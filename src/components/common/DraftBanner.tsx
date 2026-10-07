@@ -1,0 +1,77 @@
+import React from "react";
+import { FileText, RotateCcw, Trash2, CheckCircle2, Clock } from "lucide-react";
+
+interface DraftBannerProps {
+  hasDraft: boolean;
+  draftTime?: string;
+  isAutoSaved?: boolean;
+  lastSavedText?: string;
+  onRestore: () => void;
+  onDiscard: () => void;
+  formName?: string;
+}
+
+export const DraftBanner: React.FC<DraftBannerProps> = ({
+  hasDraft,
+  draftTime,
+  isAutoSaved = false,
+  lastSavedText,
+  onRestore,
+  onDiscard,
+  formName = "Form",
+}) => {
+  if (!hasDraft && !isAutoSaved) return null;
+
+  if (hasDraft) {
+    return (
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-500/40 text-amber-900 dark:text-amber-200 animate-in fade-in slide-in-from-top-2 shadow-sm dark:shadow-lg">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-300">
+            <FileText className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-amber-800 dark:text-amber-300">
+              Unfinished {formName} Draft Found
+            </div>
+            <div className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
+              {draftTime
+                ? `Saved on ${new Date(draftTime).toLocaleDateString()} at ${new Date(draftTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                : "You have an unsubmitted draft for this project."}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onRestore}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition shadow"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Resume Draft</span>
+          </button>
+          <button
+            type="button"
+            onClick={onDiscard}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900/90 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-700 dark:hover:text-red-300 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
+            title="Discard this draft and start fresh"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Discard</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isAutoSaved && lastSavedText) {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
+        <span>Draft auto-saved {lastSavedText}</span>
+      </div>
+    );
+  }
+
+  return null;
+};

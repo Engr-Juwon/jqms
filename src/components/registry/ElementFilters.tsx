@@ -1,0 +1,215 @@
+import React from "react";
+import {
+  Search,
+  Filter,
+  Layers,
+  Building2,
+  Briefcase,
+  Activity,
+} from "lucide-react";
+
+interface ElementFiltersProps {
+  searchQuery: string;
+  onSearchChange: (q: string) => void;
+  selectedType: string;
+  onTypeChange: (t: string) => void;
+  selectedLevel: string;
+  onLevelChange: (l: string) => void;
+  selectedStatus: string;
+  onStatusChange: (s: string) => void;
+  selectedPackage: string;
+  onPackageChange: (p: string) => void;
+  levels: Array<{ id: string; name: string }>;
+  packages: Array<{ id: string; name: string }>;
+  elementTypes?: string[];
+  selectAllChecked: boolean;
+  onToggleSelectAll: () => void;
+}
+
+const CORE_ELEMENT_TYPES = [
+  { value: "ALL", label: "All Element Types" },
+  { value: "Beam", label: "Beam" },
+  { value: "Column", label: "Column" },
+  { value: "Slab", label: "Slab" },
+  { value: "Wall", label: "Wall" },
+  { value: "Footing", label: "Footing" },
+  { value: "Stair", label: "Stairs / Staircase" },
+];
+
+const STATUS_OPTIONS = [
+  { value: "ALL", label: "All Statuses" },
+  { value: "PENDING", label: "Pending Inspection" },
+  { value: "REBAR_IN_PROGRESS", label: "Rebar in Progress" },
+  { value: "FORMWORK_IN_PROGRESS", label: "Formwork in Progress" },
+  { value: "READY_FOR_CASTING", label: "Ready for Casting" },
+  { value: "REBAR_INSPECTED", label: "Rebar Inspected" },
+  { value: "POURED", label: "Concrete Poured" },
+  { value: "APPROVED", label: "QA Approved" },
+  { value: "REJECTED", label: "QA Rejected" },
+];
+
+export const ElementFilters: React.FC<ElementFiltersProps> = ({
+  searchQuery,
+  onSearchChange,
+  selectedType,
+  onTypeChange,
+  selectedLevel,
+  onLevelChange,
+  selectedStatus,
+  onStatusChange,
+  selectedPackage,
+  onPackageChange,
+  levels,
+  packages,
+  elementTypes = [],
+  selectAllChecked,
+  onToggleSelectAll,
+}) => {
+  // Build unified dynamic + core types list
+  const typeOptions = React.useMemo(() => {
+    const list: Array<{ value: string; label: string }> = [...CORE_ELEMENT_TYPES];
+    
+    elementTypes.forEach((type) => {
+      const trimmed = type?.trim();
+      if (!trimmed) return;
+      const alreadyExists = list.some(
+        (opt) => opt.value.toLowerCase() === trimmed.toLowerCase()
+      );
+      if (!alreadyExists) {
+        list.push({ value: trimmed, label: trimmed });
+      }
+    });
+
+    return list;
+  }, [elementTypes]);
+
+  return (
+    <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xl space-y-3 transition-colors duration-200">
+      <div className="flex flex-col md:flex-row items-center gap-3">
+        {/* Search Bar */}
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search by element name, grid axis, level or ID..."
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition"
+          />
+        </div>
+
+        {/* Select All on Page Checkbox */}
+        <div className="flex items-center gap-2 self-start md:self-center px-3 py-2 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl">
+          <input
+            type="checkbox"
+            id="selectAllPage"
+            checked={selectAllChecked}
+            onChange={onToggleSelectAll}
+            className="w-4 h-4 rounded border-slate-300 dark:border-slate-700 text-brand-600 focus:ring-brand-500 bg-white dark:bg-slate-900 cursor-pointer"
+          />
+          <label
+            htmlFor="selectAllPage"
+            className="text-xs font-semibold text-slate-700 dark:text-slate-300 select-none cursor-pointer whitespace-nowrap"
+          >
+            Select on Page
+          </label>
+        </div>
+      </div>
+
+      {/* Filter Dropdowns Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        {/* Type Filter */}
+        <div className="relative">
+          <Layers className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 dark:text-slate-500 pointer-events-none" />
+          <select
+            value={selectedType}
+            onChange={(e) => onTypeChange(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-300 focus:outline-none focus:border-brand-500 transition cursor-pointer appearance-none font-medium"
+          >
+            {typeOptions.map((t) => (
+              <option
+                key={t.value}
+                value={t.value}
+                className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+              >
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Level Filter */}
+        <div className="relative">
+          <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 dark:text-slate-500 pointer-events-none" />
+          <select
+            value={selectedLevel}
+            onChange={(e) => onLevelChange(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-300 focus:outline-none focus:border-brand-500 transition cursor-pointer appearance-none"
+          >
+            <option
+              value="ALL"
+              className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+            >
+              All Levels
+            </option>
+            {levels.map((lvl) => (
+              <option
+                key={lvl.id}
+                value={lvl.id}
+                className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+              >
+                {lvl.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Status Filter */}
+        <div className="relative">
+          <Activity className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 dark:text-slate-500 pointer-events-none" />
+          <select
+            value={selectedStatus}
+            onChange={(e) => onStatusChange(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-300 focus:outline-none focus:border-brand-500 transition cursor-pointer appearance-none"
+          >
+            {STATUS_OPTIONS.map((s) => (
+              <option
+                key={s.value}
+                value={s.value}
+                className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+              >
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Work Package Filter */}
+        <div className="relative">
+          <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 dark:text-slate-500 pointer-events-none" />
+          <select
+            value={selectedPackage}
+            onChange={(e) => onPackageChange(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-300 focus:outline-none focus:border-brand-500 transition cursor-pointer appearance-none"
+          >
+            <option
+              value="ALL"
+              className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+            >
+              All Work Packages
+            </option>
+            {packages.map((pkg) => (
+              <option
+                key={pkg.id}
+                value={pkg.id}
+                className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+              >
+                {pkg.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+};

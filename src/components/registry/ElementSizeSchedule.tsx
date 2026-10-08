@@ -129,7 +129,17 @@ const parseElementProfile = (
 
   // 4. Slab Profiles
   if (type === "Slab") {
-    const thMm = formatMm(el.thickness || 250);
+    const thMm = formatMm(el.thickness || 175);
+    if (el.slabShape === "circular_segment" || el.slabShape === "curved_cantilever" || el.radius) {
+      const rMm = formatMm(el.radius || 2960);
+      const hMm = el.arcDepth ? formatMm(el.arcDepth) : "";
+      return {
+        type,
+        key: `SLAB_CURVED_R${rMm}_H${hMm}_T${thMm}`,
+        label: `Curved R${rMm} ${hMm ? `· h=${hMm}` : ""} · t=${thMm} mm`,
+        details: `Curved Slab · Radius: ${rMm}mm ${hMm ? `· Rise: ${hMm}mm` : ""} · Thickness: ${thMm}mm`,
+      };
+    }
     return {
       type,
       key: `SLAB_THK_${thMm}`,

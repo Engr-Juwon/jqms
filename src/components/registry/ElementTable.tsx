@@ -192,8 +192,37 @@ export const ElementTable: React.FC<ElementTableProps> = ({
       );
     }
 
-    // Wall
+    // Curved Slab (Arc segment / Sector / Semi-circle / Cantilever)
+    if (type.includes("SLAB") && (el.slabShape === "circular_segment" || el.slabShape === "curved_cantilever" || el.radius)) {
+      const r = el.radius && el.radius > 50 ? (el.radius / 1000).toFixed(2) : (el.radius || 2.96);
+      const rise = el.arcDepth && el.arcDepth > 50 ? (el.arcDepth / 1000).toFixed(2) : el.arcDepth;
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40 px-2 py-0.5 rounded-lg">
+          Arc R {r}m {rise ? `× h ${rise}m` : ""} × T {t || "0.18"}m
+        </span>
+      );
+    }
+
+    // Curved Beam
+    if (type.includes("BEAM") && (el.beamShape === "curved" || el.radius)) {
+      const r = el.radius && el.radius > 50 ? (el.radius / 1000).toFixed(2) : el.radius;
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/40 px-2 py-0.5 rounded-lg">
+          Curved R {r}m × W {w}m × D {h || el.depth}m
+        </span>
+      );
+    }
+
+    // Wall (Curved vs Straight)
     if (type.includes("WALL")) {
+      if (el.wallShape === "curved" || el.radius) {
+        const r = el.radius && el.radius > 50 ? (el.radius / 1000).toFixed(2) : el.radius;
+        return (
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/40 px-2 py-0.5 rounded-lg">
+            Curved Wall R {r}m × H {h}m × T {t || w}m
+          </span>
+        );
+      }
       return (
         <span className="inline-flex items-center gap-1 font-mono text-[11px] text-slate-300 bg-slate-950/80 border border-slate-800 px-2 py-0.5 rounded-lg">
           L {l}m × H {h}m × T {t || w}m

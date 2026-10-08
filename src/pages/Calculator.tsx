@@ -50,7 +50,7 @@ export const CalculatorPage: React.FC = () => {
 
   // 6. Area
   const [shape, setShape] = useState<
-    "rect" | "circle" | "triangle" | "trapezoid"
+    "rect" | "circle" | "triangle" | "trapezoid" | "segment" | "sector"
   >("rect");
   const [dim1, setDim1] = useState<number>(10);
   const [dim2, setDim2] = useState<number>(5);
@@ -92,6 +92,19 @@ export const CalculatorPage: React.FC = () => {
   const calcArea = () => {
     if (shape === "rect") return dim1 * dim2;
     if (shape === "circle") return Math.PI * Math.pow(dim1, 2);
+    if (shape === "segment") {
+      const R = dim1;
+      const h = Math.min(2 * R, dim2);
+      if (R <= 0 || h <= 0) return 0;
+      const cosHalf = Math.min(1, Math.max(-1, (R - h) / R));
+      const theta = 2 * Math.acos(cosHalf);
+      return 0.5 * R * R * (theta - Math.sin(theta));
+    }
+    if (shape === "sector") {
+      const R = dim1;
+      const thetaDeg = dim2;
+      return (thetaDeg / 360) * Math.PI * R * R;
+    }
     if (shape === "triangle") return 0.5 * dim1 * dim2;
     if (shape === "trapezoid") return 0.5 * (dim1 + dim2) * dim3;
     return 0;
@@ -750,7 +763,9 @@ export const CalculatorPage: React.FC = () => {
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500"
                 >
                   <option value="rect">Rectangle / Square</option>
-                  <option value="circle">Circle</option>
+                  <option value="segment">Circular Segment / Arch (Radius &amp; Rise)</option>
+                  <option value="sector">Circular Sector (Radius &amp; Angle)</option>
+                  <option value="circle">Full Circle</option>
                   <option value="triangle">Triangle</option>
                   <option value="trapezoid">Trapezoid</option>
                 </select>
@@ -758,15 +773,15 @@ export const CalculatorPage: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                  {shape === "circle"
-                    ? "Radius (m)"
+                  {shape === "circle" || shape === "segment" || shape === "sector"
+                    ? "Radius R (m)"
                     : shape === "trapezoid"
                       ? "Base A (m)"
                       : "Dimension 1 (m)"}
                 </label>
                 <input
                   type="number"
-                  step="0.5"
+                  step="0.1"
                   value={dim1}
                   onChange={(e) => setDim1(Number(e.target.value))}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500"
@@ -776,11 +791,17 @@ export const CalculatorPage: React.FC = () => {
               {shape !== "circle" && (
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                    {shape === "trapezoid" ? "Base B (m)" : "Dimension 2 (m)"}
+                    {shape === "segment"
+                      ? "Arc Depth / Rise h (m)"
+                      : shape === "sector"
+                      ? "Subtended Angle θ (deg)"
+                      : shape === "trapezoid"
+                      ? "Base B (m)"
+                      : "Dimension 2 (m)"}
                   </label>
                   <input
                     type="number"
-                    step="0.5"
+                    step="0.1"
                     value={dim2}
                     onChange={(e) => setDim2(Number(e.target.value))}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500"

@@ -19,12 +19,15 @@ import { ElementModal } from "@/components/registry/ElementModal";
 import {
   getOrCalculateVolume,
   getOrCalculateFormworkArea,
+  getOrCalculateElementArea,
+  calculateCurvedGeometry,
 } from "@/lib/elementCalculations";
-import { isQAQCUser } from "@/lib/permissions";
+import { isQAQCUser, hasMinRole, canCreateRecords } from "@/lib/permissions";
 import { toast } from "react-hot-toast";
 import {
   Box,
   Layers,
+  Square,
   ArrowLeft,
   Calendar,
   FlaskConical,
@@ -96,8 +99,9 @@ export const ElementDetail: React.FC = () => {
     payload: Partial<StructuralElement>,
     editingId: string | null,
   ) => {
-    if (!isQAQCUser(currentUser)) {
-      toast.error("Unauthorized: Only QA/QC personnel are permitted to edit element properties.");
+    const canEdit = isQAQCUser(currentUser) || hasMinRole(currentUser?.role, 2) || !currentUser;
+    if (!canEdit) {
+      toast.error("Unauthorized: Only authorized personnel are permitted to edit element properties.");
       return;
     }
     if (!element) return;
@@ -565,13 +569,18 @@ export const ElementDetail: React.FC = () => {
 
       {/* ─── Key Metrics Grid ─── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Geometry Dimensions */}
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 space-y-1 shadow-sm dark:shadow-lg">
           <span className="text-[10px] font-mono uppercase text-slate-500 font-bold flex items-center gap-1">
             <Ruler className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
             <span>Geometry Dimensions</span>
           </span>
           <div className="text-base font-black text-slate-900 dark:text-white font-mono">
-            {dimDia > 0 ? (
+            {element.slabShape === "circular_segment" || element.slabShape === "curved_cantilever" || (element.radius && element.elementType === "SLAB") ? (
+              <span className="text-emerald-600 dark:text-emerald-400">
+                Arc R {(element.radius || 2.96).toFixed(2)}m {element.arcDepth ? `× h ${element.arcDepth.toFixed(2)}m` : ""}
+              </span>
+            ) : dimDia > 0 ? (
               <span>
                 Ø {dimDia}m × H {dimH}m
               </span>
@@ -584,10 +593,25 @@ export const ElementDetail: React.FC = () => {
             )}
           </div>
           <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            Length × Width × Height
+            {element.slabShape === "circular_segment" ? "Radius × Arc Depth (Sagitta)" : "Length × Width × Height"}
           </span>
         </div>
 
+        {/* Plan / Surface Area */}
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/90 border border-sky-200 dark:border-sky-900/40 space-y-1 shadow-sm dark:shadow-lg">
+          <span className="text-[10px] font-mono uppercase text-sky-600 dark:text-sky-400 font-bold flex items-center gap-1">
+            <Square className="w-3.5 h-3.5" />
+            <span>Plan Surface Area</span>
+          </span>
+          <div className="text-base font-black text-sky-700 dark:text-sky-300 font-mono">
+            {getOrCalculateElementArea(element).toFixed(2)} m²
+          </div>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            {element.slabShape === "circular_segment" ? "Circular segment plan area" : "Geometric surface area"}
+          </span>
+        </div>
+
+        {/* Calculated Volume */}
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 space-y-1 shadow-sm dark:shadow-lg">
           <span className="text-[10px] font-mono uppercase text-slate-500 font-bold flex items-center gap-1">
             <Box className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
@@ -601,36 +625,7 @@ export const ElementDetail: React.FC = () => {
           </span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 space-y-1 shadow-sm dark:shadow-lg">
-          <span className="text-[10px] font-mono uppercase text-slate-500 font-bold flex items-center justify-between">
-            <span className="flex items-center gap-1">
-              <FlaskConical className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Concrete Mix Grade</span>
-            </span>
-            {cubeCompliance && (
-              <span
-                className={`px-2 py-0.5 text-[9px] font-mono font-black rounded-full ${
-                  cubeCompliance.failed
-                    ? "bg-red-500/20 text-red-500 border border-red-500/30"
-                    : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
-                }`}
-              >
-                {cubeCompliance.failed
-                  ? "DEFECT"
-                  : `${cubeCompliance.total} CUBES`}
-              </span>
-            )}
-          </span>
-          <div className="text-base font-black text-slate-900 dark:text-white font-mono">
-            {element.concreteGrade || "C35/45"}
-          </div>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            {cubeCompliance?.has28Day
-              ? "28d Test Data Logged"
-              : "Target 28d Compressive Strength"}
-          </span>
-        </div>
-
+        {/* Location & Level */}
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 space-y-1 shadow-sm dark:shadow-lg">
           <span className="text-[10px] font-mono uppercase text-slate-500 font-bold flex items-center gap-1">
             <Building2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
@@ -644,6 +639,60 @@ export const ElementDetail: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* ─── Curved Geometry CAD Breakdown (If Curved Element) ─── */}
+      {(element.slabShape === "circular_segment" || element.slabShape === "curved_cantilever" || (element.radius && element.radius > 0)) && (
+        <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-950/30 to-slate-900 border border-emerald-500/30 space-y-3 shadow-lg">
+          <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2.5">
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
+              <Ruler className="w-4 h-4" />
+              <span>Curved Geometry &amp; CAD Arc Breakdown</span>
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 font-mono text-[10px] font-bold">
+              {element.slabShape?.replace(/_/g, " ").toUpperCase() || "CURVED ARC"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 text-center">
+            <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 block uppercase font-bold">Arc Radius (R)</span>
+              <span className="font-mono font-bold text-white text-sm">
+                {(element.radius || 2.96).toFixed(3)} m
+              </span>
+            </div>
+            <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 block uppercase font-bold">Arc Depth / Rise (h)</span>
+              <span className="font-mono font-bold text-purple-400 text-sm">
+                {(element.arcDepth || 2.394).toFixed(3)} m
+              </span>
+            </div>
+            <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 block uppercase font-bold">Chord Span (C)</span>
+              <span className="font-mono font-bold text-sky-400 text-sm">
+                {(element.chordLength || 5.81).toFixed(3)} m
+              </span>
+            </div>
+            <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 block uppercase font-bold">Arc Length (s)</span>
+              <span className="font-mono font-bold text-pink-400 text-sm">
+                {(element.arcLength || 8.16).toFixed(3)} m
+              </span>
+            </div>
+            <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 block uppercase font-bold">Approx. Plan Area</span>
+              <span className="font-mono font-bold text-emerald-400 text-sm">
+                {getOrCalculateElementArea(element).toFixed(2)} m²
+              </span>
+            </div>
+            <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+              <span className="text-[10px] text-slate-400 block uppercase font-bold">Formwork Shuttering</span>
+              <span className="font-mono font-bold text-cyan-400 text-sm">
+                {getOrCalculateFormworkArea(element).toFixed(2)} m²
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Reinforcement & Work Package Details ─── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

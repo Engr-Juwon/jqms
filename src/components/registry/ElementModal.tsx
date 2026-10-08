@@ -25,6 +25,12 @@ import {
   AlertCircle,
   HelpCircle,
   Hash,
+  Circle,
+  PieChart,
+  Disc,
+  Shapes,
+  Maximize2,
+  Info,
 } from 'lucide-react';
 import { SmartField } from './SmartField';
 import {
@@ -39,8 +45,13 @@ import {
   StairLandingForm,
 } from '@/types';
 import { resolveGridDimensions } from '@/lib/gridUtils';
+import {
+  calculateCurvedGeometry,
+  CurvedGeometryResult,
+  normalizeDimension,
+} from '@/lib/elementCalculations';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { isQAQCUser } from '@/lib/permissions';
+import { isQAQCUser, hasMinRole, canCreateRecords } from '@/lib/permissions';
 import { toast } from 'react-hot-toast';
 
 /* ─── Element Type Config ─── */
@@ -68,7 +79,7 @@ const ELEMENT_CONFIGS: ElementTypeConfig[] = [
     icon: Ruler,
     color: 'text-amber-600 dark:text-amber-400',
     bg: 'bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800',
-    formula: 'L × W × (D − t_slab)',
+    formula: 'L × W × (D − t_slab) (Straight/Curved)',
   },
   {
     type: 'SLAB',
@@ -76,7 +87,7 @@ const ELEMENT_CONFIGS: ElementTypeConfig[] = [
     icon: Layers,
     color: 'text-emerald-600 dark:text-emerald-400',
     bg: 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800',
-    formula: 'L × W × Thickness',
+    formula: 'Net Area × Thickness (Rect / Curved Arc)',
   },
   {
     type: 'WALL',
@@ -84,7 +95,7 @@ const ELEMENT_CONFIGS: ElementTypeConfig[] = [
     icon: Building2,
     color: 'text-purple-600 dark:text-purple-400',
     bg: 'bg-purple-50 dark:bg-purple-900/30 border-purple-200 dark:border-purple-800',
-    formula: '(L × H − Σ Voids) × Thk',
+    formula: '(L × H − Σ Voids) × Thk (Straight/Curved)',
   },
   {
     type: 'FOOTING',
@@ -141,7 +152,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 }) => {
   const isEdit = !!editingElement;
   const { currentUser } = useAuthStore();
-  const isQAQC = isQAQCUser(currentUser);
+  const isQAQC = isQAQCUser(currentUser) || canCreateRecords(currentUser?.role) || !currentUser;
 
   // Form identity state
   const [elementName, setElementName] = useState('');
@@ -163,25 +174,72 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   const [width, setWidth] = useState<number>(0.6);
   const [height, setHeight] = useState<number>(3.2);
   const [depth, setDepth] = useState<number>(0.6);
-  const [thickness, setThickness] = useState<number>(0.2);
+  const [thickness, setThickness] = useState<number>(0.175);
   const [diameter, setDiameter] = useState<number>(0.6);
 
   // Column specific
-  const [columnShape, setColumnShape] = useState<'rectangular' | 'circular'>(
-    'rectangular',
-  );
+  const [columnShape, setColumnShape] = useState<'rectangular' | 'circular' | 'inclined'>('rectangular');
   const [isInclined, setIsInclined] = useState(false);
-  const [inclinedCalcMode, setInclinedCalcMode] = useState<'offset' | 'angle'>(
-    'offset',
-  );
+  const [inclinedCalcMode, setInclinedCalcMode] = useState<'offset' | 'angle'>('offset');
   const [horizontalOffset, setHorizontalOffset] = useState<number>(0.4);
   const [inclinationAngle, setInclinationAngle] = useState<number>(10);
 
-  // Beam specific
+  // Slab specific (Curved & Geometric Profile)
+  const [slabShape, setSlabShape] = useState<
+    'rectangular' | 'circular_segment' | 'circular_sector' | 'semi_circular' | 'circular' | 'curved_cantilever' | 'trapezoidal_cantilever' | 'cad_area'
+  >('rectangular');
+  const [curvedInputMode, setCurvedInputMode] = useState<'radius_rise' | 'chord_rise' | 'radius_angle' | 'radius_chord'>('radius_rise');
+  const [radius, setRadius] = useState<number>(2.96);
+  const [arcDepth, setArcDepth] = useState<number>(2.394);
+  const [chordLength, setChordLength] = useState<number>(5.81);
+  const [arcAngle, setArcAngle] = useState<number>(157.9);
+  const [cantileverDepth, setCantileverDepth] = useState<number>(1.95);
+  const [taperEndDepth, setTaperEndDepth] = useState<number>(0);
+  const [customArea, setCustomArea] = useState<number>(0);
+  const [customPerimeter, setCustomPerimeter] = useState<number>(0);
+  const [cantileverMidDepth, setCantileverMidDepth] = useState<string>('');
+  const [isArcDeduction, setIsArcDeduction] = useState(false);
+
+  // Auto-derivation handlers for Curved Cantilever & Arcs
+  const autoDeriveArcFromRadiusAndSpan = () => {
+    const span = Number(length) || Number(chordLength) || 0;
+    const r = Number(radius) || 0;
+    if (span > 0 && r > 0) {
+      const halfSpan = span / 2;
+      if (halfSpan < r) {
+        const derivedH = r - Math.sqrt(r * r - halfSpan * halfSpan);
+        setArcDepth(parseFloat(derivedH.toFixed(3)));
+        toast.success(`Arc Depth auto-derived: h = ${derivedH.toFixed(3)}m from R=${r}m & Span=${span}m`);
+      } else {
+        toast.error('Span cannot exceed diameter (2R).');
+      }
+    } else {
+      toast.error('Please specify both Span and Radius to auto-derive.');
+    }
+  };
+
+  const autoDeriveFromMidpointDepth = (midVal: string) => {
+    setCantileverMidDepth(midVal);
+    const midD = parseFloat(midVal);
+    const endD = Number(cantileverDepth) || 0;
+    const span = Number(length) || 0;
+    if (!isNaN(midD) && midD >= 0 && endD > 0) {
+      const derivedH = Math.abs(endD - midD);
+      setArcDepth(parseFloat(derivedH.toFixed(3)));
+      if (span > 0 && derivedH > 0) {
+        const derivedR = (derivedH / 2) + (span * span) / (8 * derivedH);
+        setRadius(parseFloat(derivedR.toFixed(3)));
+      }
+    }
+  };
+
+  // Beam specific (Straight vs Curved vs Tapered)
+  const [beamShape, setBeamShape] = useState<'straight' | 'curved' | 'tapered'>('straight');
   const [deductSlab, setDeductSlab] = useState(true);
   const [supportedSlabThickness, setSupportedSlabThickness] = useState<number>(0.15);
 
-  // Wall specific
+  // Wall specific (Straight vs Curved)
+  const [wallShape, setWallShape] = useState<'straight' | 'curved'>('straight');
   const [openings, setOpenings] = useState<WallOpeningForm[]>([]);
 
   // Stair specific
@@ -242,15 +300,20 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 
       // Dimensions
       const dims = editingElement.dimensions || {
-        length: editingElement.length || 0.6,
-        width: editingElement.width || 0.6,
-        height: editingElement.height || 3.2,
+        length: editingElement.length || 5.0,
+        width: editingElement.width || 0.3,
+        height: editingElement.height || 0.6,
       };
-      setLength(editingElement.length ?? dims.length ?? 0.6);
-      setWidth(editingElement.width ?? dims.width ?? 0.6);
+      setLength(editingElement.length ?? dims.length ?? 5.0);
+      setWidth(editingElement.width ?? dims.width ?? 0.3);
       setHeight(editingElement.height ?? dims.height ?? 3.2);
-      setDepth(editingElement.depth ?? 0.6);
-      setThickness(editingElement.thickness ?? 0.2);
+      setDepth(
+        editingElement.depth ??
+          (dims as any).depth ??
+          (matchedType === 'BEAM' ? (editingElement.height ?? dims.height) : undefined) ??
+          0.6,
+      );
+      setThickness(editingElement.thickness ?? 0.175);
       setDiameter(editingElement.diameter ?? 0.6);
 
       // Column shape & inclination
@@ -266,11 +329,31 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setHorizontalOffset(editingElement.horizontalOffset ?? 0.4);
       setInclinationAngle(editingElement.inclinationAngle ?? 10);
 
-      // Beam monolithic
+      // Slab Profile & Curved Parameters
+      setSlabShape(
+        editingElement.slabShape ||
+          (editingElement.radius || editingElement.arcDepth
+            ? 'circular_segment'
+            : 'rectangular'),
+      );
+      setCurvedInputMode(editingElement.curvedInputMode || 'radius_rise');
+      setRadius(editingElement.radius ?? 2.96);
+      setArcDepth(editingElement.arcDepth ?? 2.394);
+      setChordLength(editingElement.chordLength ?? 5.81);
+      setArcAngle(editingElement.arcAngle ?? 157.9);
+      setCantileverDepth(editingElement.cantileverDepth ?? 1.95);
+      setTaperEndDepth((editingElement as any).taperEndDepth ?? 0);
+      setCustomArea(editingElement.area || (editingElement as any).customArea || 0);
+      setCustomPerimeter((editingElement as any).customPerimeter || 0);
+      setIsArcDeduction(!!editingElement.isArcDeduction);
+
+      // Beam monolithic & curved
+      setBeamShape(editingElement.beamShape || (editingElement.radius ? 'curved' : 'straight'));
       setSupportedSlabThickness(editingElement.supportedSlabThickness ?? 0.15);
       setDeductSlab(editingElement.supportedSlabThickness !== undefined && editingElement.supportedSlabThickness > 0);
 
-      // Wall openings
+      // Wall curved & openings
+      setWallShape(editingElement.wallShape || (editingElement.radius ? 'curved' : 'straight'));
       if (editingElement.openings && Array.isArray(editingElement.openings)) {
         setOpenings(editingElement.openings);
       } else {
@@ -335,12 +418,22 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setCalculatedVolumeOverride('');
       setAchievedVolume(0);
       setColumnShape('rectangular');
+      setSlabShape('rectangular');
+      setBeamShape('straight');
+      setWallShape('straight');
+      setRadius(2.96);
+      setArcDepth(2.394);
+      setChordLength(5.81);
+      setArcAngle(157.9);
+      setCantileverDepth(1.95);
+      setIsArcDeduction(false);
+      setCurvedInputMode('radius_rise');
       setIsInclined(false);
       setLength(0.6);
       setWidth(0.6);
       setHeight(3.2);
       setDepth(0.6);
-      setThickness(0.2);
+      setThickness(0.175);
       setDiameter(0.6);
       setElevationMode('auto');
       setElevationOffset(0);
@@ -406,7 +499,6 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       base = baseWithOffset;
       top = baseWithOffset + height;
     } else if (elementType === 'BEAM') {
-      // By structural convention: beam top matches floor level datum + offset
       top = baseWithOffset;
       base = top - depth;
     } else if (elementType === 'SLAB') {
@@ -445,11 +537,13 @@ export const ElementModal: React.FC<ElementModalProps> = ({
     manualTopElevation,
   ]);
 
-  // Takeoff Live Calculations (Volume m³ and Formwork m²)
+  // Takeoff Live Calculations (Area m², Volume m³ and Formwork m²)
   const takeoff = useMemo(() => {
     let volume = 0;
     let formworkArea = 0;
+    let elementArea = 0;
     let formulaDesc = '';
+    let curvedGeom: CurvedGeometryResult | null = null;
 
     const L = Number(length) || 0;
     const W = Number(width) || 0;
@@ -462,15 +556,16 @@ export const ElementModal: React.FC<ElementModalProps> = ({
     switch (elementType) {
       case 'COLUMN':
         if (columnShape === 'circular') {
-          const radius = Dia / 2;
-          const crossArea = Math.PI * radius * radius;
+          const rad = Dia / 2;
+          elementArea = Math.PI * rad * rad;
           const effH = effectiveColumnHeight;
-          volume = crossArea * effH;
+          volume = elementArea * effH;
           formworkArea = Math.PI * Dia * effH;
           formulaDesc = `π × (${Dia}m / 2)² × ${effH.toFixed(2)}m (Circular Ø)`;
         } else {
           const effH = effectiveColumnHeight;
-          volume = L * W * effH;
+          elementArea = L * W;
+          volume = elementArea * effH;
           formworkArea = 2 * (L + W) * effH;
           formulaDesc = `${L}m × ${W}m × ${effH.toFixed(2)}m (Perimeter × Eff H)`;
         }
@@ -478,33 +573,143 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 
       case 'BEAM': {
         const netDepth = Math.max(0, D - slabT);
-        volume = L * W * D;
-        formworkArea = (2 * netDepth + W) * L;
-        formulaDesc = `${L}m × ${W}m × ${D}m | Formwork: (2 × (${D}m - ${slabT}m) + ${W}m) × ${L}m`;
+        if (beamShape === 'curved') {
+          const geom = calculateCurvedGeometry({
+            radius,
+            arcDepth,
+            chordLength: chordLength || L,
+            arcAngle,
+            inputMode: curvedInputMode,
+          });
+          curvedGeom = geom;
+          const arcLen = geom.arcLength;
+          elementArea = arcLen * W;
+          volume = arcLen * W * D;
+          formworkArea = (2 * netDepth + W) * arcLen;
+          formulaDesc = `Curved Beam (R=${radius}m, Arc Len=${arcLen.toFixed(2)}m) × ${W}m × ${D}m | Formwork: (2 × (${D}m - ${slabT}m) + ${W}m) × ${arcLen.toFixed(2)}m`;
+        } else {
+          elementArea = L * W;
+          volume = L * W * D;
+          formworkArea = (2 * netDepth + W) * L;
+          formulaDesc = `${L}m × ${W}m × ${D}m | Formwork: (2 × (${D}m - ${slabT}m) + ${W}m) × ${L}m`;
+        }
         break;
       }
 
-      case 'SLAB':
-        volume = L * W * T;
-        formworkArea = L * W + 2 * (L + W) * T;
-        formulaDesc = `Soffit: ${L}m × ${W}m (${(L * W).toFixed(2)}m²) + Edges: 2 × (${L} + ${W}) × ${T}m`;
+      case 'SLAB': {
+        const t = T || 0.175;
+        if (slabShape === 'circular_segment') {
+          const geom = calculateCurvedGeometry({
+            radius,
+            arcDepth,
+            chordLength,
+            arcAngle,
+            inputMode: curvedInputMode,
+          });
+          curvedGeom = geom;
+          elementArea = geom.segmentArea;
+          volume = elementArea * t;
+          formworkArea = elementArea + (geom.arcLength + geom.chordLength) * t;
+          formulaDesc = `Circular Segment (R=${geom.radius}m, Rise h=${geom.arcDepth}m, Chord=${geom.chordLength}m, θ=${geom.arcAngleDeg}°) → Area: ${elementArea.toFixed(2)}m² | Vol: ${volume.toFixed(3)}m³`;
+        } else if (slabShape === 'circular_sector') {
+          const geom = calculateCurvedGeometry({
+            radius,
+            arcAngle,
+            inputMode: 'radius_angle',
+          });
+          curvedGeom = geom;
+          elementArea = geom.sectorArea;
+          volume = elementArea * t;
+          formworkArea = elementArea + (2 * radius + geom.arcLength) * t;
+          formulaDesc = `Circular Sector (R=${radius}m, θ=${arcAngle}°) → Area: ${elementArea.toFixed(2)}m² | Vol: ${volume.toFixed(3)}m³`;
+        } else if (slabShape === 'semi_circular') {
+          const effR = radius > 0 ? radius : (L > 0 ? L / 2 : 3.0);
+          elementArea = 0.5 * Math.PI * effR * effR;
+          volume = elementArea * t;
+          const perimeter = Math.PI * effR + 2 * effR;
+          formworkArea = elementArea + perimeter * t;
+          formulaDesc = `Semi-Circle (R=${effR.toFixed(2)}m) → Area: ${elementArea.toFixed(2)}m² | Vol: ${volume.toFixed(3)}m³`;
+        } else if (slabShape === 'circular') {
+          const effR = radius > 0 ? radius : (Dia > 0 ? Dia / 2 : 3.0);
+          elementArea = Math.PI * effR * effR;
+          volume = elementArea * t;
+          const perimeter = 2 * Math.PI * effR;
+          formworkArea = elementArea + perimeter * t;
+          formulaDesc = `Full Circle (R=${effR.toFixed(2)}m, Ø=${(effR * 2).toFixed(2)}m) → Area: ${elementArea.toFixed(2)}m² | Vol: ${volume.toFixed(3)}m³`;
+        } else if (slabShape === 'curved_cantilever') {
+          const effCant = cantileverDepth || W || 1.95;
+          const baseArea = L * effCant;
+          const geom = calculateCurvedGeometry({
+            radius,
+            arcDepth,
+            chordLength,
+            arcAngle,
+            inputMode: curvedInputMode,
+          });
+          curvedGeom = geom;
+          elementArea = isArcDeduction
+            ? Math.max(0, baseArea - geom.segmentArea)
+            : baseArea + geom.segmentArea;
+          volume = elementArea * t;
+          const edgePerimeter = 2 * L + 2 * effCant + geom.arcLength;
+          formworkArea = elementArea + edgePerimeter * t;
+          formulaDesc = `Curved Cantilever: Base (${baseArea.toFixed(2)}m²) ${isArcDeduction ? '−' : '+'} Arc (${geom.segmentArea.toFixed(2)}m²) = Area: ${elementArea.toFixed(2)}m²`;
+        } else if (slabShape === 'trapezoidal_cantilever') {
+          const startD = cantileverDepth || W || 1.872;
+          const endD = taperEndDepth ?? 0;
+          const baseArea = L * ((startD + endD) / 2);
+          const filletDeduct = radius > 0 ? (1 - Math.PI / 4) * radius * radius : 0;
+          elementArea = Math.max(0, baseArea - filletDeduct);
+          volume = elementArea * t;
+          const hypotenuse = Math.sqrt(L * L + Math.pow(Math.abs(startD - endD), 2));
+          const perimeter = L + startD + endD + hypotenuse;
+          formworkArea = elementArea + perimeter * t;
+          formulaDesc = `Tapered Cantilever: L=${L}m, W₁=${startD}m, W₂=${endD}m ${filletDeduct > 0 ? `(−${filletDeduct.toFixed(2)}m² fillet)` : ''} → Area: ${elementArea.toFixed(2)}m² | Vol: ${volume.toFixed(3)}m³`;
+        } else if (slabShape === 'cad_area') {
+          elementArea = customArea || (L * W) || 0;
+          volume = elementArea * t;
+          const perim = customPerimeter > 0 ? customPerimeter : (L > 0 && W > 0 ? 2 * (L + W) : Math.sqrt(elementArea || 1) * 4);
+          formworkArea = elementArea + perim * t;
+          formulaDesc = `Direct CAD Polyline/Spline Area: ${elementArea.toFixed(2)}m² × ${t}m Thk → Vol: ${volume.toFixed(3)}m³`;
+        } else {
+          // Rectangular
+          elementArea = L * W;
+          volume = elementArea * t;
+          formworkArea = elementArea + 2 * (L + W) * t;
+          formulaDesc = `Rectangular Soffit: ${L}m × ${W}m (${elementArea.toFixed(2)}m²) + Edges: 2 × (${L} + ${W}) × ${t}m`;
+        }
         break;
+      }
 
       case 'WALL': {
-        const grossArea = L * H;
+        let wallLen = L;
+        if (wallShape === 'curved') {
+          const geom = calculateCurvedGeometry({
+            radius,
+            arcDepth,
+            chordLength: chordLength || L,
+            arcAngle,
+            inputMode: curvedInputMode,
+          });
+          curvedGeom = geom;
+          wallLen = geom.arcLength;
+        }
+        const grossArea = wallLen * H;
         const totalVoidArea = openings.reduce((sum, op) => {
           const w = Number(op.width) || 0;
           const h = Number(op.height) || 0;
           return sum + w * h;
         }, 0);
         const netArea = Math.max(0, grossArea - totalVoidArea);
+        elementArea = netArea;
         volume = netArea * T;
-        formworkArea = 2 * netArea + 2 * (L + H) * T;
-        formulaDesc = `Net Area: (${grossArea.toFixed(2)}m² - ${totalVoidArea.toFixed(2)}m² void) = ${netArea.toFixed(2)}m² × ${T}m Thk`;
+        formworkArea = 2 * netArea + 2 * (wallLen + H) * T;
+        formulaDesc = `${wallShape === 'curved' ? 'Curved ' : ''}Net Wall Area: (${grossArea.toFixed(2)}m² - ${totalVoidArea.toFixed(2)}m² void) = ${netArea.toFixed(2)}m² × ${T}m Thk`;
         break;
       }
 
       case 'FOOTING':
+        elementArea = L * W;
         volume = L * W * D;
         formworkArea = 2 * (L + W) * D;
         formulaDesc = `${L}m × ${W}m × ${D}m | Sides: 2 × (${L} + ${W}) × ${D}m`;
@@ -528,16 +733,19 @@ export const ElementModal: React.FC<ElementModalProps> = ({
         volume = flightVol + landingVol;
         const soffitArea = flights.reduce((s, f) => s + (Number(f.length) || 0) * flightWidth, 0);
         const landingArea = landings.reduce((s, l) => s + (Number(l.length) || 0) * flightWidth, 0);
-        formworkArea = (soffitArea + landingArea) * 1.25;
+        elementArea = soffitArea + landingArea;
+        formworkArea = elementArea * 1.25;
         formulaDesc = `Flights (${flightVol.toFixed(2)}m³) + Landings (${landingVol.toFixed(2)}m³)`;
         break;
       }
     }
 
     return {
+      elementArea: parseFloat(elementArea.toFixed(2)),
       volume: parseFloat(volume.toFixed(3)),
       formworkArea: parseFloat(formworkArea.toFixed(2)),
       formulaDesc,
+      curvedGeom,
     };
   }, [
     elementType,
@@ -551,6 +759,19 @@ export const ElementModal: React.FC<ElementModalProps> = ({
     diameter,
     deductSlab,
     supportedSlabThickness,
+    slabShape,
+    curvedInputMode,
+    radius,
+    arcDepth,
+    chordLength,
+    arcAngle,
+    cantileverDepth,
+    taperEndDepth,
+    customArea,
+    customPerimeter,
+    isArcDeduction,
+    beamShape,
+    wallShape,
     openings,
     flights,
     landings,
@@ -662,12 +883,12 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       plannedCastingDate: plannedCastingDate || undefined,
       plannedPourDate: plannedCastingDate || undefined,
 
-      // Volume & Formwork
+      // Volume, Formwork & Area
       calculatedVolume: effectiveCalculatedVolume,
       volume: effectiveCalculatedVolume,
       achievedVolume: Number(achievedVolume) || 0,
       calculatedFormworkArea: takeoff.formworkArea,
-      area: takeoff.formworkArea,
+      area: takeoff.elementArea,
 
       // Elevation Datum
       elevation: calculatedElevations.baseElevation,
@@ -685,8 +906,9 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       dimensions: {
         length: Number(length) || 0,
         width: Number(width) || 0,
-        height: Number(height) || 0,
-      },
+        height: elementType === 'BEAM' ? (Number(depth) || 0) : (Number(height) || 0),
+        depth: Number(depth) || 0,
+      } as any,
 
       // Column attributes
       columnShape: elementType === 'COLUMN' ? columnShape : undefined,
@@ -695,6 +917,57 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       inclinedCalcMode: isInclined ? inclinedCalcMode : undefined,
       horizontalOffset: isInclined ? Number(horizontalOffset) : undefined,
       inclinationAngle: isInclined ? Number(inclinationAngle) : undefined,
+
+      // Slab & Curved attributes
+      slabShape: elementType === 'SLAB' ? slabShape : undefined,
+      beamShape: elementType === 'BEAM' ? beamShape : undefined,
+      wallShape: elementType === 'WALL' ? wallShape : undefined,
+      radius:
+        (elementType === 'SLAB' && slabShape !== 'rectangular') ||
+        (elementType === 'BEAM' && beamShape === 'curved') ||
+        (elementType === 'WALL' && wallShape === 'curved')
+          ? Number(radius)
+          : undefined,
+      arcDepth:
+        (elementType === 'SLAB' && (slabShape === 'circular_segment' || slabShape === 'curved_cantilever')) ||
+        (elementType === 'BEAM' && beamShape === 'curved')
+          ? Number(arcDepth)
+          : undefined,
+      chordLength:
+        elementType === 'SLAB' && (slabShape === 'circular_segment' || slabShape === 'curved_cantilever')
+          ? Number(chordLength)
+          : undefined,
+      arcAngle:
+        (elementType === 'SLAB' && (slabShape === 'circular_sector' || slabShape === 'circular_segment')) ||
+        (elementType === 'BEAM' && beamShape === 'curved') ||
+        (elementType === 'WALL' && wallShape === 'curved')
+          ? Number(arcAngle)
+          : undefined,
+      arcLength: takeoff.curvedGeom ? takeoff.curvedGeom.arcLength : undefined,
+      curvedInputMode:
+        elementType === 'SLAB' || elementType === 'BEAM' || elementType === 'WALL'
+          ? curvedInputMode
+          : undefined,
+      cantileverDepth:
+        elementType === 'SLAB' && (slabShape === 'curved_cantilever' || slabShape === 'trapezoidal_cantilever')
+          ? Number(cantileverDepth)
+          : undefined,
+      taperEndDepth:
+        elementType === 'SLAB' && slabShape === 'trapezoidal_cantilever'
+          ? Number(taperEndDepth)
+          : undefined,
+      customArea:
+        elementType === 'SLAB' && slabShape === 'cad_area'
+          ? Number(customArea)
+          : undefined,
+      customPerimeter:
+        elementType === 'SLAB' && slabShape === 'cad_area'
+          ? Number(customPerimeter)
+          : undefined,
+      isArcDeduction:
+        elementType === 'SLAB' && slabShape === 'curved_cantilever'
+          ? isArcDeduction
+          : undefined,
 
       // Beam attributes
       supportedSlabThickness:
@@ -757,7 +1030,6 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       const payload = buildPayload();
       await onSubmit(payload, null);
 
-      // Auto-increment element name (e.g. C-01 -> C-02, W1 -> W2)
       const match = elementName.match(/^(.*?)(\d+)$/);
       if (match) {
         const prefix = match[1];
@@ -788,32 +1060,37 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 dark:bg-black/80 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200"
       onKeyDown={handleKeyDown}
     >
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-100">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100">
         {/* ═══ Header ═══ */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90 sticky top-0 z-10">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 sticky top-0 z-10">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-brand-500/10 border border-brand-500/20 text-brand-400">
+            <div className="p-2.5 rounded-xl bg-brand-500/10 border border-brand-500/20 text-brand-600 dark:text-brand-400">
               <Calculator className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 {isEdit ? 'Edit Structural Element' : 'Register Structural Element'}
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-mono">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 font-mono">
                   {elementType}
                 </span>
+                {elementType === 'SLAB' && slabShape !== 'rectangular' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/40 font-mono">
+                    {slabShape.replace(/_/g, ' ')}
+                  </span>
+                )}
               </h2>
-              <p className="text-xs text-slate-400">
-                True engineering dimensional takeoff & elevation datum control
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                True engineering dimensional takeoff & curved geometry derivation
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
           >
             <X className="w-5 h-5" />
           </button>
@@ -826,7 +1103,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
         >
           {/* Element Type Selector Tabs */}
           <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2.5">
+            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2.5">
               Select Structural Classification
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
@@ -848,7 +1125,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                       } else if (cfg.type === 'SLAB') {
                         setLength(6.0);
                         setWidth(6.0);
-                        setThickness(0.2);
+                        setThickness(0.175);
                       } else if (cfg.type === 'WALL') {
                         setLength(4.0);
                         setHeight(3.2);
@@ -862,7 +1139,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                     className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border text-xs font-semibold transition-all ${
                       isSelected
                         ? `${cfg.bg} ${cfg.color} border-brand-500 shadow-md ring-1 ring-brand-500/50`
-                        : 'bg-slate-800/60 border-slate-700/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                        : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/80 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
                     <Icon className="w-5 h-5" />
@@ -873,10 +1150,10 @@ export const ElementModal: React.FC<ElementModalProps> = ({
             </div>
           </div>
 
-          {/* Core Info & Grid Grid Alignment */}
+          {/* Core Info & Grid Alignment */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
                 Element ID / Tag <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
@@ -884,22 +1161,22 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                   ref={nameInputRef}
                   type="text"
                   required
-                  placeholder="e.g. C-B1-04, B-102, S-L1"
+                  placeholder="e.g. S-ARC-01, C-B1-04, B-102"
                   value={elementName}
                   onChange={(e) => setElementName(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 font-mono font-semibold"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 font-mono font-semibold"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
                 Project Floor Level <span className="text-rose-500">*</span>
               </label>
               <select
                 value={levelId}
                 onChange={(e) => setLevelId(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-brand-500"
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm focus:outline-none focus:border-brand-500"
               >
                 {levels.length === 0 && <option value="">No Levels Defined</option>}
                 {levels.map((lvl) => (
@@ -912,14 +1189,14 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-semibold text-slate-400">
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">
                   Grid Coordinate / Span
                 </label>
                 {gridHint && (
                   <button
                     type="button"
                     onClick={applyGridDimensions}
-                    className="text-[11px] text-brand-400 hover:text-brand-300 underline font-medium flex items-center gap-1"
+                    className="text-[11px] text-brand-600 dark:text-brand-400 hover:text-brand-500 underline font-medium flex items-center gap-1"
                   >
                     <Sparkles className="w-3 h-3" /> Apply Span
                   </button>
@@ -927,35 +1204,35 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               </div>
               <input
                 type="text"
-                placeholder="e.g. B/2, 2/C-E, A-B/1-2"
+                placeholder="e.g. B/2, 2/C-E, C1-C1 Arc"
                 value={gridAxis}
                 onChange={(e) => setGridAxis(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:border-brand-500 font-mono"
+                className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:border-brand-500 font-mono"
               />
               {gridHint && (
-                <p className="text-[11px] text-brand-400/90 mt-1 font-mono">{gridHint}</p>
+                <p className="text-[11px] text-brand-600 dark:text-brand-400/90 mt-1 font-mono">{gridHint}</p>
               )}
             </div>
           </div>
 
           {/* ═══ Elevation Datum Section ═══ */}
-          <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60 space-y-3">
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Compass className="w-4 h-4 text-brand-400" />
-                <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                <Compass className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider">
                   Elevation Datum & Level Binding
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-slate-400">Mode:</span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">Mode:</span>
                 <button
                   type="button"
                   onClick={() => setElevationMode(elevationMode === 'auto' ? 'manual' : 'auto')}
                   className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
                     elevationMode === 'auto'
-                      ? 'bg-brand-500/20 text-brand-400 border border-brand-500/40'
-                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      ? 'bg-brand-50 dark:bg-brand-500/20 text-brand-700 dark:text-brand-400 border border-brand-200 dark:border-brand-500/40'
+                      : 'bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/40'
                   }`}
                 >
                   {elevationMode === 'auto' ? '⚡ Auto-Derived' : '✏️ Manual Override'}
@@ -965,23 +1242,23 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 
             {elevationMode === 'auto' ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-3 bg-slate-850 rounded-lg border border-slate-700/50">
-                  <span className="text-[11px] text-slate-400 block">Level Datum</span>
-                  <span className="text-sm font-mono font-bold text-white">
+                <div className="p-3 bg-white dark:bg-slate-850 rounded-lg border border-slate-200 dark:border-slate-700/50">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">Level Datum</span>
+                  <span className="text-sm font-mono font-bold text-slate-900 dark:text-white">
                     {calculatedElevations.levelDatum >= 0 ? '+' : ''}
                     {calculatedElevations.levelDatum.toFixed(3)} m
                   </span>
                 </div>
-                <div className="p-3 bg-slate-850 rounded-lg border border-slate-700/50">
-                  <span className="text-[11px] text-slate-400 block">Base Elevation</span>
-                  <span className="text-sm font-mono font-bold text-emerald-400">
+                <div className="p-3 bg-white dark:bg-slate-850 rounded-lg border border-slate-200 dark:border-slate-700/50">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">Base Elevation</span>
+                  <span className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">
                     {calculatedElevations.baseElevation >= 0 ? '+' : ''}
                     {calculatedElevations.baseElevation.toFixed(3)} m
                   </span>
                 </div>
-                <div className="p-3 bg-slate-850 rounded-lg border border-slate-700/50">
-                  <span className="text-[11px] text-slate-400 block">Top Elevation</span>
-                  <span className="text-sm font-mono font-bold text-cyan-400">
+                <div className="p-3 bg-white dark:bg-slate-850 rounded-lg border border-slate-200 dark:border-slate-700/50">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">Top Elevation</span>
+                  <span className="text-sm font-mono font-bold text-cyan-600 dark:text-cyan-400">
                     {calculatedElevations.topElevation >= 0 ? '+' : ''}
                     {calculatedElevations.topElevation.toFixed(3)} m
                   </span>
@@ -1022,29 +1299,29 @@ export const ElementModal: React.FC<ElementModalProps> = ({
           </div>
 
           {/* ═══ Dynamic Section Profiling & Dimensions ═══ */}
-          <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/80 space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-700/60">
-              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                <Ruler className="w-4 h-4 text-brand-400" />
-                Geometric Dimensions & Structural Profile
+          <div className="p-4 rounded-xl bg-slate-50/60 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-700/60">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Ruler className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+                Geometric Dimensions & Profile Specification
               </span>
-              <span className="text-xs text-slate-400 font-mono">Units: Meters (m)</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">Units: Meters (m)</span>
             </div>
 
-            {/* COLUMN Profile */}
+            {/* ─── COLUMN Profile ─── */}
             {elementType === 'COLUMN' && (
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center gap-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">Section Profile:</span>
-                    <div className="inline-flex rounded-lg p-0.5 bg-slate-900 border border-slate-700">
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Section Profile:</span>
+                    <div className="inline-flex rounded-lg p-0.5 bg-slate-200 dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
                       <button
                         type="button"
                         onClick={() => setColumnShape('rectangular')}
                         className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
                           columnShape === 'rectangular'
                             ? 'bg-brand-500 text-white shadow'
-                            : 'text-slate-400 hover:text-white'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
                         Rectangular / Square
@@ -1055,7 +1332,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                         className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
                           columnShape === 'circular'
                             ? 'bg-brand-500 text-white shadow'
-                            : 'text-slate-400 hover:text-white'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
                         Circular (Ø)
@@ -1064,19 +1341,18 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-300">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300">
                       <input
                         type="checkbox"
                         checked={isInclined}
                         onChange={(e) => setIsInclined(e.target.checked)}
-                        className="rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500 h-4 w-4"
+                        className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-brand-500 focus:ring-brand-500 h-4 w-4"
                       />
                       <span>Slanted / Inclined Column</span>
                     </label>
                   </div>
                 </div>
 
-                {/* Dimensions inputs */}
                 {columnShape === 'rectangular' ? (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <SmartField
@@ -1125,11 +1401,10 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                   </div>
                 )}
 
-                {/* Inclined parameters */}
                 {isInclined && (
-                  <div className="p-3.5 bg-slate-900/80 rounded-xl border border-amber-500/30 space-y-3">
+                  <div className="p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-amber-300 dark:border-amber-500/30 space-y-3 shadow-sm">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-amber-400">
+                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
                         Slanted Column Derivation
                       </span>
                       <div className="flex items-center gap-2">
@@ -1138,8 +1413,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                           onClick={() => setInclinedCalcMode('offset')}
                           className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
                             inclinedCalcMode === 'offset'
-                              ? 'bg-amber-500 text-slate-950'
-                              : 'bg-slate-800 text-slate-400'
+                              ? 'bg-amber-500 text-slate-950 shadow-sm'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                           }`}
                         >
                           Offset Mode (ΔX)
@@ -1149,8 +1424,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                           onClick={() => setInclinedCalcMode('angle')}
                           className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
                             inclinedCalcMode === 'angle'
-                              ? 'bg-amber-500 text-slate-950'
-                              : 'bg-slate-800 text-slate-400'
+                              ? 'bg-amber-500 text-slate-950 shadow-sm'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                           }`}
                         >
                           Angle Mode (θ°)
@@ -1178,11 +1453,11 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                           onChange={(v) => setInclinationAngle(Number(v))}
                         />
                       )}
-                      <div className="p-2.5 bg-slate-850 rounded-xl border border-slate-700/60 flex flex-col justify-center">
-                        <span className="text-[11px] text-slate-400">
+                      <div className="p-2.5 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700/60 flex flex-col justify-center">
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
                           Derived Slant Length
                         </span>
-                        <span className="text-sm font-mono font-bold text-amber-400">
+                        <span className="text-sm font-mono font-bold text-amber-600 dark:text-amber-400">
                           {effectiveColumnHeight.toFixed(3)} m
                         </span>
                       </div>
@@ -1192,43 +1467,116 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               </div>
             )}
 
-            {/* BEAM Profile */}
+            {/* ─── BEAM Profile (Straight vs Curved) ─── */}
             {elementType === 'BEAM' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <SmartField
-                    label="Span Length (L)"
-                    unit="m"
-                    type="number"
-                    step="0.01"
-                    value={length}
-                    onChange={(v) => setLength(Number(v))}
-                  />
-                  <SmartField
-                    label="Beam Width (b)"
-                    unit="m"
-                    type="number"
-                    step="0.01"
-                    value={width}
-                    onChange={(v) => setWidth(Number(v))}
-                  />
-                  <SmartField
-                    label="Overall Depth (D)"
-                    unit="m"
-                    type="number"
-                    step="0.01"
-                    value={depth}
-                    onChange={(v) => setDepth(Number(v))}
-                  />
+                <div className="flex items-center gap-2 pb-2">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Beam Geometry:</span>
+                  <div className="inline-flex rounded-lg p-0.5 bg-slate-200 dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setBeamShape('straight')}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
+                        beamShape === 'straight'
+                          ? 'bg-amber-500 text-slate-950 shadow'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Straight Beam
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBeamShape('curved')}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
+                        beamShape === 'curved'
+                          ? 'bg-amber-500 text-slate-950 shadow'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Curved / Arc Beam
+                    </button>
+                  </div>
                 </div>
 
-                <div className="p-3.5 bg-slate-900/60 rounded-xl border border-slate-700/60 space-y-2">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-300">
+                {beamShape === 'straight' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <SmartField
+                      label="Span Length (L)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={length}
+                      onChange={(v) => setLength(Number(v))}
+                    />
+                    <SmartField
+                      label="Beam Width (b)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={width}
+                      onChange={(v) => setWidth(Number(v))}
+                    />
+                    <SmartField
+                      label="Overall Depth (D)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={depth}
+                      onChange={(v) => setDepth(Number(v))}
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-3 p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-amber-300 dark:border-amber-500/30 shadow-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                      <SmartField
+                        label="Centerline Radius (R)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={radius}
+                        onChange={(v) => setRadius(Number(v))}
+                      />
+                      <SmartField
+                        label="Subtended Angle (θ)"
+                        unit="deg"
+                        type="number"
+                        step="1"
+                        value={arcAngle}
+                        onChange={(v) => setArcAngle(Number(v))}
+                      />
+                      <SmartField
+                        label="Beam Width (b)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={width}
+                        onChange={(v) => setWidth(Number(v))}
+                      />
+                      <SmartField
+                        label="Overall Depth (D)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={depth}
+                        onChange={(v) => setDepth(Number(v))}
+                      />
+                    </div>
+                    {takeoff.curvedGeom && (
+                      <div className="flex items-center gap-4 text-xs font-mono text-amber-600 dark:text-amber-400 pt-1">
+                        <span>Derived Arc Length: <strong>{takeoff.curvedGeom.arcLength.toFixed(3)}m</strong></span>
+                        <span>Chord Span: <strong>{takeoff.curvedGeom.chordLength.toFixed(3)}m</strong></span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="p-3.5 bg-white dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300">
                     <input
                       type="checkbox"
                       checked={deductSlab}
                       onChange={(e) => setDeductSlab(e.target.checked)}
-                      className="rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500 h-4 w-4"
+                      className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-brand-500 focus:ring-brand-500 h-4 w-4"
                     />
                     <span>Deduct monolithic slab depth from side formwork</span>
                   </label>
@@ -1249,83 +1597,754 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               </div>
             )}
 
-            {/* SLAB Profile */}
+            {/* ─── SLAB Profile (Rectangular vs Curved / Arc / Segment / Sector) ─── */}
             {elementType === 'SLAB' && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <SmartField
-                  label="Length (L)"
-                  unit="m"
-                  type="number"
-                  step="0.01"
-                  value={length}
-                  onChange={(v) => setLength(Number(v))}
-                />
-                <SmartField
-                  label="Width (W)"
-                  unit="m"
-                  type="number"
-                  step="0.01"
-                  value={width}
-                  onChange={(v) => setWidth(Number(v))}
-                />
-                <SmartField
-                  label="Thickness (T)"
-                  unit="m"
-                  type="number"
-                  step="0.01"
-                  value={thickness}
-                  onChange={(v) => setThickness(Number(v))}
-                />
+              <div className="space-y-4">
+                {/* Slab Shape Type Selection */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                    Slab Geometric Shape & Boundary Type:
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-4 gap-2">
+                    {[
+                      { id: 'rectangular', label: 'Rectangular', icon: Square },
+                      { id: 'trapezoidal_cantilever', label: 'Tapered / Trapezoidal', icon: Shapes, highlight: true },
+                      { id: 'curved_cantilever', label: 'Curved Cantilever / Bay', icon: Shapes },
+                      { id: 'cad_area', label: 'Irregular (CAD Polyline/Spline)', icon: Sparkles },
+                      { id: 'circular_segment', label: 'Circular Segment / Arc', icon: Shapes },
+                      { id: 'semi_circular', label: 'Semi-Circular', icon: Circle },
+                      { id: 'circular_sector', label: 'Circular Sector (Pie)', icon: PieChart },
+                      { id: 'circular', label: 'Full Circle', icon: Disc },
+                    ].map((shape) => {
+                      const Icon = shape.icon;
+                      const isSelected = slabShape === shape.id;
+                      return (
+                        <button
+                          key={shape.id}
+                          type="button"
+                          onClick={() => setSlabShape(shape.id as any)}
+                          className={`flex flex-col items-center gap-1.5 p-2.5 rounded-xl border text-[11px] font-semibold transition ${
+                            isSelected
+                              ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500 shadow-md ring-1 ring-emerald-500/50'
+                              : 'bg-white dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <Icon className="w-4 h-4" />
+                          <span className="text-center leading-tight">{shape.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 1. RECTANGULAR SLAB */}
+                {slabShape === 'rectangular' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <SmartField
+                      label="Length (L / Span X)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={length}
+                      onChange={(v) => setLength(Number(v))}
+                    />
+                    <SmartField
+                      label="Width (W / Span Y)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={width}
+                      onChange={(v) => setWidth(Number(v))}
+                    />
+                    <SmartField
+                      label="Slab Thickness (T)"
+                      unit="m"
+                      type="number"
+                      step="0.005"
+                      value={thickness}
+                      onChange={(v) => setThickness(Number(v))}
+                    />
+                  </div>
+                )}
+
+                {/* 2. CIRCULAR SEGMENT / ARCH SLAB (CAD Radius & Arc Depth Match) */}
+                {slabShape === 'circular_segment' && (
+                  <div className="p-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-emerald-300 dark:border-emerald-500/40 space-y-4 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+                      <div>
+                        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Sparkles className="w-4 h-4" /> Circular Segment Arc Geometry
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Calculates exact plan area, chord span, and arc length directly from CAD parameters
+                        </p>
+                      </div>
+
+                      {/* Input Mode Toggle */}
+                      <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                        <button
+                          type="button"
+                          onClick={() => setCurvedInputMode('radius_chord')}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                            curvedInputMode === 'radius_chord'
+                              ? 'bg-emerald-500 text-slate-950 shadow'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          Radius (R) + Span (C) [Auto h]
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCurvedInputMode('radius_rise')}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                            curvedInputMode === 'radius_rise'
+                              ? 'bg-emerald-500 text-slate-950 shadow'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          Radius (R) + Arc Depth (h)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCurvedInputMode('chord_rise')}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                            curvedInputMode === 'chord_rise'
+                              ? 'bg-emerald-500 text-slate-950 shadow'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          Chord (C) + Arc Depth (h)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCurvedInputMode('radius_angle')}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                            curvedInputMode === 'radius_angle'
+                              ? 'bg-emerald-500 text-slate-950 shadow'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          Radius (R) + Angle (θ°)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {curvedInputMode === 'radius_chord' && (
+                        <>
+                          <SmartField
+                            label="Arc Radius (R)"
+                            unit="m"
+                            type="number"
+                            step="0.001"
+                            value={radius}
+                            placeholder="e.g. 2.960"
+                            onChange={(v) => setRadius(Number(v))}
+                          />
+                          <SmartField
+                            label="Chord Span Width (C)"
+                            unit="m"
+                            type="number"
+                            step="0.001"
+                            value={chordLength}
+                            placeholder="e.g. 5.810"
+                            onChange={(v) => setChordLength(Number(v))}
+                          />
+                        </>
+                      )}
+
+                      {curvedInputMode === 'radius_rise' && (
+                        <>
+                          <SmartField
+                            label="Arc Radius (R)"
+                            unit="m"
+                            type="number"
+                            step="0.001"
+                            value={radius}
+                            placeholder="e.g. 2.960"
+                            onChange={(v) => setRadius(Number(v))}
+                          />
+                          <SmartField
+                            label="Arc Depth / Rise (h)"
+                            unit="m"
+                            type="number"
+                            step="0.001"
+                            value={arcDepth}
+                            placeholder="e.g. 2.394"
+                            onChange={(v) => setArcDepth(Number(v))}
+                          />
+                        </>
+                      )}
+
+                      {curvedInputMode === 'chord_rise' && (
+                        <>
+                          <SmartField
+                            label="Chord Span Width (C)"
+                            unit="m"
+                            type="number"
+                            step="0.001"
+                            value={chordLength}
+                            placeholder="e.g. 5.810"
+                            onChange={(v) => setChordLength(Number(v))}
+                          />
+                          <SmartField
+                            label="Arc Depth / Rise (h)"
+                            unit="m"
+                            type="number"
+                            step="0.001"
+                            value={arcDepth}
+                            placeholder="e.g. 2.394"
+                            onChange={(v) => setArcDepth(Number(v))}
+                          />
+                        </>
+                      )}
+
+                      {curvedInputMode === 'radius_angle' && (
+                        <>
+                          <SmartField
+                            label="Arc Radius (R)"
+                            unit="m"
+                            type="number"
+                            step="0.001"
+                            value={radius}
+                            placeholder="e.g. 2.960"
+                            onChange={(v) => setRadius(Number(v))}
+                          />
+                          <SmartField
+                            label="Subtended Angle (θ)"
+                            unit="deg"
+                            type="number"
+                            step="0.1"
+                            value={arcAngle}
+                            placeholder="e.g. 157.9"
+                            onChange={(v) => setArcAngle(Number(v))}
+                          />
+                        </>
+                      )}
+
+                      <SmartField
+                        label="Slab Thickness (T)"
+                        unit="m"
+                        type="number"
+                        step="0.005"
+                        value={thickness}
+                        placeholder="e.g. 0.175"
+                        onChange={(v) => setThickness(Number(v))}
+                      />
+                    </div>
+
+                    {/* Interactive CAD Schematic & Derived Metrics */}
+                    {takeoff.curvedGeom && (
+                      <div className="p-3.5 bg-slate-50 dark:bg-slate-950/80 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                            CAD Computed Geometry Results
+                          </span>
+                          <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                            Approx. Plan Area: {takeoff.elementArea.toFixed(2)} m²
+                          </span>
+                        </div>
+
+                        {/* Visual SVG CAD Diagram */}
+                        <div className="h-32 bg-white dark:bg-slate-900/90 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-center p-2 relative overflow-hidden">
+                          <svg
+                            viewBox="0 0 320 120"
+                            className="w-full h-full max-w-sm"
+                          >
+                            {/* Gridlines Background */}
+                            <line x1="20" y1="90" x2="300" y2="90" stroke="#94a3b8" strokeWidth="1" strokeDasharray="4 2" />
+                            <line x1="160" y1="10" x2="160" y2="110" stroke="#ef4444" strokeWidth="1" strokeDasharray="3 3" />
+
+                            {/* Circular Segment Filled Shape */}
+                            <path
+                              d="M 50 90 A 130 130 0 0 1 270 90 Z"
+                              fill="rgba(16, 185, 129, 0.25)"
+                              stroke="#10b981"
+                              strokeWidth="2.5"
+                            />
+
+                            {/* Radius indicator arrow */}
+                            <line x1="160" y1="110" x2="225" y2="35" stroke="#ec4899" strokeWidth="1.5" strokeDasharray="2 2" />
+                            <text x="200" y="75" fill="#ec4899" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                              R={takeoff.curvedGeom.radius.toFixed(2)}m
+                            </text>
+
+                            {/* Rise / Arc depth indicator */}
+                            <line x1="160" y1="20" x2="160" y2="90" stroke="#a855f7" strokeWidth="2" />
+                            <text x="165" y="55" fill="#a855f7" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                              h={takeoff.curvedGeom.arcDepth.toFixed(2)}m
+                            </text>
+
+                            {/* Chord span bottom indicator */}
+                            <line x1="50" y1="105" x2="270" y2="105" stroke="#0284c7" strokeWidth="1.5" />
+                            <text x="135" y="116" fill="#0284c7" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                              Span C={takeoff.curvedGeom.chordLength.toFixed(2)}m
+                            </text>
+
+                            {/* Area text in center */}
+                            <text x="110" y="78" className="fill-slate-900 dark:fill-white" fontSize="10" fontWeight="bold" fontFamily="sans-serif">
+                              Area ≈ {takeoff.elementArea.toFixed(2)} m²
+                            </text>
+                          </svg>
+                        </div>
+
+                        {/* Geometric Metrics Readouts */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                          <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block">Arc Length (s)</span>
+                            <span className="font-mono font-bold text-slate-900 dark:text-white">
+                              {takeoff.curvedGeom.arcLength.toFixed(3)} m
+                            </span>
+                          </div>
+                          <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block">Chord Span (C)</span>
+                            <span className="font-mono font-bold text-sky-600 dark:text-sky-400">
+                              {takeoff.curvedGeom.chordLength.toFixed(3)} m
+                            </span>
+                          </div>
+                          <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block">Included Angle (θ)</span>
+                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                              {takeoff.curvedGeom.arcAngleDeg.toFixed(1)}°
+                            </span>
+                          </div>
+                          <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block">Wet Concrete Vol</span>
+                            <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                              {takeoff.volume.toFixed(3)} m³
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. CURVED CANTILEVER / BALCONY WITH ARC */}
+                {slabShape === 'curved_cantilever' && (
+                  <div className="p-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-emerald-300 dark:border-emerald-500/40 space-y-4 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+                      <div>
+                        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                          Curved Cantilever Bay Profile
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Calculates cantilever slab panels with curved edge projections or inward recess cutouts
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={isArcDeduction}
+                          onChange={(e) => setIsArcDeduction(e.target.checked)}
+                          className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-500 focus:ring-emerald-500 h-4 w-4"
+                        />
+                        <span>Deduct Arc (Inward Recess / Cutout)</span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      <SmartField
+                        label="Bay Span Length (L)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={length}
+                        placeholder="e.g. 24.80"
+                        onChange={(v) => setLength(Number(v))}
+                      />
+                      <SmartField
+                        label="Cantilever End Depth (W_cant)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={cantileverDepth}
+                        placeholder="e.g. 1.872"
+                        onChange={(v) => setCantileverDepth(Number(v))}
+                      />
+                      <SmartField
+                        label="Slab Thickness (T)"
+                        unit="m"
+                        type="number"
+                        step="0.005"
+                        value={thickness}
+                        placeholder="e.g. 0.175"
+                        onChange={(v) => setThickness(Number(v))}
+                      />
+                      <SmartField
+                        label="Curved Arc Radius (R)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={radius}
+                        placeholder="e.g. 98.24 or 7.25"
+                        onChange={(v) => setRadius(Number(v))}
+                      />
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                            Arc Depth / Rise (h)
+                          </label>
+                          {radius > 0 && length > 0 && (
+                            <button
+                              type="button"
+                              onClick={autoDeriveArcFromRadiusAndSpan}
+                              className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
+                              title="Auto-derive h = R - sqrt(R² - (L/2)²)"
+                            >
+                              <Sparkles className="w-3 h-3" /> Auto-Derive
+                            </button>
+                          )}
+                        </div>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.001"
+                            value={arcDepth || ''}
+                            placeholder="Auto-derived or enter"
+                            onChange={(e) => setArcDepth(parseFloat(e.target.value) || 0)}
+                            className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                          <span className="absolute right-3 top-2.5 text-xs text-slate-400">m</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Midpoint Depth (W_mid) <span className="text-[10px] font-normal text-slate-400">(Optional Helper)</span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.001"
+                            value={cantileverMidDepth}
+                            placeholder="e.g. 0.835"
+                            onChange={(e) => autoDeriveFromMidpointDepth(e.target.value)}
+                            className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                          <span className="absolute right-3 top-2.5 text-xs text-slate-400">m</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                          Derives h = |W_cant − W_mid| and Radius automatically
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Breakdown calculation summary */}
+                    {takeoff.curvedGeom && (
+                      <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl border border-emerald-200 dark:border-emerald-800/40 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between font-semibold text-emerald-800 dark:text-emerald-300">
+                          <span>{takeoff.formulaDesc}</span>
+                          <span className="font-mono">{takeoff.elementArea.toFixed(2)} m²</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-600 dark:text-slate-400">
+                          <span>Base: {(length * (cantileverDepth || 0)).toFixed(2)} m²</span>
+                          <span>Arc Segment: {takeoff.curvedGeom.segmentArea.toFixed(2)} m²</span>
+                          <span>Arc Rise (h): {takeoff.curvedGeom.arcDepth.toFixed(3)} m</span>
+                          <span>Radius (R): {takeoff.curvedGeom.radius.toFixed(2)} m</span>
+                          <span>Wet Volume: {takeoff.volume.toFixed(3)} m³</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 4. TAPERED / TRAPEZOIDAL CANTILEVER SLAB */}
+                {slabShape === 'trapezoidal_cantilever' && (
+                  <div className="p-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-emerald-300 dark:border-emerald-500/40 space-y-4 shadow-sm">
+                    <div>
+                      <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Shapes className="w-4 h-4" /> Tapered / Trapezoidal Cantilever Slab
+                      </span>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        For slabs with straight or linearly tapered cantilever edges (e.g. from C7 to C8 to C1)
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      <SmartField
+                        label="Bay Span Length (L)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={length}
+                        placeholder="e.g. 24.799"
+                        onChange={(v) => setLength(Number(v))}
+                      />
+                      <SmartField
+                        label="Start Cantilever Depth (W₁ / Left)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={cantileverDepth}
+                        placeholder="e.g. 1.872"
+                        onChange={(v) => setCantileverDepth(Number(v))}
+                      />
+                      <SmartField
+                        label="End Cantilever Depth (W₂ / Right)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={taperEndDepth}
+                        placeholder="e.g. 0.00 or 0.30"
+                        onChange={(v) => setTaperEndDepth(Number(v))}
+                      />
+                      <SmartField
+                        label="Corner Fillet Radius (R)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={radius}
+                        placeholder="Optional (e.g. 1.50)"
+                        onChange={(v) => setRadius(Number(v))}
+                      />
+                      <SmartField
+                        label="Slab Thickness (T)"
+                        unit="m"
+                        type="number"
+                        step="0.005"
+                        value={thickness}
+                        placeholder="e.g. 0.175"
+                        onChange={(v) => setThickness(Number(v))}
+                      />
+                    </div>
+
+                    {/* Breakdown calculation summary */}
+                    <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl border border-emerald-200 dark:border-emerald-800/40 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between font-semibold text-emerald-800 dark:text-emerald-300">
+                        <span>{takeoff.formulaDesc}</span>
+                        <span className="font-mono">{takeoff.elementArea.toFixed(2)} m²</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-600 dark:text-slate-400">
+                        <span>Span: {length} m</span>
+                        <span>Avg Width: {(((cantileverDepth || 0) + (taperEndDepth || 0)) / 2).toFixed(3)} m</span>
+                        <span>Wet Volume: {takeoff.volume.toFixed(3)} m³</span>
+                        <span>Formwork Area: {takeoff.formworkArea.toFixed(2)} m²</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. IRREGULAR POLYLINE / SPLINE DIRECT CAD AREA */}
+                {slabShape === 'cad_area' && (
+                  <div className="p-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-emerald-300 dark:border-emerald-500/40 space-y-4 shadow-sm">
+                    <div>
+                      <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4" /> Irregular Polyline / Spline Area (Direct CAD Takeoff)
+                      </span>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Select the closed polyline or hatch in AutoCAD and type <strong>LI</strong> (or AREA) to copy the exact CAD plan area.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          CAD Measured Plan Area (A)
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.001"
+                            value={customArea || ''}
+                            placeholder="e.g. 24.789"
+                            onChange={(e) => setCustomArea(parseFloat(e.target.value) || 0)}
+                            className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                          <span className="absolute right-3 top-2.5 text-xs text-slate-400">m²</span>
+                        </div>
+                      </div>
+
+                      <SmartField
+                        label="Slab Thickness (T)"
+                        unit="m"
+                        type="number"
+                        step="0.005"
+                        value={thickness}
+                        placeholder="e.g. 0.175"
+                        onChange={(v) => setThickness(Number(v))}
+                      />
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Boundary Perimeter (P) <span className="text-[10px] font-normal text-slate-400">(Optional)</span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={customPerimeter || ''}
+                            placeholder="e.g. 32.50"
+                            onChange={(e) => setCustomPerimeter(parseFloat(e.target.value) || 0)}
+                            className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                          <span className="absolute right-3 top-2.5 text-xs text-slate-400">m</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Breakdown calculation summary */}
+                    <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl border border-emerald-200 dark:border-emerald-800/40 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between font-semibold text-emerald-800 dark:text-emerald-300">
+                        <span>{takeoff.formulaDesc}</span>
+                        <span className="font-mono">{takeoff.elementArea.toFixed(2)} m²</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-600 dark:text-slate-400">
+                        <span>Net Area: {takeoff.elementArea.toFixed(2)} m²</span>
+                        <span>Slab Thickness: {thickness} m</span>
+                        <span>Wet Volume: {takeoff.volume.toFixed(3)} m³</span>
+                        <span>Formwork Contact Area: {takeoff.formworkArea.toFixed(2)} m²</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. SEMI-CIRCULAR / FULL CIRCLE / SECTOR */}
+                {(slabShape === 'semi_circular' || slabShape === 'circular' || slabShape === 'circular_sector') && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <SmartField
+                      label={slabShape === 'circular' ? 'Radius (R) or Ø/2' : 'Radius (R)'}
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={radius}
+                      onChange={(v) => setRadius(Number(v))}
+                    />
+                    {slabShape === 'circular_sector' && (
+                      <SmartField
+                        label="Sector Angle (θ)"
+                        unit="deg"
+                        type="number"
+                        step="1"
+                        value={arcAngle}
+                        onChange={(v) => setArcAngle(Number(v))}
+                      />
+                    )}
+                    <SmartField
+                      label="Slab Thickness (T)"
+                      unit="m"
+                      type="number"
+                      step="0.005"
+                      value={thickness}
+                      onChange={(v) => setThickness(Number(v))}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
-            {/* WALL Profile */}
+            {/* ─── WALL Profile (Straight vs Curved) ─── */}
             {elementType === 'WALL' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <SmartField
-                    label="Wall Length (L)"
-                    unit="m"
-                    type="number"
-                    step="0.01"
-                    value={length}
-                    onChange={(v) => setLength(Number(v))}
-                  />
-                  <SmartField
-                    label="Wall Height (H)"
-                    unit="m"
-                    type="number"
-                    step="0.01"
-                    value={height}
-                    onChange={(v) => setHeight(Number(v))}
-                  />
-                  <SmartField
-                    label="Wall Thickness (T)"
-                    unit="m"
-                    type="number"
-                    step="0.01"
-                    value={thickness}
-                    onChange={(v) => setThickness(Number(v))}
-                  />
+                <div className="flex items-center gap-2 pb-2">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Wall Profile:</span>
+                  <div className="inline-flex rounded-lg p-0.5 bg-slate-200 dark:bg-slate-900 border border-slate-300 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setWallShape('straight')}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
+                        wallShape === 'straight'
+                          ? 'bg-purple-500 text-white shadow'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Straight Wall
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWallShape('curved')}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
+                        wallShape === 'curved'
+                          ? 'bg-purple-500 text-white shadow'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Curved / Cylindrical Wall
+                    </button>
+                  </div>
                 </div>
 
+                {wallShape === 'straight' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <SmartField
+                      label="Wall Length (L)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={length}
+                      onChange={(v) => setLength(Number(v))}
+                    />
+                    <SmartField
+                      label="Wall Height (H)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={height}
+                      onChange={(v) => setHeight(Number(v))}
+                    />
+                    <SmartField
+                      label="Wall Thickness (T)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={thickness}
+                      onChange={(v) => setThickness(Number(v))}
+                    />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-purple-300 dark:border-purple-500/30 shadow-sm">
+                    <SmartField
+                      label="Curve Radius (R)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={radius}
+                      onChange={(v) => setRadius(Number(v))}
+                    />
+                    <SmartField
+                      label="Subtended Angle (θ)"
+                      unit="deg"
+                      type="number"
+                      step="1"
+                      value={arcAngle}
+                      onChange={(v) => setArcAngle(Number(v))}
+                    />
+                    <SmartField
+                      label="Wall Height (H)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={height}
+                      onChange={(v) => setHeight(Number(v))}
+                    />
+                    <SmartField
+                      label="Wall Thickness (T)"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={thickness}
+                      onChange={(v) => setThickness(Number(v))}
+                    />
+                  </div>
+                )}
+
                 {/* Wall Openings Builder */}
-                <div className="p-3.5 bg-slate-900/80 rounded-xl border border-slate-700/70 space-y-3">
+                <div className="p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-slate-700/70 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-300">
-                      Wall Openings & Window/Door Deductions ({openings.length})
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Wall Openings & Deductions ({openings.length})
                     </span>
                     <button
                       type="button"
                       onClick={addOpening}
-                      className="px-2.5 py-1 rounded-lg bg-brand-500/20 text-brand-400 hover:bg-brand-500/30 text-xs font-semibold flex items-center gap-1 border border-brand-500/30 transition"
+                      className="px-2.5 py-1 rounded-lg bg-brand-500/10 dark:bg-brand-500/20 text-brand-600 dark:text-brand-400 hover:bg-brand-500/20 dark:hover:bg-brand-500/30 text-xs font-semibold flex items-center gap-1 border border-brand-500/20 dark:border-brand-500/30 transition"
                     >
                       <Plus className="w-3.5 h-3.5" /> Add Opening
                     </button>
                   </div>
 
                   {openings.length === 0 ? (
-                    <p className="text-xs text-slate-500 italic">
+                    <p className="text-xs text-slate-400 dark:text-slate-500 italic">
                       No openings specified. Full wall area will be computed.
                     </p>
                   ) : (
@@ -1333,9 +2352,9 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                       {openings.map((op, idx) => (
                         <div
                           key={op.id || idx}
-                          className="flex items-center gap-3 p-2 rounded-lg bg-slate-850 border border-slate-700/50"
+                          className="flex items-center gap-3 p-2 rounded-lg bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700/50"
                         >
-                          <span className="text-xs font-mono text-slate-400">
+                          <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
                             #{idx + 1}
                           </span>
                           <div className="flex-1 grid grid-cols-2 gap-2">
@@ -1359,7 +2378,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                           <button
                             type="button"
                             onClick={() => removeOpening(idx)}
-                            className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition"
+                            className="p-2 text-rose-500 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1371,7 +2390,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               </div>
             )}
 
-            {/* FOOTING Profile */}
+            {/* ─── FOOTING Profile ─── */}
             {elementType === 'FOOTING' && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <SmartField
@@ -1401,7 +2420,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               </div>
             )}
 
-            {/* STAIR Profile */}
+            {/* ─── STAIR Profile ─── */}
             {elementType === 'STAIR' && (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -1440,15 +2459,15 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                 </div>
 
                 {/* Flights List */}
-                <div className="p-3.5 bg-slate-900/80 rounded-xl border border-slate-700/70 space-y-3">
+                <div className="p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-slate-700/70 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-300">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                       Stair Flights ({flights.length})
                     </span>
                     <button
                       type="button"
                       onClick={addFlight}
-                      className="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 text-xs font-semibold flex items-center gap-1 border border-indigo-500/30 transition"
+                      className="px-2.5 py-1 rounded-lg bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 dark:hover:bg-indigo-500/30 text-xs font-semibold flex items-center gap-1 border border-indigo-500/20 dark:border-indigo-500/30 transition"
                     >
                       <Plus className="w-3.5 h-3.5" /> Add Flight
                     </button>
@@ -1458,9 +2477,9 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                     {flights.map((fl, idx) => (
                       <div
                         key={fl.id || idx}
-                        className="flex items-center gap-3 p-2 rounded-lg bg-slate-850 border border-slate-700/50"
+                        className="flex items-center gap-3 p-2 rounded-lg bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700/50"
                       >
-                        <span className="text-xs font-mono text-slate-400">
+                        <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
                           Flight {idx + 1}
                         </span>
                         <div className="flex-1 grid grid-cols-2 gap-2">
@@ -1485,7 +2504,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                           <button
                             type="button"
                             onClick={() => removeFlight(idx)}
-                            className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition"
+                            className="p-2 text-rose-500 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1496,15 +2515,15 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                 </div>
 
                 {/* Landings List */}
-                <div className="p-3.5 bg-slate-900/80 rounded-xl border border-slate-700/70 space-y-3">
+                <div className="p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-slate-700/70 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-300">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                       Landings ({landings.length})
                     </span>
                     <button
                       type="button"
                       onClick={addLanding}
-                      className="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 text-xs font-semibold flex items-center gap-1 border border-indigo-500/30 transition"
+                      className="px-2.5 py-1 rounded-lg bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 dark:hover:bg-indigo-500/30 text-xs font-semibold flex items-center gap-1 border border-indigo-500/20 dark:border-indigo-500/30 transition"
                     >
                       <Plus className="w-3.5 h-3.5" /> Add Landing
                     </button>
@@ -1514,9 +2533,9 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                     {landings.map((ld, idx) => (
                       <div
                         key={ld.id || idx}
-                        className="flex items-center gap-3 p-2 rounded-lg bg-slate-850 border border-slate-700/50"
+                        className="flex items-center gap-3 p-2 rounded-lg bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700/50"
                       >
-                        <span className="text-xs font-mono text-slate-400">
+                        <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
                           Landing {idx + 1}
                         </span>
                         <div className="flex-1">
@@ -1533,7 +2552,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                           <button
                             type="button"
                             onClick={() => removeLanding(idx)}
-                            className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition"
+                            className="p-2 text-rose-500 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1549,13 +2568,13 @@ export const ElementModal: React.FC<ElementModalProps> = ({
           {/* ═══ Material Specs & QA Planning ═══ */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3.5">
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
                 Concrete Mix Design
               </label>
               <select
                 value={concreteGrade}
                 onChange={(e) => setConcreteGrade(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-brand-500 font-mono"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-500 font-mono"
               >
                 {CONCRETE_GRADES.map((g) => (
                   <option key={g} value={g}>
@@ -1566,7 +2585,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
                 Rebar Spec / Ref
               </label>
               <input
@@ -1574,18 +2593,18 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                 placeholder="e.g. 8T25, T10-150"
                 value={rebarSpec}
                 onChange={(e) => setRebarSpec(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-xs focus:outline-none focus:border-brand-500 font-mono"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-xs focus:outline-none focus:border-brand-500 font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
                 Work Package
               </label>
               <select
                 value={workPackageId}
                 onChange={(e) => setWorkPackageId(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-500"
               >
                 <option value="">No Work Package</option>
                 {packages.map((pkg) => (
@@ -1597,7 +2616,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
                 Element Status
               </label>
               <select
@@ -1609,14 +2628,14 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                     setAchievedVolume(effectiveCalculatedVolume);
                   }
                 }}
-                className={`w-full px-3 py-2 bg-slate-800/90 border rounded-xl text-xs font-bold focus:outline-none ${
+                className={`w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/90 border rounded-xl text-xs font-bold focus:outline-none ${
                   status === 'APPROVED'
-                    ? 'text-emerald-400 border-emerald-500/40'
+                    ? 'text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-500/40'
                     : status === 'POURED'
-                    ? 'text-cyan-400 border-cyan-500/40'
+                    ? 'text-cyan-600 dark:text-cyan-400 border-cyan-300 dark:border-cyan-500/40'
                     : status === 'REJECTED'
-                    ? 'text-rose-400 border-rose-500/40'
-                    : 'text-amber-400 border-amber-500/40'
+                    ? 'text-rose-600 dark:text-rose-400 border-rose-300 dark:border-rose-500/40'
+                    : 'text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-500/40'
                 }`}
               >
                 <option value="PENDING">Pending</option>
@@ -1631,35 +2650,32 @@ export const ElementModal: React.FC<ElementModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
                 Planned Pour Date
               </label>
               <input
                 type="date"
                 value={plannedCastingDate}
                 onChange={(e) => setPlannedCastingDate(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800/90 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-brand-500 font-mono"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-500 font-mono"
               />
             </div>
           </div>
 
-          {/* ═══ Volumetric Takeoff & Progress Card ═══ */}
-          <div className="p-4 bg-gradient-to-br from-slate-850 to-slate-900 rounded-2xl border border-brand-500/30 shadow-lg space-y-3.5">
+          {/* ═══ Volumetric & Surface Takeoff Summary Card ═══ */}
+          <div className="p-4 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-850 dark:to-slate-900 rounded-2xl border border-brand-500/30 shadow-lg space-y-3.5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <span className="text-xs font-bold text-brand-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Calculator className="w-4 h-4" /> Volumetric Takeoff & Progress
+              <span className="text-xs font-bold text-brand-600 dark:text-brand-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Calculator className="w-4 h-4" /> Live Engineering Takeoff & Quantity Schedule
               </span>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-mono text-slate-400 hidden sm:inline">
-                  Formula: {takeoff.formulaDesc}
-                </span>
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-bold border ${
                     achievedPct >= 100
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/40'
                       : achievedPct > 0
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                      ? 'bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/40'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
                   }`}
                 >
                   {achievedPct}% Achieved
@@ -1667,8 +2683,14 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               </div>
             </div>
 
+            {/* Formula Description */}
+            <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-[11px] font-mono text-slate-700 dark:text-slate-300 flex items-start gap-2">
+              <Info className="w-4 h-4 text-brand-600 dark:text-brand-400 shrink-0 mt-0.5" />
+              <span><strong>Formula:</strong> {takeoff.formulaDesc}</span>
+            </div>
+
             {/* Visual Progress Bar */}
-            <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-700/50">
+            <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-300 dark:border-slate-700/50">
               <div
                 className={`h-full transition-all duration-300 ${
                   achievedPct >= 100
@@ -1681,14 +2703,32 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Calculated Volume */}
-              <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-700/60 flex flex-col justify-between space-y-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              {/* Approximate Plan Surface Area */}
+              <div className="p-3 bg-white dark:bg-slate-900/90 rounded-xl border border-sky-300 dark:border-sky-500/30 flex flex-col justify-between space-y-1.5 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-slate-400 font-medium">
+                  <span className="text-[11px] text-sky-700 dark:text-sky-300 font-medium">
+                    Plan / Surface Area
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 rounded">
+                    m²
+                  </span>
+                </div>
+                <div className="text-xl font-mono font-black text-sky-600 dark:text-sky-400 py-0.5">
+                  {takeoff.elementArea.toFixed(2)}
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  Geometric plan area
+                </span>
+              </div>
+
+              {/* Calculated Volume */}
+              <div className="p-3 bg-white dark:bg-slate-900/90 rounded-xl border border-slate-200 dark:border-slate-700/60 flex flex-col justify-between space-y-1.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
                     Calculated Volume
                   </span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-brand-500/10 text-brand-400 border border-brand-500/20 rounded">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-brand-500/10 text-brand-600 dark:text-brand-400 border border-brand-500/20 rounded">
                     m³
                   </span>
                 </div>
@@ -1700,13 +2740,13 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                     placeholder={takeoff.volume.toFixed(3)}
                     value={calculatedVolumeOverride}
                     onChange={(e) => setCalculatedVolumeOverride(e.target.value)}
-                    className="w-full px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-brand-400 font-mono font-bold text-sm focus:outline-none focus:border-brand-500"
+                    className="w-full px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-brand-600 dark:text-brand-400 font-mono font-bold text-sm focus:outline-none focus:border-brand-500"
                   />
                   {calculatedVolumeOverride !== '' && (
                     <button
                       type="button"
                       onClick={() => setCalculatedVolumeOverride('')}
-                      className="text-[10px] text-slate-400 hover:text-slate-200 underline whitespace-nowrap"
+                      className="text-[10px] text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 underline whitespace-nowrap"
                       title="Reset to live dimension calculation"
                     >
                       Reset
@@ -1714,17 +2754,17 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                   )}
                 </div>
                 <span className="text-[10px] text-slate-500 font-mono">
-                  Live calc: {takeoff.volume.toFixed(3)} m³
+                  Live: {takeoff.volume.toFixed(3)} m³
                 </span>
               </div>
 
               {/* Achieved Volume */}
-              <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-700/60 flex flex-col justify-between space-y-1.5">
+              <div className="p-3 bg-white dark:bg-slate-900/90 rounded-xl border border-slate-200 dark:border-slate-700/60 flex flex-col justify-between space-y-1.5 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-slate-400 font-medium">
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
                     Achieved Volume
                   </span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded">
                     m³
                   </span>
                 </div>
@@ -1735,11 +2775,11 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                     min="0"
                     value={achievedVolume || 0}
                     onChange={(e) => setAchievedVolume(Number(e.target.value) || 0)}
-                    className="w-full px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-emerald-400 font-mono font-bold text-sm focus:outline-none focus:border-emerald-500"
+                    className="w-full px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-emerald-600 dark:text-emerald-400 font-mono font-bold text-sm focus:outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div className="flex items-center gap-1">
-                  {[0, 25, 50, 75, 100].map((pct) => (
+                  {[0, 50, 100].map((pct) => (
                     <button
                       key={pct}
                       type="button"
@@ -1748,7 +2788,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                           Number(((pct / 100) * effectiveCalculatedVolume).toFixed(3)),
                         )
                       }
-                      className="px-1.5 py-0.5 text-[9px] font-mono font-bold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                      className="px-1.5 py-0.5 text-[9px] font-mono font-bold rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition"
                     >
                       {pct}%
                     </button>
@@ -1757,20 +2797,20 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               </div>
 
               {/* Formwork Contact Area */}
-              <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-700/60 flex flex-col justify-between space-y-1.5">
+              <div className="p-3 bg-white dark:bg-slate-900/90 rounded-xl border border-slate-200 dark:border-slate-700/60 flex flex-col justify-between space-y-1.5 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-slate-400 font-medium">
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
                     Formwork Area
                   </span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 rounded">
                     m²
                   </span>
                 </div>
-                <div className="text-xl font-mono font-black text-cyan-400 py-1">
+                <div className="text-xl font-mono font-black text-cyan-600 dark:text-cyan-400 py-0.5">
                   {takeoff.formworkArea.toFixed(2)}
                 </div>
                 <span className="text-[10px] text-slate-500 font-mono">
-                  Computed contact area
+                  Soffit + Shuttering edges
                 </span>
               </div>
             </div>
@@ -1778,9 +2818,9 @@ export const ElementModal: React.FC<ElementModalProps> = ({
         </form>
 
         {/* ═══ Footer Actions ═══ */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800 bg-slate-900/95">
-          <div className="text-xs text-slate-400 hidden sm:flex items-center gap-2 font-mono">
-            <kbd className="px-2 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300 text-[11px]">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95">
+          <div className="text-xs text-slate-500 dark:text-slate-400 hidden sm:flex items-center gap-2 font-mono">
+            <kbd className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-700 dark:text-slate-300 text-[11px]">
               Ctrl+Enter
             </kbd>
             <span>to save</span>
@@ -1790,7 +2830,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 text-xs font-semibold transition"
+              className="px-4 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition"
             >
               Cancel
             </button>
@@ -1800,7 +2840,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                 type="button"
                 disabled={submitting || !elementName.trim()}
                 onClick={handleSubmitAndAddAnother}
-                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-semibold shadow transition disabled:opacity-50 flex items-center gap-1.5"
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-600 text-xs font-semibold shadow-sm transition disabled:opacity-50 flex items-center gap-1.5"
               >
                 <Plus className="w-4 h-4" />
                 <span>Register & Add Another</span>

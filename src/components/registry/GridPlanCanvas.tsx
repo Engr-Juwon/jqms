@@ -26,6 +26,10 @@ import {
   Tag,
   Type,
   Sparkles,
+  Sun,
+  Moon,
+  Compass,
+  Palette,
 } from "lucide-react";
 import { StructuralElement, ProjectLevel, Gridline, NCR } from "@/types";
 import {
@@ -44,6 +48,112 @@ import { uploadImage, getThumbnail } from "@/lib/cloudinary";
 import { syncPhotoToSiteGallery } from "@/lib/photoSync";
 import { toast } from "react-hot-toast";
 import { GridSnapshotModal } from "./GridSnapshotModal";
+
+export type CanvasTheme = "dark" | "light" | "blueprint";
+
+export interface CanvasThemeConfig {
+  name: string;
+  canvasBg: string;
+  gridline: string;
+  bubbleFill: string;
+  bubbleStrokeX: string;
+  bubbleTextX: string;
+  bubbleStrokeY: string;
+  bubbleTextY: string;
+  dimLine: string;
+  dimBoxBg: string;
+  dimBoxStroke: string;
+  dimText: string;
+  plateBg: string;
+  plateText: string;
+  plateSubText: string;
+  plateBorder: string;
+  slabDefaultFill: string;
+  slabDefaultStroke: string;
+  beamCenterline: string;
+  columnHatch: string;
+  wallCenterline: string;
+  shadowOpacity: string;
+  shadowColor: string;
+}
+
+export const CANVAS_THEMES: Record<CanvasTheme, CanvasThemeConfig> = {
+  dark: {
+    name: "Dark CAD",
+    canvasBg: "#090d16",
+    gridline: "#334155",
+    bubbleFill: "#090d16",
+    bubbleStrokeX: "#0284c7",
+    bubbleTextX: "#38bdf8",
+    bubbleStrokeY: "#f59e0b",
+    bubbleTextY: "#fbbf24",
+    dimLine: "#475569",
+    dimBoxBg: "#0f172a",
+    dimBoxStroke: "#334155",
+    dimText: "#94a3b8",
+    plateBg: "#090d16",
+    plateText: "#f8fafc",
+    plateSubText: "#94a3b8",
+    plateBorder: "#334155",
+    slabDefaultFill: "#10b98120",
+    slabDefaultStroke: "#059669",
+    beamCenterline: "#ffffff",
+    columnHatch: "#0f172a",
+    wallCenterline: "#0f172a",
+    shadowOpacity: "0.85",
+    shadowColor: "#000000",
+  },
+  light: {
+    name: "Light Paper",
+    canvasBg: "#ffffff",
+    gridline: "#cbd5e1",
+    bubbleFill: "#ffffff",
+    bubbleStrokeX: "#0284c7",
+    bubbleTextX: "#0284c7",
+    bubbleStrokeY: "#d97706",
+    bubbleTextY: "#b45309",
+    dimLine: "#94a3b8",
+    dimBoxBg: "#ffffff",
+    dimBoxStroke: "#cbd5e1",
+    dimText: "#334155",
+    plateBg: "#ffffff",
+    plateText: "#0f172a",
+    plateSubText: "#475569",
+    plateBorder: "#cbd5e1",
+    slabDefaultFill: "#ecfdf5",
+    slabDefaultStroke: "#059669",
+    beamCenterline: "#64748b",
+    columnHatch: "#ffffff",
+    wallCenterline: "#ffffff",
+    shadowOpacity: "0.2",
+    shadowColor: "#000000",
+  },
+  blueprint: {
+    name: "Blueprint",
+    canvasBg: "#0b1e3b",
+    gridline: "#1e3a8a",
+    bubbleFill: "#0b1e3b",
+    bubbleStrokeX: "#38bdf8",
+    bubbleTextX: "#7dd3fc",
+    bubbleStrokeY: "#38bdf8",
+    bubbleTextY: "#7dd3fc",
+    dimLine: "#1e40af",
+    dimBoxBg: "#0b1e3b",
+    dimBoxStroke: "#1e40af",
+    dimText: "#93c5fd",
+    plateBg: "#0f274c",
+    plateText: "#f0f9ff",
+    plateSubText: "#93c5fd",
+    plateBorder: "#1e40af",
+    slabDefaultFill: "#1e3a8a40",
+    slabDefaultStroke: "#38bdf8",
+    beamCenterline: "#38bdf8",
+    columnHatch: "#0b1e3b",
+    wallCenterline: "#0b1e3b",
+    shadowOpacity: "0.85",
+    shadowColor: "#000000",
+  },
+};
 
 export function getFormworkLayerStyle(fmwkArea: number): {
   fill: string;
@@ -274,6 +384,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
     useState<LabelDetailMode>("STANDARD");
   const [textSize, setTextSize] = useState<TextSizeOption>("LARGE");
   const [autoScaleLabels, setAutoScaleLabels] = useState<boolean>(true);
+  const [canvasTheme, setCanvasTheme] = useState<CanvasTheme>("dark");
+  const currentTheme = CANVAS_THEMES[canvasTheme];
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [showSnapshotModal, setShowSnapshotModal] = useState<boolean>(false);
 
@@ -436,8 +548,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
         return;
       }
 
-      // 1. Dark Blueprint Background
-      ctx.fillStyle = "#070b14";
+      // 1. Blueprint / Canvas Background
+      ctx.fillStyle = currentTheme.canvasBg;
       ctx.fillRect(0, 0, exportWidth, exportHeight);
 
       // 2. Draw SVG Plan
@@ -449,21 +561,24 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
       const projName =
         activeProject?.name || "Structural Quality Management System";
 
-      ctx.fillStyle = "rgba(15, 23, 42, 0.94)";
+      const isLight = canvasTheme === "light";
+      ctx.fillStyle = isLight
+        ? "rgba(255, 255, 255, 0.96)"
+        : "rgba(15, 23, 42, 0.94)";
       ctx.fillRect(40, 40, 560, 110);
-      ctx.strokeStyle = "#334155";
+      ctx.strokeStyle = isLight ? "#cbd5e1" : "#334155";
       ctx.lineWidth = 2;
       ctx.strokeRect(40, 40, 560, 110);
 
-      ctx.fillStyle = "#38bdf8";
+      ctx.fillStyle = isLight ? "#0284c7" : "#38bdf8";
       ctx.font = "bold 13px sans-serif";
       ctx.fillText(projName.toUpperCase(), 58, 68);
 
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = isLight ? "#0f172a" : "#ffffff";
       ctx.font = "bold 20px sans-serif";
       ctx.fillText("STRUCTURAL 2D SPATIAL GRID BLUEPRINT", 58, 96);
 
-      ctx.fillStyle = "#94a3b8";
+      ctx.fillStyle = isLight ? "#475569" : "#94a3b8";
       ctx.font = "normal 13px sans-serif";
       ctx.fillText(
         `Floor Level: ${currentLvlName} | Active Layer: ${activeLayer} | Elements: ${filteredElements.length}`,
@@ -471,7 +586,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
         122,
       );
 
-      ctx.fillStyle = "#64748b";
+      ctx.fillStyle = isLight ? "#64748b" : "#64748b";
       ctx.font = "normal 11px monospace";
       ctx.fillText(`Captured: ${new Date().toLocaleString()}`, 58, 140);
 
@@ -481,9 +596,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
       const legendX = exportWidth - legendW - 40;
       const legendY = exportHeight - legendH - 40;
 
-      ctx.fillStyle = "rgba(15, 23, 42, 0.94)";
+      ctx.fillStyle = isLight
+        ? "rgba(255, 255, 255, 0.96)"
+        : "rgba(15, 23, 42, 0.94)";
       ctx.fillRect(legendX, legendY, legendW, legendH);
-      ctx.strokeStyle = "#0284c7";
+      ctx.strokeStyle = isLight ? "#0284c7" : "#0284c7";
       ctx.lineWidth = 2;
       ctx.strokeRect(legendX, legendY, legendW, legendH);
 
@@ -909,6 +1026,46 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
 
         {/* Viewport Actions & Export */}
         <div className="flex items-center gap-1.5">
+          {/* Theme Switcher: Dark / Light / Blueprint */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-950 rounded-xl p-0.5 border border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setCanvasTheme("dark")}
+              className={`p-1.5 rounded-lg transition ${
+                canvasTheme === "dark"
+                  ? "bg-slate-800 text-white shadow"
+                  : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+              }`}
+              title="Dark CAD Theme"
+            >
+              <Moon className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setCanvasTheme("light")}
+              className={`p-1.5 rounded-lg transition ${
+                canvasTheme === "light"
+                  ? "bg-white text-slate-900 shadow border border-slate-200"
+                  : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+              }`}
+              title="Light Paper Theme"
+            >
+              <Sun className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setCanvasTheme("blueprint")}
+              className={`p-1.5 rounded-lg transition ${
+                canvasTheme === "blueprint"
+                  ? "bg-brand-600 text-white shadow"
+                  : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+              }`}
+              title="Blueprint Theme"
+            >
+              <Compass className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
           <button
             onClick={() => setZoom((z) => Math.min(3.0, z * 1.2))}
             className="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 transition"
@@ -972,17 +1129,18 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        className="w-full h-[600px] cursor-grab active:cursor-grabbing relative overflow-hidden bg-slate-950 select-none touch-none"
+        style={{ backgroundColor: currentTheme.canvasBg }}
+        className="w-full h-[600px] cursor-grab active:cursor-grabbing relative overflow-hidden select-none touch-none transition-colors duration-200"
       >
         <svg
           ref={svgRef}
           className="w-full h-full pointer-events-auto"
-          style={{ width: "100%", height: "100%" }}
+          style={{ width: "100%", height: "100%", backgroundColor: currentTheme.canvasBg }}
         >
           {/* Enhanced Drop Shadow for High-Legibility Labels */}
           <defs>
             <filter id="label-shadow" x="-30%" y="-30%" width="160%" height="160%">
-              <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor="#000000" floodOpacity="0.85" />
+              <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor={currentTheme.shadowColor} floodOpacity={currentTheme.shadowOpacity} />
             </filter>
           </defs>
 
@@ -999,7 +1157,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     y1={minY}
                     x2={gx.offset}
                     y2={maxY}
-                    stroke="#334155"
+                    stroke={currentTheme.gridline}
                     strokeWidth="1.5"
                     strokeDasharray="5 5"
                   />
@@ -1008,8 +1166,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     cx={gx.offset}
                     cy={minY + 20}
                     r={bubbleRadius}
-                    fill="transparent"
-                    stroke="#0284c7"
+                    fill={currentTheme.bubbleFill}
+                    stroke={currentTheme.bubbleStrokeX}
                     strokeWidth={Math.max(2, 2.5 * bubbleScale)}
                     filter="url(#label-shadow)"
                   />
@@ -1017,7 +1175,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     x={gx.offset}
                     y={minY + 20 + bubbleFontSize * 0.35}
                     textAnchor="middle"
-                    fill="#38bdf8"
+                    fill={currentTheme.bubbleTextX}
                     fontSize={bubbleFontSize}
                     fontWeight="bold"
                     fontFamily="monospace, sans-serif"
@@ -1029,8 +1187,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     cx={gx.offset}
                     cy={maxY - 20}
                     r={bubbleRadius}
-                    fill="transparent"
-                    stroke="#0284c7"
+                    fill={currentTheme.bubbleFill}
+                    stroke={currentTheme.bubbleStrokeX}
                     strokeWidth={Math.max(2, 2.5 * bubbleScale)}
                     filter="url(#label-shadow)"
                   />
@@ -1038,7 +1196,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     x={gx.offset}
                     y={maxY - 20 + bubbleFontSize * 0.35}
                     textAnchor="middle"
-                    fill="#38bdf8"
+                    fill={currentTheme.bubbleTextX}
                     fontSize={bubbleFontSize}
                     fontWeight="bold"
                     fontFamily="monospace, sans-serif"
@@ -1065,7 +1223,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     y1={minY + 48}
                     x2={nextGx.offset}
                     y2={minY + 48}
-                    stroke="#475569"
+                    stroke={currentTheme.dimLine}
                     strokeWidth="1"
                   />
                   <line
@@ -1073,7 +1231,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     y1={minY + 44}
                     x2={gx.offset}
                     y2={minY + 52}
-                    stroke="#475569"
+                    stroke={currentTheme.dimLine}
                     strokeWidth="1"
                   />
                   <line
@@ -1081,7 +1239,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     y1={minY + 44}
                     x2={nextGx.offset}
                     y2={minY + 52}
-                    stroke="#475569"
+                    stroke={currentTheme.dimLine}
                     strokeWidth="1"
                   />
                   <rect
@@ -1090,8 +1248,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     width={dimWidth}
                     height={dimHeight}
                     rx={3 * bubbleScale}
-                    fill="#0f172a"
-                    stroke="#334155"
+                    fill={currentTheme.dimBoxBg}
+                    stroke={currentTheme.dimBoxStroke}
                     strokeWidth={Math.max(0.8, 1 * bubbleScale)}
                     filter="url(#label-shadow)"
                   />
@@ -1099,7 +1257,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     x={midOffset}
                     y={minY + 48 + dimFontSize * 0.35}
                     textAnchor="middle"
-                    fill="#94a3b8"
+                    fill={currentTheme.dimText}
                     fontSize={dimFontSize}
                     fontWeight="bold"
                     fontFamily="monospace, sans-serif"
@@ -1121,7 +1279,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     y1={gy.offset}
                     x2={maxX}
                     y2={gy.offset}
-                    stroke="#334155"
+                    stroke={currentTheme.gridline}
                     strokeWidth="1.5"
                     strokeDasharray="5 5"
                   />
@@ -1130,8 +1288,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     cx={minX + 20}
                     cy={gy.offset}
                     r={bubbleRadius}
-                    fill="transparent"
-                    stroke="#f59e0b"
+                    fill={currentTheme.bubbleFill}
+                    stroke={currentTheme.bubbleStrokeY}
                     strokeWidth={Math.max(2, 2.5 * bubbleScale)}
                     filter="url(#label-shadow)"
                   />
@@ -1139,7 +1297,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     x={minX + 20}
                     y={gy.offset + bubbleFontSize * 0.35}
                     textAnchor="middle"
-                    fill="#fbbf24"
+                    fill={currentTheme.bubbleTextY}
                     fontSize={bubbleFontSize}
                     fontWeight="bold"
                     fontFamily="monospace, sans-serif"
@@ -1151,8 +1309,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     cx={maxX - 20}
                     cy={gy.offset}
                     r={bubbleRadius}
-                    fill="transparent"
-                    stroke="#f59e0b"
+                    fill={currentTheme.bubbleFill}
+                    stroke={currentTheme.bubbleStrokeY}
                     strokeWidth={Math.max(2, 2.5 * bubbleScale)}
                     filter="url(#label-shadow)"
                   />
@@ -1160,7 +1318,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     x={maxX - 20}
                     y={gy.offset + bubbleFontSize * 0.35}
                     textAnchor="middle"
-                    fill="#fbbf24"
+                    fill={currentTheme.bubbleTextY}
                     fontSize={bubbleFontSize}
                     fontWeight="bold"
                     fontFamily="monospace, sans-serif"
@@ -1187,7 +1345,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     y1={gy.offset}
                     x2={minX + 48}
                     y2={nextGy.offset}
-                    stroke="#475569"
+                    stroke={currentTheme.dimLine}
                     strokeWidth="1"
                   />
                   <line
@@ -1195,7 +1353,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     y1={gy.offset}
                     x2={minX + 52}
                     y2={gy.offset}
-                    stroke="#475569"
+                    stroke={currentTheme.dimLine}
                     strokeWidth="1"
                   />
                   <line
@@ -1203,7 +1361,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     y1={nextGy.offset}
                     x2={minX + 52}
                     y2={nextGy.offset}
-                    stroke="#475569"
+                    stroke={currentTheme.dimLine}
                     strokeWidth="1"
                   />
                   <rect
@@ -1212,8 +1370,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     width={dimWidth}
                     height={dimHeight}
                     rx={3 * bubbleScale}
-                    fill="#0f172a"
-                    stroke="#334155"
+                    fill={currentTheme.dimBoxBg}
+                    stroke={currentTheme.dimBoxStroke}
                     strokeWidth={Math.max(0.8, 1 * bubbleScale)}
                     filter="url(#label-shadow)"
                   />
@@ -1221,7 +1379,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     x={minX + 48}
                     y={midOffset + dimFontSize * 0.35}
                     textAnchor="middle"
-                    fill="#94a3b8"
+                    fill={currentTheme.dimText}
                     fontSize={dimFontSize}
                     fontWeight="bold"
                     fontFamily="monospace, sans-serif"
@@ -1246,8 +1404,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                 const rw = Math.max(Math.abs(coords.x2 - coords.x1), 60);
                 const rh = Math.max(Math.abs(coords.y2 - coords.y1), 60);
 
-                let fill = "#10b98120";
-                let stroke = "#059669";
+                let fill = currentTheme.slabDefaultFill;
+                let stroke = currentTheme.slabDefaultStroke;
                 if (activeLayer === "STATUS") {
                   const s =
                     STATUS_COLOR_MAP[el.status || "PENDING"] ||
@@ -1320,8 +1478,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       width={cardW}
                       height={cardH}
                       rx={4 * labelScale}
-                      fill="#090d16"
-                      fillOpacity="0.94"
+                      fill={currentTheme.plateBg}
+                      fillOpacity="0.95"
                       stroke={stroke}
                       strokeWidth={Math.max(1.2, 1.4 * labelScale)}
                       filter="url(#label-shadow)"
@@ -1336,7 +1494,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           : slabCy + slabNameFont * 0.35
                       }
                       textAnchor="middle"
-                      fill="#f8fafc"
+                      fill={currentTheme.plateText}
                       fontSize={slabNameFont}
                       fontWeight="bold"
                       fontFamily="monospace, sans-serif"
@@ -1350,7 +1508,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         x={slabCx}
                         y={slabCy + slabSubFont * 1.1}
                         textAnchor="middle"
-                        fill="#94a3b8"
+                        fill={currentTheme.plateSubText}
                         fontSize={slabSubFont}
                         fontFamily="monospace, sans-serif"
                         className="pointer-events-none"
@@ -1449,9 +1607,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       width={fpW}
                       height={fpH}
                       rx={3 * labelScale}
-                      fill="#090d16"
-                      fillOpacity="0.94"
-                      stroke="#64748b"
+                      fill={currentTheme.plateBg}
+                      fillOpacity="0.95"
+                      stroke={footStroke || currentTheme.plateBorder}
                       strokeWidth={Math.max(0.8, 1 * labelScale)}
                       filter="url(#label-shadow)"
                       data-layer="labels"
@@ -1460,7 +1618,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       x={cx}
                       y={cy + fh / 2 + 2 * labelScale + fpH / 2 + fpFont * 0.35}
                       textAnchor="middle"
-                      fill="#cbd5e1"
+                      fill={currentTheme.plateText}
                       fontSize={fpFont}
                       fontWeight="bold"
                       fontFamily="monospace, sans-serif"
@@ -1554,7 +1712,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       y1={coords.y1}
                       x2={coords.x2}
                       y2={coords.y2}
-                      stroke="#0f172a"
+                      stroke={currentTheme.wallCenterline}
                       strokeWidth="2"
                     />
                     {/* Wall Orientation-Aligned Callout Tag */}
@@ -1570,8 +1728,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         width={wpW}
                         height={wpH}
                         rx={3.5 * labelScale}
-                        fill="#090d16"
-                        fillOpacity="0.94"
+                        fill={currentTheme.plateBg}
+                        fillOpacity="0.95"
                         stroke={stroke}
                         strokeWidth={Math.max(1, 1.2 * labelScale)}
                       />
@@ -1579,7 +1737,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         x="0"
                         y={wpFont * 0.35}
                         textAnchor="middle"
-                        fill="#f8fafc"
+                        fill={currentTheme.plateText}
                         fontSize={wpFont}
                         fontWeight="bold"
                         fontFamily="monospace, sans-serif"
@@ -1673,7 +1831,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       y1={coords.y1}
                       x2={coords.x2}
                       y2={coords.y2}
-                      stroke="#ffffff"
+                      stroke={currentTheme.beamCenterline}
                       strokeWidth="1.5"
                       strokeDasharray="4 2"
                       opacity="0.6"
@@ -1691,8 +1849,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         width={bpW}
                         height={bpH}
                         rx={3.5 * labelScale}
-                        fill="#090d16"
-                        fillOpacity="0.94"
+                        fill={currentTheme.plateBg}
+                        fillOpacity="0.95"
                         stroke={stroke}
                         strokeWidth={Math.max(1, 1.2 * labelScale)}
                       />
@@ -1700,7 +1858,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         x="0"
                         y={bpFont * 0.35}
                         textAnchor="middle"
-                        fill="#ffffff"
+                        fill={currentTheme.plateText}
                         fontSize={bpFont}
                         fontWeight="bold"
                         fontFamily="monospace, sans-serif"
@@ -1777,7 +1935,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           y1={cy}
                           x2={cx + size / 2}
                           y2={cy}
-                          stroke="#0f172a"
+                          stroke={currentTheme.columnHatch}
                           strokeWidth="1"
                         />
                         <line
@@ -1785,7 +1943,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           y1={cy - size / 2}
                           x2={cx}
                           y2={cy + size / 2}
-                          stroke="#0f172a"
+                          stroke={currentTheme.columnHatch}
                           strokeWidth="1"
                         />
                       </g>
@@ -1807,7 +1965,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           y1={cy - size / 2}
                           x2={cx + size / 2}
                           y2={cy + size / 2}
-                          stroke="#0f172a"
+                          stroke={currentTheme.columnHatch}
                           strokeWidth="1"
                         />
                         <line
@@ -1815,7 +1973,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           y1={cy + size / 2}
                           x2={cx + size / 2}
                           y2={cy - size / 2}
-                          stroke="#0f172a"
+                          stroke={currentTheme.columnHatch}
                           strokeWidth="1"
                         />
                       </g>
@@ -1849,9 +2007,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             width={cpW}
                             height={cpH}
                             rx={4 * labelScale}
-                            fill="#090d16"
+                            fill={currentTheme.plateBg}
                             fillOpacity="0.96"
-                            stroke={stroke || "#38bdf8"}
+                            stroke={stroke || currentTheme.plateBorder}
                             strokeWidth={Math.max(1, 1.2 * labelScale)}
                           />
                           <text
@@ -1864,7 +2022,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                               cpFont * 0.35
                             }
                             textAnchor="middle"
-                            fill="#f8fafc"
+                            fill={currentTheme.plateText}
                             fontSize={cpFont}
                             fontWeight="bold"
                             fontFamily="monospace, sans-serif"

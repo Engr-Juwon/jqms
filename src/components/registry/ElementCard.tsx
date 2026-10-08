@@ -38,6 +38,7 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import {
   getOrCalculateVolume,
   getOrCalculateFormworkArea,
+  getOrCalculateElementArea,
 } from "@/lib/elementCalculations";
 
 /* ─── Element Configs ─── */
@@ -237,9 +238,7 @@ export const ElementCard: React.FC<ElementCardProps> = ({
   const formworkArea = getOrCalculateFormworkArea(element);
 
   /* Calculated element area */
-  const elementArea =
-    element.area ??
-    (element.length && element.width ? element.length * element.width : 0);
+  const elementArea = getOrCalculateElementArea(element);
 
   return (
     <div
@@ -500,8 +499,38 @@ export const ElementCard: React.FC<ElementCardProps> = ({
           </span>
         </div>
 
-        {/* Beam with supported slab thickness */}
-        {element.elementType === "BEAM" && element.supportedSlabThickness ? (
+        {/* Curved Slab / Circular Arc Profile */}
+        {element.elementType === "SLAB" && (element.slabShape === "circular_segment" || element.slabShape === "curved_cantilever" || element.radius) ? (
+          <div>
+            <p className="text-xs sm:text-sm font-black font-mono leading-tight text-emerald-800 dark:text-emerald-300">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-600 dark:text-emerald-400 mr-1.5">
+                {element.slabShape === "circular_segment" ? "Arc Segment" : element.slabShape === "curved_cantilever" ? "Curved Cantilever" : "Curved Slab"}
+              </span>
+              R={element.radius?.toFixed(2) || "2.96"}m
+              {element.arcDepth && (
+                <>
+                  <span className="text-[10px] px-1.5 text-slate-400 dark:text-slate-500">·</span>
+                  <span>Rise h={element.arcDepth.toFixed(2)}m</span>
+                </>
+              )}
+              <span className="text-[10px] px-1.5 text-slate-400 dark:text-slate-500">×</span>
+              <span className="text-slate-900 dark:text-white">
+                {(element.thickness || 0.175).toFixed(3)}m (T)
+              </span>
+            </p>
+          </div>
+        ) : element.elementType === "BEAM" && (element.beamShape === "curved" || (element.radius && !element.columnShape)) ? (
+          <div>
+            <p className="text-xs sm:text-sm font-black font-mono leading-tight text-amber-800 dark:text-amber-300">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-amber-600 dark:text-amber-400 mr-1.5">
+                Curved Beam
+              </span>
+              R={element.radius?.toFixed(2)}m
+              <span className="text-[10px] px-1.5 text-slate-400 dark:text-slate-500">×</span>
+              {element.width?.toFixed(2)}m × {element.depth?.toFixed(2)}m
+            </p>
+          </div>
+        ) : element.elementType === "BEAM" && element.supportedSlabThickness ? (
           <div>
             <p className="text-xs sm:text-sm font-black font-mono leading-tight text-slate-900 dark:text-white tracking-tight">
               {element.width?.toFixed(2) || "0.30"}m

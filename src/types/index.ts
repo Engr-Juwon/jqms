@@ -427,7 +427,22 @@ export interface StructuralElement {
   depth?: number; // in meters
   thickness?: number; // in meters (slab/wall thickness)
   diameter?: number; // in meters (circular column diameter)
-  columnShape?: "rectangular" | "circular";
+  columnShape?: "rectangular" | "circular" | "inclined";
+  slabShape?: "rectangular" | "circular" | "semi_circular" | "circular_segment" | "circular_sector" | "curved_cantilever" | "trapezoidal_cantilever" | "cad_area";
+  beamShape?: "straight" | "curved" | "tapered";
+  wallShape?: "straight" | "curved";
+  radius?: number; // in meters (radius R)
+  arcRadius?: number; // alias for radius R in meters
+  arcDepth?: number; // in meters (rise / sagitta / h)
+  arcAngle?: number; // in degrees (subtended angle θ)
+  chordLength?: number; // in meters (chord width C)
+  arcLength?: number; // in meters (curved arc length s)
+  curvedInputMode?: "radius_rise" | "chord_rise" | "radius_angle" | "radius_chord";
+  isArcDeduction?: boolean; // for curved cantilever / recess
+  cantileverDepth?: number; // in meters
+  taperEndDepth?: number; // in meters (for tapered / trapezoidal cantilever)
+  customArea?: number; // in m2 (for irregular polyline / spline area)
+  customPerimeter?: number; // in meters (for irregular polyline formwork)
   verticality?: "straight" | "inclined";
   isInclined?: boolean;
   verticalHeight?: number;

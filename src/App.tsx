@@ -83,6 +83,18 @@ const GridPlanPage = lazyPage(
   () => import("./pages/GridPlanPage"),
   "GridPlanPage",
 );
+const BIM3DViewerPage = lazyPage(
+  () => import("./pages/BIM3DViewerPage"),
+  "BIM3DViewerPage",
+);
+const BIM5DCostPage = lazyPage(
+  () => import("./pages/BIM5DCostPage"),
+  "BIM5DCostPage",
+);
+const BIM6DCarbonPage = lazyPage(
+  () => import("./pages/BIM6DCarbonPage"),
+  "BIM6DCarbonPage",
+);
 const FloorLevelsPage = lazyPage(
   () => import("./pages/FloorLevelsPage"),
   "FloorLevelsPage",
@@ -322,12 +334,18 @@ export const App: React.FC = () => {
               />
               <Route path="dashboard" element={<Dashboard />} />
 
-              {/* Elements & BIM */}
+              {/* Elements & BIM Dimensions (2D to 7D) */}
               <Route path="elements" element={<ElementRegistry />} />
               <Route path="elements/:id" element={<ElementDetail />} />
               <Route path="registry/element/:id" element={<ElementDetail />} />
               <Route path="elements/:id/passport" element={<ElementDetail />} />
               <Route path="grid-plan" element={<GridPlanPage />} />
+              <Route path="bim-3d" element={<BIM3DViewerPage />} />
+              <Route path="3d-twin" element={<BIM3DViewerPage />} />
+              <Route path="5d-cost" element={<BIM5DCostPage />} />
+              <Route path="cost-takeoff" element={<BIM5DCostPage />} />
+              <Route path="6d-carbon" element={<BIM6DCarbonPage />} />
+              <Route path="sustainability" element={<BIM6DCarbonPage />} />
               <Route path="levels" element={<FloorLevelsPage />} />
               <Route path="packages" element={<WorkPackagesPage />} />
               <Route path="gridlines" element={<GridlinesPage />} />

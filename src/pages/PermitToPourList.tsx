@@ -18,7 +18,11 @@ import {
   Building2,
   Clock,
   ArrowRight,
+  FlaskConical,
+  Award,
+  Scissors,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 export const PermitToPourList: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -102,6 +106,32 @@ export const PermitToPourList: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* Structural Quality & Testing Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Concrete Cube Testing",
+            path: "/project/concrete",
+            icon: FlaskConical,
+          },
+          {
+            label: "Steel Rebar Testing & Mill Certs",
+            path: "/project/steel",
+            icon: Award,
+          },
+          {
+            label: "Bar Bending Schedule (BBS)",
+            path: "/project/bar-cutting",
+            icon: Scissors,
+          },
+          {
+            label: "Permit to Pour (PTP)",
+            path: "/project/permit-to-pour",
+            icon: HardHat,
+          },
+        ]}
+      />
 
       {/* Search and status filters */}
       <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">

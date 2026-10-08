@@ -27,8 +27,13 @@ import {
   RefreshCw,
   FolderOpen,
   X,
+  FileCheck2,
+  FileQuestion,
+  FileText,
+  BookOpen,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 export const ITPRegistryPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -306,6 +311,37 @@ export const ITPRegistryPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* QA/QC Engineering Submittals Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Inspection & Test Plans (ITP)",
+            path: "/project/itp",
+            icon: ClipboardList,
+          },
+          {
+            label: "Material Approvals (MAR)",
+            path: "/project/mar",
+            icon: FileCheck2,
+          },
+          {
+            label: "Requests for Information (RFI)",
+            path: "/project/rfi",
+            icon: FileQuestion,
+          },
+          {
+            label: "Method Statements (RAMS)",
+            path: "/project/method-statements",
+            icon: FileText,
+          },
+          {
+            label: "QA/QC SOP Manual",
+            path: "/project/qaqc-handbook",
+            icon: BookOpen,
+          },
+        ]}
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

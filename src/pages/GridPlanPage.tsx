@@ -6,6 +6,7 @@ import { dbService } from '@/lib/db';
 import { StructuralElement, ProjectLevel, Gridline, NonConformanceReport } from '@/types';
 import { GridPlanCanvas } from '@/components/registry/GridPlanCanvas';
 import { ElementModal } from '@/components/registry/ElementModal';
+import { BIMDimensionNav } from '@/components/bim/BIMDimensionNav';
 import { Grid, Layers, Box, Plus, ArrowLeft } from 'lucide-react';
 import { hasMinRole, isQAQCUser } from '@/lib/permissions';
 import { toast } from 'react-hot-toast';
@@ -86,7 +87,7 @@ export const GridPlanPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
         <div>
-          <div className="flex items-center gap-2 text-brand-600 dark:text-brand-400 font-mono text-xs uppercase tracking-wider mb-1 font-bold">
+          <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-mono text-xs uppercase tracking-wider mb-1 font-bold">
             <Grid className="w-4 h-4" />
             <span>2D Spatial Blueprint Engine</span>
           </div>
@@ -117,6 +118,16 @@ export const GridPlanPage: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {/* BIM Dimension Navigation Bar */}
+      <BIMDimensionNav
+        activeDimension="2D"
+        counts={{
+          elements: elements.length,
+          levels: levels.length,
+          gridlines: gridlines.length,
+        }}
+      />
 
       {/* Main Grid Plan Canvas */}
       {loading ? (

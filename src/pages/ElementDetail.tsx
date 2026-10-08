@@ -22,6 +22,16 @@ import {
   getOrCalculateElementArea,
   calculateCurvedGeometry,
 } from "@/lib/elementCalculations";
+import {
+  calculateElement5DCost,
+  format5DCurrency,
+  DEFAULT_PROJECT_COST_RATES,
+} from "@/lib/costCalculations";
+import {
+  calculateElement6DCarbon,
+  formatCarbonKg,
+  DEFAULT_CARBON_FACTORS,
+} from "@/lib/carbonCalculations";
 import { isQAQCUser, hasMinRole, canCreateRecords } from "@/lib/permissions";
 import { toast } from "react-hot-toast";
 import {
@@ -51,6 +61,12 @@ import {
   Pencil,
   QrCode,
   ShieldAlert,
+  Coins,
+  DollarSign,
+  TrendingUp,
+  Calculator,
+  Leaf,
+  Trees,
 } from "lucide-react";
 import { ElementQRTagsModal } from "@/components/registry/ElementQRTagsModal";
 
@@ -267,6 +283,16 @@ export const ElementDetail: React.FC = () => {
     const found = packages.find((p) => p.id === element.workPackageId);
     return found?.name || element.workPackageName || "Superstructure Works";
   }, [element, packages]);
+
+  const costBreakdown = useMemo(() => {
+    if (!element) return null;
+    return calculateElement5DCost(element, DEFAULT_PROJECT_COST_RATES);
+  }, [element]);
+
+  const carbonBreakdown = useMemo(() => {
+    if (!element) return null;
+    return calculateElement6DCarbon(element, DEFAULT_CARBON_FACTORS);
+  }, [element]);
 
   // QA Defect Hold & Cube Status
   const openNCRs = useMemo(() => {
@@ -741,6 +767,150 @@ export const ElementDetail: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* ─── 5D BIM Costing & BOQ Takeoff Card ─── */}
+      {costBreakdown && (
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm dark:shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+                <Coins className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>5D BIM Costing &amp; BOQ Takeoff</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    DIRECT TAKEOFF
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Parametric quantity survey based on geometric volume and formwork contact area
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <div className="text-[10px] uppercase font-mono text-slate-400 font-semibold">Total Element Cost</div>
+                <div className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  {format5DCurrency(costBreakdown.totalCost, "$")}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Trade Badges */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">Concrete</div>
+              <div className="text-sm font-black font-mono text-cyan-600 dark:text-cyan-400 mt-0.5">
+                {format5DCurrency(costBreakdown.concreteCost, "$")}
+              </div>
+              <div className="text-[10px] text-slate-500">{costBreakdown.concreteVolume.toFixed(2)} m³ @ ${costBreakdown.concreteRate}</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">Formwork</div>
+              <div className="text-sm font-black font-mono text-amber-600 dark:text-amber-400 mt-0.5">
+                {format5DCurrency(costBreakdown.formworkCost, "$")}
+              </div>
+              <div className="text-[10px] text-slate-500">{costBreakdown.formworkArea.toFixed(2)} m² @ ${costBreakdown.formworkRate}</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">Rebar Steel</div>
+              <div className="text-sm font-black font-mono text-purple-600 dark:text-purple-400 mt-0.5">
+                {format5DCurrency(costBreakdown.rebarCost, "$")}
+              </div>
+              <div className="text-[10px] text-slate-500">{costBreakdown.rebarTonnage.toFixed(3)} T @ ${costBreakdown.rebarRatePerTonne}</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">Labor</div>
+              <div className="text-sm font-black font-mono text-blue-600 dark:text-blue-400 mt-0.5">
+                {format5DCurrency(costBreakdown.laborCost, "$")}
+              </div>
+              <div className="text-[10px] text-slate-500">{costBreakdown.concreteVolume.toFixed(2)} m³ @ ${costBreakdown.laborRatePerM3}</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">Equipment</div>
+              <div className="text-sm font-black font-mono text-rose-600 dark:text-rose-400 mt-0.5">
+                {format5DCurrency(costBreakdown.equipmentCost, "$")}
+              </div>
+              <div className="text-[10px] text-slate-500">{costBreakdown.concreteVolume.toFixed(2)} m³ @ ${costBreakdown.equipmentRatePerM3}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 6D BIM Sustainability & Embodied Carbon Card ─── */}
+      {carbonBreakdown && (
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm dark:shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+                <Leaf className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>6D BIM Sustainability &amp; Embodied Carbon</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-black bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    ECO RATING: {carbonBreakdown.ecoRating}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Embodied carbon lifecycle assessment based on ICE database clinker &amp; steel metrics
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <div className="text-[10px] uppercase font-mono text-slate-400 font-semibold">Total Carbon Footprint</div>
+                <div className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  {formatCarbonKg(carbonBreakdown.totalCarbonKg)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Carbon Badges */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">Concrete CO₂</div>
+              <div className="text-sm font-black font-mono text-cyan-600 dark:text-cyan-400 mt-0.5">
+                {carbonBreakdown.concreteCarbonKg.toFixed(0)} kg
+              </div>
+              <div className="text-[10px] text-slate-500">{carbonBreakdown.concreteFactor.toFixed(0)} kg/m³ mix</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">Rebar Steel CO₂</div>
+              <div className="text-sm font-black font-mono text-purple-600 dark:text-purple-400 mt-0.5">
+                {carbonBreakdown.rebarCarbonKg.toFixed(0)} kg
+              </div>
+              <div className="text-[10px] text-slate-500">{(carbonBreakdown.rebarTonnage * 1000).toFixed(0)} kg steel</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">SCM Clinker Offset</div>
+              <div className="text-sm font-black font-mono text-teal-600 dark:text-teal-400 mt-0.5">
+                -{carbonBreakdown.scmAvoidedCarbonKg.toFixed(0)} kg
+              </div>
+              <div className="text-[10px] text-slate-500">Saved emissions</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="text-[10px] font-mono text-slate-400 uppercase font-bold">Carbon Intensity</div>
+              <div className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
+                {carbonBreakdown.carbonIntensityKgPerM3.toFixed(0)} kg/m³
+              </div>
+              <div className="text-[10px] text-slate-500">Density rating</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Linked QA/QC History Cards (Inspections, Cube Tests, NCRs, Observations) ─── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

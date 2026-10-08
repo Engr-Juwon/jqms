@@ -17,13 +17,13 @@ import {
   FileDown,
   Clock,
   CheckCircle2,
-  Calendar,
-  AlertTriangle,
-  ChevronRight,
   Trash2,
   FileWarning,
   ShieldAlert,
+  MessageSquareWarning,
+  ChevronRight,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 export const NCRModule: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -155,6 +155,27 @@ export const NCRModule: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* Module Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Non-Conformance Reports (NCR)",
+            path: "/project/ncrs",
+            icon: AlertOctagon,
+          },
+          {
+            label: "Site Instructions (SI)",
+            path: "/project/site-instructions",
+            icon: FileWarning,
+          },
+          {
+            label: "Site Observations & Comments",
+            path: "/project/site-comments",
+            icon: MessageSquareWarning,
+          },
+        ]}
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

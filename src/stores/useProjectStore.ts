@@ -10,6 +10,8 @@ interface ProjectState {
   isLoading: boolean;
   setActiveProject: (project: Project | null) => void;
   setCurrentLevel: (levelId: string, levelName?: string) => Promise<void>;
+  updateCostRates: (costRates: any) => Promise<void>;
+  updateCarbonFactors: (carbonFactors: any) => Promise<void>;
   loadProjects: (
     companyId?: string,
     user?: UserProfile | null,
@@ -45,6 +47,55 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         activeProject.id,
         levelId,
         levelName,
+        activeProject.companyId,
+      );
+    },
+
+    updateCostRates: async (costRates: any) => {
+      const { activeProject, projects } = get();
+      if (!activeProject) return;
+
+      const updatedProject: Project = {
+        ...activeProject,
+        costRates,
+        currency: costRates?.currencySymbol || activeProject.currency || "$",
+        updatedAt: new Date().toISOString(),
+      };
+
+      set({
+        activeProject: updatedProject,
+        projects: projects.map((p) =>
+          p.id === activeProject.id ? updatedProject : p,
+        ),
+      });
+
+      await dbService.updateProjectCostRates(
+        activeProject.id,
+        costRates,
+        activeProject.companyId,
+      );
+    },
+
+    updateCarbonFactors: async (carbonFactors: any) => {
+      const { activeProject, projects } = get();
+      if (!activeProject) return;
+
+      const updatedProject: Project = {
+        ...activeProject,
+        carbonFactors,
+        updatedAt: new Date().toISOString(),
+      };
+
+      set({
+        activeProject: updatedProject,
+        projects: projects.map((p) =>
+          p.id === activeProject.id ? updatedProject : p,
+        ),
+      });
+
+      await dbService.updateProjectCarbonFactors(
+        activeProject.id,
+        carbonFactors,
         activeProject.companyId,
       );
     },

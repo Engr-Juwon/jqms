@@ -26,8 +26,6 @@ import {
   getOrCalculateFormworkArea,
   getOrCalculateElementArea,
 } from "@/lib/elementCalculations";
-import { BIMViewer3D } from "@/components/bim/BIMViewer3D";
-import { GridPlanCanvas } from "@/components/registry/GridPlanCanvas";
 import { ElementCard } from "@/components/registry/ElementCard";
 import { ElementFilters } from "@/components/registry/ElementFilters";
 import { BulkToolbar } from "@/components/registry/BulkToolbar";
@@ -35,6 +33,7 @@ import { ElementModal } from "@/components/registry/ElementModal";
 import { BulkElementGenerator } from "@/components/registry/BulkElementGenerator";
 import { ElementViewer } from "@/components/registry/ElementViewer";
 import { ElementQRTagsModal } from "@/components/registry/ElementQRTagsModal";
+import { BIMDimensionNav } from "@/components/bim/BIMDimensionNav";
 import {
   exportElementSchedulePDF,
   exportElementScheduleCSV,
@@ -45,7 +44,6 @@ import {
   Table as TableIcon,
   Plus,
   Copy,
-  Grid,
   Building2,
   Briefcase,
   Compass,
@@ -94,10 +92,8 @@ export const ElementRegistry: React.FC = () => {
   const [siteComments, setSiteComments] = useState<SiteCommentReport[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // View Mode: 3D BIM, 2D Grid Plan, Cards, Table
-  const [viewMode, setViewMode] = useState<"3D" | "GRID" | "CARDS" | "TABLE">(
-    "TABLE",
-  );
+  // View Mode: Cards or Table
+  const [viewMode, setViewMode] = useState<"CARDS" | "TABLE">("TABLE");
 
   // Modals
   const [showElementModal, setShowElementModal] = useState(false);
@@ -878,98 +874,16 @@ export const ElementRegistry: React.FC = () => {
         </div>
       </div>
 
-      {/* ═══ QUICK NAV HORIZON BAR ═══ */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-2 bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar whitespace-nowrap max-w-full">
-          <Link
-            to="/project/grid-plan"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50/80 dark:bg-slate-950/60 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold transition shrink-0"
-          >
-            <Grid className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
-            <span>2D Grid Plan</span>
-          </Link>
-
-          <Link
-            to="/project/mto"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50/80 dark:bg-slate-950/60 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
-          >
-            <Layers className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>Size Schedule &amp; MTO</span>
-          </Link>
-
-          <Link
-            to="/project/levels"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50/80 dark:bg-slate-950/60 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
-          >
-            <Building2 className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-            <span>Floor Levels ({levels.length})</span>
-          </Link>
-
-          <Link
-            to="/project/packages"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50/80 dark:bg-slate-950/60 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
-          >
-            <Briefcase className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-            <span>Packages ({packages.length})</span>
-          </Link>
-
-          <Link
-            to="/project/gridlines"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50/80 dark:bg-slate-950/60 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
-          >
-            <Compass className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            <span>Gridlines ({gridlines.length})</span>
-          </Link>
-        </div>
-
-        {/* View Mode Switcher */}
-        <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
-          <button
-            onClick={() => setViewMode("GRID")}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition ${
-              viewMode === "GRID"
-                ? "bg-brand-600 text-white shadow"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            <Grid className="w-3.5 h-3.5" />
-            <span>2D Grid</span>
-          </button>
-          <button
-            onClick={() => setViewMode("CARDS")}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition ${
-              viewMode === "CARDS"
-                ? "bg-brand-600 text-white shadow"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            <LayoutGrid className="w-3.5 h-3.5" />
-            <span>Cards</span>
-          </button>
-          <button
-            onClick={() => setViewMode("TABLE")}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition ${
-              viewMode === "TABLE"
-                ? "bg-brand-600 text-white shadow"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            <TableIcon className="w-3.5 h-3.5" />
-            <span>Table</span>
-          </button>
-                    <button
-            onClick={() => setViewMode("3D")}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition ${
-              viewMode === "3D"
-                ? "bg-brand-600 text-white shadow"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            <Box className="w-3.5 h-3.5" />
-            <span>3D BIM</span>
-          </button>
-        </div>
-      </div>
+      {/* ═══ BIM DIMENSION NAVIGATION BAR ═══ */}
+      <BIMDimensionNav
+        activeDimension="7D"
+        counts={{
+          elements: elements.length,
+          levels: levels.length,
+          packages: packages.length,
+          gridlines: gridlines.length,
+        }}
+      />
 
       {/* ═══ LEVEL PROGRESS HORIZON & TAKEOFF ANALYTICS ═══ */}
       <div className="bg-white dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 text-slate-900 dark:text-white rounded-3xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4 transition-colors">
@@ -1127,83 +1041,28 @@ export const ElementRegistry: React.FC = () => {
         </div>
       </div>
 
-      {/* ═══ VIEW MODE CONTENT ═══ */}
-
-      {/* 1. 3D WebGL BIM Twin View */}
-      {viewMode === "3D" && (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm dark:shadow-2xl p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Box className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-                <span className="text-xs font-bold text-slate-900 dark:text-white">
-                  Interactive 3D WebGL Structural Twin
-                </span>
-              </div>
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                {filteredElements.length} elements rendered
-              </span>
-            </div>
-
-            <div className="h-[560px] rounded-2xl overflow-hidden bg-slate-950 border border-slate-200 dark:border-slate-800">
-              <BIMViewer3D
-                elements={filteredElements}
-                levels={levels}
-                gridlines={gridlines}
-                selectedElementIds={Array.from(selectedIds)}
-                onSelectElements={(els) => {
-                  setSelectedIds(new Set(els.map((e) => e.id)));
-                }}
-                onSelectElement={(el) => {
-                  if (el) setViewerEl(el);
-                }}
-                activeLevelId={filterLevel !== "ALL" ? filterLevel : undefined}
-                onLevelChange={(lvlId) => setFilterLevel(lvlId)}
-                projectId={currentProjId}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2. 2D Spatial Grid Plan View */}
-      {viewMode === "GRID" && (
-        <div className="space-y-4">
-          <GridPlanCanvas
-            elements={elements}
-            levels={levels}
-            gridlines={gridlines}
-            ncrs={ncrs}
-            projectId={currentProjId}
-            onSelectElement={(el) => {
-              setEditingElement(el);
-              setShowElementModal(true);
-            }}
-          />
-        </div>
-      )}
-
-      {/* 3. Cards & Table Views: Filters + Bulk Actions + Content */}
-      {(viewMode === "CARDS" || viewMode === "TABLE") && (
-        <div className="space-y-4">
-          {/* Filters */}
-          <ElementFilters
-            searchQuery={search}
-            onSearchChange={setSearch}
-            selectedType={filterType}
-            onTypeChange={setFilterType}
-            selectedLevel={filterLevel}
-            onLevelChange={setFilterLevel}
-            selectedStatus={filterStatus}
-            onStatusChange={setFilterStatus}
-            selectedPackage={filterPackage}
-            onPackageChange={setFilterPackage}
-            levels={levels.map((l) => ({ id: l.id, name: l.name }))}
-            packages={packages.map((p) => ({ id: p.id, name: p.name }))}
-            elementTypes={elementTypes}
-            selectAllChecked={isAllPageSelected}
-            onToggleSelectAll={toggleSelectAllPage}
-          />
+      {/* ═══ REGISTRY FILTERS & ACTIONS ═══ */}
+      <div className="space-y-4">
+        {/* Filters */}
+        <ElementFilters
+          searchQuery={search}
+          onSearchChange={setSearch}
+          selectedType={filterType}
+          onTypeChange={setFilterType}
+          selectedLevel={filterLevel}
+          onLevelChange={setFilterLevel}
+          selectedStatus={filterStatus}
+          onStatusChange={setFilterStatus}
+          selectedPackage={filterPackage}
+          onPackageChange={setFilterPackage}
+          levels={levels.map((l) => ({ id: l.id, name: l.name }))}
+          packages={packages.map((p) => ({ id: p.id, name: p.name }))}
+          elementTypes={elementTypes}
+          selectAllChecked={isAllPageSelected}
+          onToggleSelectAll={toggleSelectAllPage}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+        />
 
           {/* Floating Bulk Toolbar */}
           {selectedIds.size > 0 && (
@@ -1499,8 +1358,7 @@ export const ElementRegistry: React.FC = () => {
               {renderPagination()}
             </div>
           )}
-        </div>
-      )}
+      </div>
 
       {/* ═══ MODALS ═══ */}
       {showElementModal && (

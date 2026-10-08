@@ -16,11 +16,12 @@ import {
   AlertTriangle,
   XCircle,
   Clock,
-  Building2,
-  Layers,
   Filter,
   Edit3,
+  Truck,
+  ShieldCheck,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 export const MIRRegistry: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -182,6 +183,22 @@ export const MIRRegistry: React.FC = () => {
           <span>Issue New MIR</span>
         </button>
       </div>
+
+      {/* Module Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Material Deliveries Log",
+            path: "/project/deliveries",
+            icon: Truck,
+          },
+          {
+            label: "Material Inspection Reports (MIR)",
+            path: "/project/mir",
+            icon: ShieldCheck,
+          },
+        ]}
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">

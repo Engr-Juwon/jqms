@@ -29,9 +29,12 @@ import {
   ArrowRight,
   Sparkles,
   Link as LinkIcon,
+  ClipboardList,
+  FileQuestion,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { SignaturePad } from "@/components/common/SignaturePad";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 import {
   MethodStatement,
   MethodStatementReviewCode,
@@ -431,6 +434,37 @@ export const MethodStatementsPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* QA/QC Engineering Submittals Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Inspection & Test Plans (ITP)",
+            path: "/project/itp",
+            icon: ClipboardList,
+          },
+          {
+            label: "Material Approvals (MAR)",
+            path: "/project/mar",
+            icon: FileCheck2,
+          },
+          {
+            label: "Requests for Information (RFI)",
+            path: "/project/rfi",
+            icon: FileQuestion,
+          },
+          {
+            label: "Method Statements (RAMS)",
+            path: "/project/method-statements",
+            icon: FileText,
+          },
+          {
+            label: "QA/QC SOP Manual",
+            path: "/project/qaqc-handbook",
+            icon: BookOpen,
+          },
+        ]}
+      />
 
       {/* KPI Ribbon */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">

@@ -14,7 +14,10 @@ import {
   FileDown,
   X,
   Scissors,
+  FlaskConical,
+  HardHat,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 export const SteelPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -117,24 +120,6 @@ export const SteelPage: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {/* Module Segmented Tab Switcher */}
-      <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-200/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-fit">
-        <button className="px-4 py-2 rounded-xl text-xs font-black bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm flex items-center gap-2">
-          <Award className="w-4 h-4 text-red-500" />
-          <span>Tensile & Bend Lab Tests ({tests.length})</span>
-        </button>
-        <Link
-          to={`/project/${currentProjId}/bar-cutting`}
-          className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition flex items-center gap-2"
-        >
-          <Scissors className="w-4 h-4 text-amber-500" />
-          <span>Bar Cutting Schedule & 12m Stock Optimization</span>
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-700 dark:text-amber-400 uppercase">
-            QA/QC
-          </span>
-        </Link>
-      </div>
-
       {/* Header */}
       <div className="sticky top-0 z-30 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur-md py-3 -mt-3 pb-4 border-b border-slate-200/80 dark:border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors">
         <div>
@@ -160,6 +145,32 @@ export const SteelPage: React.FC = () => {
           <span>Log Rebar Mill Sample</span>
         </button>
       </div>
+
+      {/* Structural Quality & Testing Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Concrete Cube Testing",
+            path: "/project/concrete",
+            icon: FlaskConical,
+          },
+          {
+            label: "Steel Rebar Testing & Mill Certs",
+            path: "/project/steel",
+            icon: Award,
+          },
+          {
+            label: "Bar Bending Schedule (BBS)",
+            path: "/project/bar-cutting",
+            icon: Scissors,
+          },
+          {
+            label: "Permit to Pour (PTP)",
+            path: "/project/permit-to-pour",
+            icon: HardHat,
+          },
+        ]}
+      />
 
       {/* Search */}
       <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl">

@@ -21,15 +21,17 @@ import {
   Copy,
   Download,
   FileCheck,
+  Filter,
   Building,
   Calendar,
   Layers,
   FileText,
-  Filter,
   ShieldAlert,
+  ShieldCheck,
   ArrowRight,
   ExternalLink,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 interface DeliveryItemInput {
   tempId: string;
@@ -806,6 +808,22 @@ export const DeliveriesPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Module Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Material Deliveries Log",
+            path: "/project/deliveries",
+            icon: Truck,
+          },
+          {
+            label: "Material Inspection Reports (MIR)",
+            path: "/project/mir",
+            icon: ShieldCheck,
+          },
+        ]}
+      />
 
       {/* KPI Stats Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">

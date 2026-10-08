@@ -4,7 +4,8 @@ import { useProjectStore } from '@/stores/useProjectStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { dbService } from '@/lib/db';
 import { InspectionRequest } from '@/types';
-import { Calendar, Clock, Plus, ChevronRight, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, Plus, ChevronRight, AlertCircle, ClipboardCheck } from 'lucide-react';
+import { ModuleTabNav } from '@/components/common/ModuleTabNav';
 
 export const InspectionSchedule: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -56,6 +57,22 @@ export const InspectionSchedule: React.FC = () => {
           <span>Execute Inspection</span>
         </Link>
       </div>
+
+      {/* Module Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Inspection Requests (IR/WIR)",
+            path: "/project/inspections",
+            icon: ClipboardCheck,
+          },
+          {
+            label: "Inspection Timetable & Schedule",
+            path: "/project/inspections/schedule",
+            icon: Calendar,
+          },
+        ]}
+      />
 
       {/* Timetable Cards */}
       {loading ? (

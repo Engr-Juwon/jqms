@@ -36,7 +36,11 @@ import {
   Sparkles,
   ArrowUpRight,
   Download,
+  Award,
+  Scissors,
+  HardHat,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 export interface ConcreteTestResultItem {
   age: number;
@@ -581,6 +585,32 @@ export const Concrete: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Structural Quality & Testing Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Concrete Cube Testing",
+            path: "/project/concrete",
+            icon: FlaskConical,
+          },
+          {
+            label: "Steel Rebar Testing & Mill Certs",
+            path: "/project/steel",
+            icon: Award,
+          },
+          {
+            label: "Bar Bending Schedule (BBS)",
+            path: "/project/bar-cutting",
+            icon: Scissors,
+          },
+          {
+            label: "Permit to Pour (PTP)",
+            path: "/project/permit-to-pour",
+            icon: HardHat,
+          },
+        ]}
+      />
 
       {/* KPI Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">

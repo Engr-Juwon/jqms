@@ -269,6 +269,8 @@ export interface Project {
   color?: string;
   totalBudget?: number;
   currency?: string;
+  costRates?: ProjectCostRates;
+  carbonFactors?: CarbonFactors;
   currentLevelId?: string;
   currentLevelName?: string;
   createdAt: number | string;
@@ -482,6 +484,99 @@ export interface StructuralElement {
   inspectionsCount?: number;
   linkedNcrIds?: string[];
   linkedCubeSampleIds?: string[];
+}
+
+// ─── 5D BIM COST & QUANTITY TAKEOFF (QTO) ───
+export interface ProjectCostRates {
+  currencySymbol: string;
+  concreteRates: Record<string, number>;
+  defaultConcreteRate: number;
+  formworkRate: number; // per m2
+  rebarRatePerTonne: number; // per Tonne
+  laborRatePerM3: number; // per m3
+  equipmentRatePerM3: number; // per m3 (pumps/cranes)
+}
+
+export interface Element5DCostBreakdown {
+  concreteVolume: number;
+  concreteRate: number;
+  concreteCost: number;
+  formworkArea: number;
+  formworkRate: number;
+  formworkCost: number;
+  rebarTonnage: number;
+  rebarRatePerTonne: number;
+  rebarCost: number;
+  laborRatePerM3: number;
+  laborCost: number;
+  equipmentRatePerM3: number;
+  equipmentCost: number;
+  totalCost: number;
+  currencySymbol: string;
+}
+
+export interface Level5DCostSummary {
+  levelId: string;
+  levelName: string;
+  totalElementsCount: number;
+  plannedVolume: number;
+  plannedFormworkArea: number;
+  plannedRebarTonnage: number;
+  plannedCostPV: number; // Planned Value (Budget)
+  approvedCostEV: number; // Earned Value (QA/QC Approved)
+  inProgressCost: number; // Rebar / Formwork / Ready / Poured
+  currencySymbol: string;
+  concreteCostTotal: number;
+  formworkCostTotal: number;
+  rebarCostTotal: number;
+  laborCostTotal: number;
+  equipmentCostTotal: number;
+}
+
+// ─── 6D BIM SUSTAINABILITY & EMBODIED CARBON ───
+export interface CarbonFactors {
+  concreteGradeFactors: Record<string, number>; // kg CO2e / m3
+  defaultConcreteFactor: number; // kg CO2e / m3
+  scmReplacementPct: number; // % SCM (GGBS/Fly Ash replacement, e.g. 30%)
+  rebarCarbonFactor: number; // kg CO2e / tonne of steel
+  recycledSteelPct: number; // % recycled EAF steel content (e.g. 60%)
+  formworkCarbonFactor: number; // kg CO2e / m2 of shuttering reuse
+  transportationFactor: number; // kg CO2e / m3 concrete transport
+}
+
+export type EcoRating = "A+" | "A" | "B" | "C" | "D" | "E";
+
+export interface Element6DCarbonBreakdown {
+  concreteVolume: number;
+  concreteFactor: number; // kg CO2e / m3
+  concreteCarbonKg: number;
+  formworkArea: number;
+  formworkCarbonKg: number;
+  rebarTonnage: number;
+  rebarCarbonFactor: number;
+  rebarCarbonKg: number;
+  transportCarbonKg: number;
+  totalCarbonKg: number;
+  totalCarbonTonne: number;
+  carbonIntensityKgPerM3: number;
+  scmAvoidedCarbonKg: number; // Saved CO2e from SCM replacement
+  ecoRating: EcoRating;
+}
+
+export interface Level6DCarbonSummary {
+  levelId: string;
+  levelName: string;
+  totalElementsCount: number;
+  totalVolumeM3: number;
+  totalCarbonKg: number;
+  totalCarbonTonne: number;
+  concreteCarbonTonne: number;
+  rebarCarbonTonne: number;
+  formworkCarbonTonne: number;
+  transportCarbonTonne: number;
+  averageIntensityKgPerM3: number;
+  totalScmAvoidedCarbonTonne: number;
+  greenBuildingTier: "Net-Zero Ready (A+)" | "Low Carbon (A)" | "Standard (B)" | "Moderate (C)" | "High Impact (D)";
 }
 
 // ─── ELEMENT REGISTRY UI PROPS ───

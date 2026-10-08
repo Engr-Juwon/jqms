@@ -24,7 +24,9 @@ import {
   Maximize2,
   Calendar,
   Edit3,
+  FileWarning,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 interface NormalizedPhoto {
   url: string;
@@ -319,6 +321,27 @@ export const SiteCommentsRegistry: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* Module Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Non-Conformance Reports (NCR)",
+            path: "/project/ncrs",
+            icon: AlertOctagon,
+          },
+          {
+            label: "Site Instructions (SI)",
+            path: "/project/site-instructions",
+            icon: FileWarning,
+          },
+          {
+            label: "Site Observations & Comments",
+            path: "/project/site-comments",
+            icon: MessageSquareWarning,
+          },
+        ]}
+      />
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

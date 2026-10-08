@@ -15,7 +15,12 @@ import {
   ChevronRight,
   CheckCircle2,
   AlertCircle,
+  ClipboardList,
+  FileCheck2,
+  FileText,
+  BookOpen,
 } from 'lucide-react';
+import { ModuleTabNav } from '@/components/common/ModuleTabNav';
 
 export const RFIRegistry: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -90,6 +95,37 @@ export const RFIRegistry: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* QA/QC Engineering Submittals Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Inspection & Test Plans (ITP)",
+            path: "/project/itp",
+            icon: ClipboardList,
+          },
+          {
+            label: "Material Approvals (MAR)",
+            path: "/project/mar",
+            icon: FileCheck2,
+          },
+          {
+            label: "Requests for Information (RFI)",
+            path: "/project/rfi",
+            icon: FileQuestion,
+          },
+          {
+            label: "Method Statements (RAMS)",
+            path: "/project/method-statements",
+            icon: FileText,
+          },
+          {
+            label: "QA/QC SOP Manual",
+            path: "/project/qaqc-handbook",
+            icon: BookOpen,
+          },
+        ]}
+      />
 
       {/* Search & Filter */}
       <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl">

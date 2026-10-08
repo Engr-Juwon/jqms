@@ -20,7 +20,11 @@ import {
   Layers,
   ArrowRight,
   Printer,
+  FlaskConical,
+  Award,
+  HardHat,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 import { BBSUploadModal } from "@/components/steel/BBSUploadModal";
 import { CreateScheduleModal } from "@/components/steel/CreateScheduleModal";
 import { Pagination } from "@/components/common/Pagination";
@@ -510,6 +514,32 @@ export const BarCuttingRegistryPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Structural Quality & Testing Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Concrete Cube Testing",
+            path: "/project/concrete",
+            icon: FlaskConical,
+          },
+          {
+            label: "Steel Rebar Testing & Mill Certs",
+            path: "/project/steel",
+            icon: Award,
+          },
+          {
+            label: "Bar Bending Schedule (BBS)",
+            path: "/project/bar-cutting",
+            icon: Scissors,
+          },
+          {
+            label: "Permit to Pour (PTP)",
+            path: "/project/permit-to-pour",
+            icon: HardHat,
+          },
+        ]}
+      />
 
       {/* Project-Level Aggregate Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

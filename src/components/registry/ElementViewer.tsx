@@ -23,9 +23,26 @@ import {
   ExternalLink,
   Sun,
   Moon,
+  Coins,
+  Calculator,
+  HardHat,
+  TrendingUp,
+  Leaf,
+  Trees,
+  Zap,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { StructuralElement } from "@/types";
+import {
+  calculateElement5DCost,
+  format5DCurrency,
+  DEFAULT_PROJECT_COST_RATES,
+} from "@/lib/costCalculations";
+import {
+  calculateElement6DCarbon,
+  formatCarbonKg,
+  DEFAULT_CARBON_FACTORS,
+} from "@/lib/carbonCalculations";
 
 /* ─────────────────────────────────────────────────────────────────────────
    3D PRIMITIVE COMPONENTS — True Structural Engineering Geometry & Rebar
@@ -1292,13 +1309,23 @@ export const ElementViewer: React.FC<ElementViewerProps> = ({
   isOpen,
   onClose,
 }) => {
-  const [activeView, setActiveView] = useState<"3d" | "cross-section">("3d");
+  const [activeView, setActiveView] = useState<"3d" | "cross-section" | "5d-cost" | "6d-carbon">("3d");
   const [viewerTheme, setViewerTheme] = useState<"dark" | "light">("dark");
   const [showRebar, setShowRebar] = useState(true);
   const [showDimensions, setShowDimensions] = useState(true);
   const [wireframe, setWireframe] = useState(false);
   const [autoRotate, setAutoRotate] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const costBreakdown = useMemo(() => {
+    if (!element) return null;
+    return calculateElement5DCost(element, DEFAULT_PROJECT_COST_RATES);
+  }, [element]);
+
+  const carbonBreakdown = useMemo(() => {
+    if (!element) return null;
+    return calculateElement6DCarbon(element, DEFAULT_CARBON_FACTORS);
+  }, [element]);
 
   if (!isOpen || !element) return null;
 
@@ -1348,6 +1375,24 @@ export const ElementViewer: React.FC<ElementViewerProps> = ({
               >
                 Cross-Section
               </button>
+              <button
+                onClick={() => setActiveView("5d-cost")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeView === "5d-cost" ? "bg-brand-600 text-white shadow" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Coins size={13} />
+                <span>5D Cost</span>
+              </button>
+              <button
+                onClick={() => setActiveView("6d-carbon")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeView === "6d-carbon" ? "bg-brand-600 text-white shadow" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Leaf size={13} />
+                <span>6D Carbon</span>
+              </button>
             </div>
 
             <button
@@ -1383,41 +1428,45 @@ export const ElementViewer: React.FC<ElementViewerProps> = ({
             <span>{viewerTheme === "light" ? "Light View" : "Dark View"}</span>
           </button>
 
-          <button
-            onClick={() => setShowRebar(!showRebar)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              showRebar
-                ? "bg-amber-600 text-white shadow"
-                : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            <Crosshair size={13} />
-            Rebar Cage
-          </button>
+          {activeView !== "5d-cost" && activeView !== "6d-carbon" && (
+            <>
+              <button
+                onClick={() => setShowRebar(!showRebar)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  showRebar
+                    ? "bg-amber-600 text-white shadow"
+                    : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Crosshair size={13} />
+                Rebar Cage
+              </button>
 
-          <button
-            onClick={() => setShowDimensions(!showDimensions)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              showDimensions
-                ? "bg-slate-800 text-white shadow"
-                : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            <Ruler size={13} />
-            Dimensions
-          </button>
+              <button
+                onClick={() => setShowDimensions(!showDimensions)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  showDimensions
+                    ? "bg-slate-800 text-white shadow"
+                    : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Ruler size={13} />
+                Dimensions
+              </button>
 
-          <button
-            onClick={() => setWireframe(!wireframe)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              wireframe
-                ? "bg-brand-600 text-white shadow"
-                : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
-            }`}
-          >
-            <Grid3x3 size={13} />
-            Wireframe
-          </button>
+              <button
+                onClick={() => setWireframe(!wireframe)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  wireframe
+                    ? "bg-brand-600 text-white shadow"
+                    : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Grid3x3 size={13} />
+                Wireframe
+              </button>
+            </>
+          )}
 
           {activeView === "3d" && (
             <button
@@ -1434,16 +1483,24 @@ export const ElementViewer: React.FC<ElementViewerProps> = ({
           )}
 
           <div className="ml-auto flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+            {carbonBreakdown && (
+              <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 px-2.5 py-1 rounded-xl flex items-center gap-1">
+                <Leaf size={12} />
+                {formatCarbonKg(carbonBreakdown.totalCarbonKg)} ({carbonBreakdown.ecoRating})
+              </span>
+            )}
+            {costBreakdown && (
+              <span className="font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 px-2.5 py-1 rounded-xl">
+                {format5DCurrency(costBreakdown.totalCost, DEFAULT_PROJECT_COST_RATES.currencySymbol)}
+              </span>
+            )}
             <span className="font-mono font-bold text-brand-700 dark:text-brand-400 bg-brand-50 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800/60 px-2.5 py-1 rounded-xl">
               {(element.calculatedVolume || element.volume || 0).toFixed(3)} m³
-            </span>
-            <span className="hidden sm:inline text-[11px] text-slate-400 dark:text-slate-500">
-              Drag to rotate · Scroll to zoom · Right-click to pan
             </span>
           </div>
         </div>
 
-        {/* 3D Viewport / 2D Cross-Section */}
+        {/* 3D Viewport / 2D Cross-Section / 5D Cost Breakdown */}
         <div
           className={`flex-1 min-h-[420px] relative transition-colors duration-200 ${
             viewerTheme === "light" ? "bg-slate-100" : "bg-slate-950"
@@ -1458,7 +1515,7 @@ export const ElementViewer: React.FC<ElementViewerProps> = ({
               autoRotate={autoRotate}
               theme={viewerTheme}
             />
-          ) : (
+          ) : activeView === "cross-section" ? (
             <div className={`w-full h-full flex items-center justify-center p-8 transition-colors ${
               viewerTheme === "light" ? "bg-slate-100" : "bg-slate-950"
             }`}>
@@ -1477,6 +1534,307 @@ export const ElementViewer: React.FC<ElementViewerProps> = ({
                   </div>
                 </div>
               </div>
+            </div>
+          ) : activeView === "5d-cost" ? (
+            /* 5D Cost Breakdown View */
+            <div className="w-full h-full overflow-y-auto p-6 sm:p-8">
+              {costBreakdown && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  {/* Top KPI Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[10px] font-mono uppercase font-bold text-slate-500 dark:text-slate-400">Total 5D Cost</div>
+                      <div className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                        {format5DCurrency(costBreakdown.totalCost, DEFAULT_PROJECT_COST_RATES.currencySymbol)}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">Direct Structural Takeoff</div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[10px] font-mono uppercase font-bold text-slate-500 dark:text-slate-400">Concrete Volume</div>
+                      <div className="text-xl font-black font-mono text-cyan-600 dark:text-cyan-400 mt-1">
+                        {costBreakdown.concreteVolume.toFixed(2)} m³
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">Grade: {element.concreteGrade || "C30/37"}</div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[10px] font-mono uppercase font-bold text-slate-500 dark:text-slate-400">Formwork Contact</div>
+                      <div className="text-xl font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
+                        {costBreakdown.formworkArea.toFixed(2)} m²
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">Shuttering &amp; Propping</div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[10px] font-mono uppercase font-bold text-slate-500 dark:text-slate-400">Rebar Steel</div>
+                      <div className="text-xl font-black font-mono text-purple-600 dark:text-purple-400 mt-1">
+                        {(costBreakdown.rebarTonnage * 1000).toFixed(0)} kg
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{costBreakdown.rebarTonnage.toFixed(3)} Tonnes</div>
+                    </div>
+                  </div>
+
+                  {/* Itemized BOQ Schedule */}
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+                    <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                        <Calculator size={14} className="text-brand-600 dark:text-brand-400" />
+                        5D Bill of Quantities (BOQ) Schedule
+                      </span>
+                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                        Status: <strong className="text-brand-600">{element.status}</strong>
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
+                        <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 uppercase font-mono text-[10px] border-b border-slate-200 dark:border-slate-800">
+                          <tr>
+                            <th className="py-2.5 px-4 font-bold">Trade Package</th>
+                            <th className="py-2.5 px-4 font-bold text-right">Quantity</th>
+                            <th className="py-2.5 px-4 font-bold text-right">Unit Rate</th>
+                            <th className="py-2.5 px-4 font-bold text-right">Amount</th>
+                            <th className="py-2.5 px-4 font-bold text-right">Share</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
+                          <tr>
+                            <td className="py-2.5 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" />
+                              Ready-Mix Concrete ({element.concreteGrade || "C30/37"})
+                            </td>
+                            <td className="py-2.5 px-4 text-right">{costBreakdown.concreteVolume.toFixed(2)} m³</td>
+                            <td className="py-2.5 px-4 text-right">{format5DCurrency(costBreakdown.concreteRate, "$")}/m³</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-cyan-600 dark:text-cyan-400">
+                              {format5DCurrency(costBreakdown.concreteCost, "$")}
+                            </td>
+                            <td className="py-2.5 px-4 text-right text-slate-500">
+                              {costBreakdown.totalCost > 0 ? ((costBreakdown.concreteCost / costBreakdown.totalCost) * 100).toFixed(1) : 0}%
+                            </td>
+                          </tr>
+
+                          <tr>
+                            <td className="py-2.5 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                              Formwork &amp; Shuttering
+                            </td>
+                            <td className="py-2.5 px-4 text-right">{costBreakdown.formworkArea.toFixed(2)} m²</td>
+                            <td className="py-2.5 px-4 text-right">{format5DCurrency(costBreakdown.formworkRate, "$")}/m²</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-amber-600 dark:text-amber-400">
+                              {format5DCurrency(costBreakdown.formworkCost, "$")}
+                            </td>
+                            <td className="py-2.5 px-4 text-right text-slate-500">
+                              {costBreakdown.totalCost > 0 ? ((costBreakdown.formworkCost / costBreakdown.totalCost) * 100).toFixed(1) : 0}%
+                            </td>
+                          </tr>
+
+                          <tr>
+                            <td className="py-2.5 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+                              Rebar Reinforcement Steel
+                            </td>
+                            <td className="py-2.5 px-4 text-right">{costBreakdown.rebarTonnage.toFixed(3)} Tonnes</td>
+                            <td className="py-2.5 px-4 text-right">{format5DCurrency(costBreakdown.rebarRatePerTonne, "$")}/tonne</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-purple-600 dark:text-purple-400">
+                              {format5DCurrency(costBreakdown.rebarCost, "$")}
+                            </td>
+                            <td className="py-2.5 px-4 text-right text-slate-500">
+                              {costBreakdown.totalCost > 0 ? ((costBreakdown.rebarCost / costBreakdown.totalCost) * 100).toFixed(1) : 0}%
+                            </td>
+                          </tr>
+
+                          <tr>
+                            <td className="py-2.5 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                              Direct Structural Labor
+                            </td>
+                            <td className="py-2.5 px-4 text-right">{costBreakdown.concreteVolume.toFixed(2)} m³</td>
+                            <td className="py-2.5 px-4 text-right">{format5DCurrency(costBreakdown.laborRatePerM3, "$")}/m³</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-blue-600 dark:text-blue-400">
+                              {format5DCurrency(costBreakdown.laborCost, "$")}
+                            </td>
+                            <td className="py-2.5 px-4 text-right text-slate-500">
+                              {costBreakdown.totalCost > 0 ? ((costBreakdown.laborCost / costBreakdown.totalCost) * 100).toFixed(1) : 0}%
+                            </td>
+                          </tr>
+
+                          <tr>
+                            <td className="py-2.5 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                              Equipment, Boom Pumps &amp; Cranage
+                            </td>
+                            <td className="py-2.5 px-4 text-right">{costBreakdown.concreteVolume.toFixed(2)} m³</td>
+                            <td className="py-2.5 px-4 text-right">{format5DCurrency(costBreakdown.equipmentRatePerM3, "$")}/m³</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-rose-600 dark:text-rose-400">
+                              {format5DCurrency(costBreakdown.equipmentCost, "$")}
+                            </td>
+                            <td className="py-2.5 px-4 text-right text-slate-500">
+                              {costBreakdown.totalCost > 0 ? ((costBreakdown.equipmentCost / costBreakdown.totalCost) * 100).toFixed(1) : 0}%
+                            </td>
+                          </tr>
+                        </tbody>
+                        <tfoot className="bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs border-t border-slate-200 dark:border-slate-800">
+                          <tr>
+                            <td className="py-3 px-4 text-slate-900 dark:text-white uppercase">Total Direct 5D Estimate</td>
+                            <td colSpan={2} className="py-3 px-4 text-right text-slate-500">
+                              Unit Cost: {format5DCurrency(costBreakdown.totalCost / (costBreakdown.concreteVolume || 1), "$")}/m³
+                            </td>
+                            <td className="py-3 px-4 text-right text-emerald-600 dark:text-emerald-400 text-sm">
+                              {format5DCurrency(costBreakdown.totalCost, "$")}
+                            </td>
+                            <td className="py-3 px-4 text-right text-slate-700 dark:text-slate-300">100%</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* 6D Carbon Footprint & Sustainability View */
+            <div className="w-full h-full overflow-y-auto p-6 sm:p-8">
+              {carbonBreakdown && (
+                <div className="max-w-4xl mx-auto space-y-6">
+                  {/* Top Carbon KPI Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[10px] font-mono uppercase font-bold text-slate-500 dark:text-slate-400">Total Carbon</div>
+                      <div className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                        {formatCarbonKg(carbonBreakdown.totalCarbonKg)}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{carbonBreakdown.totalCarbonTonne.toFixed(3)} Tonnes CO₂e</div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[10px] font-mono uppercase font-bold text-slate-500 dark:text-slate-400">Carbon Intensity</div>
+                      <div className="text-xl font-black font-mono text-cyan-600 dark:text-cyan-400 mt-1">
+                        {carbonBreakdown.carbonIntensityKgPerM3.toFixed(0)} <span className="text-xs font-normal">kg/m³</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">Volumetric Density</div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[10px] font-mono uppercase font-bold text-slate-500 dark:text-slate-400">SCM Clinker Offset</div>
+                      <div className="text-xl font-black font-mono text-teal-600 dark:text-teal-400 mt-1">
+                        {carbonBreakdown.scmAvoidedCarbonKg.toFixed(0)} kg
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">CO₂e Avoided via SCM</div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <div className="text-[10px] font-mono uppercase font-bold text-slate-500 dark:text-slate-400">Eco Rating</div>
+                      <div className="text-xl font-black font-mono text-amber-500 mt-1 flex items-center gap-1.5">
+                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-sm font-black border border-emerald-500/30">
+                          {carbonBreakdown.ecoRating}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">LEED / BREEAM Tier</div>
+                    </div>
+                  </div>
+
+                  {/* Trade Carbon Breakdown Table */}
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+                    <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                        <Leaf size={14} className="text-emerald-600 dark:text-emerald-400" />
+                        6D Embodied Carbon Trade Footprint
+                      </span>
+                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                        Grade: <strong className="text-cyan-600">{element.concreteGrade || "C30/37"}</strong>
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
+                        <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 uppercase font-mono text-[10px] border-b border-slate-200 dark:border-slate-800">
+                          <tr>
+                            <th className="py-2.5 px-4 font-bold">Material / Process</th>
+                            <th className="py-2.5 px-4 font-bold text-right">Quantity</th>
+                            <th className="py-2.5 px-4 font-bold text-right">Emission Factor</th>
+                            <th className="py-2.5 px-4 font-bold text-right">Emissions (kg CO₂e)</th>
+                            <th className="py-2.5 px-4 font-bold text-right">Share</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono">
+                          <tr>
+                            <td className="py-2.5 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" />
+                              Ready-Mix Concrete ({element.concreteGrade || "C30/37"})
+                            </td>
+                            <td className="py-2.5 px-4 text-right">{carbonBreakdown.concreteVolume.toFixed(2)} m³</td>
+                            <td className="py-2.5 px-4 text-right">{carbonBreakdown.concreteFactor.toFixed(0)} kg/m³</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-cyan-600 dark:text-cyan-400">
+                              {carbonBreakdown.concreteCarbonKg.toFixed(1)}
+                            </td>
+                            <td className="py-2.5 px-4 text-right text-slate-500">
+                              {carbonBreakdown.totalCarbonKg > 0 ? ((carbonBreakdown.concreteCarbonKg / carbonBreakdown.totalCarbonKg) * 100).toFixed(1) : 0}%
+                            </td>
+                          </tr>
+
+                          <tr>
+                            <td className="py-2.5 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+                              Rebar Reinforcement Steel
+                            </td>
+                            <td className="py-2.5 px-4 text-right">{carbonBreakdown.rebarTonnage.toFixed(3)} T</td>
+                            <td className="py-2.5 px-4 text-right">{carbonBreakdown.rebarCarbonFactor.toFixed(0)} kg/T</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-purple-600 dark:text-purple-400">
+                              {carbonBreakdown.rebarCarbonKg.toFixed(1)}
+                            </td>
+                            <td className="py-2.5 px-4 text-right text-slate-500">
+                              {carbonBreakdown.totalCarbonKg > 0 ? ((carbonBreakdown.rebarCarbonKg / carbonBreakdown.totalCarbonKg) * 100).toFixed(1) : 0}%
+                            </td>
+                          </tr>
+
+                          <tr>
+                            <td className="py-2.5 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                              Formwork Shuttering &amp; Propping
+                            </td>
+                            <td className="py-2.5 px-4 text-right">{carbonBreakdown.formworkArea.toFixed(2)} m²</td>
+                            <td className="py-2.5 px-4 text-right">7.5 kg/m²</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-amber-600 dark:text-amber-400">
+                              {carbonBreakdown.formworkCarbonKg.toFixed(1)}
+                            </td>
+                            <td className="py-2.5 px-4 text-right text-slate-500">
+                              {carbonBreakdown.totalCarbonKg > 0 ? ((carbonBreakdown.formworkCarbonKg / carbonBreakdown.totalCarbonKg) * 100).toFixed(1) : 0}%
+                            </td>
+                          </tr>
+
+                          <tr>
+                            <td className="py-2.5 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                              Transit, Delivery &amp; Pouring Plant
+                            </td>
+                            <td className="py-2.5 px-4 text-right">{carbonBreakdown.concreteVolume.toFixed(2)} m³</td>
+                            <td className="py-2.5 px-4 text-right">11.2 kg/m³</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                              {carbonBreakdown.transportCarbonKg.toFixed(1)}
+                            </td>
+                            <td className="py-2.5 px-4 text-right text-slate-500">
+                              {carbonBreakdown.totalCarbonKg > 0 ? ((carbonBreakdown.transportCarbonKg / carbonBreakdown.totalCarbonKg) * 100).toFixed(1) : 0}%
+                            </td>
+                          </tr>
+                        </tbody>
+                        <tfoot className="bg-slate-50 dark:bg-slate-950 font-mono font-bold text-xs border-t border-slate-200 dark:border-slate-800">
+                          <tr>
+                            <td className="py-3 px-4 text-slate-900 dark:text-white uppercase">Total Embodied Carbon</td>
+                            <td colSpan={2} className="py-3 px-4 text-right text-slate-500">
+                              Intensity: {carbonBreakdown.carbonIntensityKgPerM3.toFixed(0)} kg CO₂e/m³
+                            </td>
+                            <td className="py-3 px-4 text-right text-emerald-600 dark:text-emerald-400 text-sm">
+                              {formatCarbonKg(carbonBreakdown.totalCarbonKg)}
+                            </td>
+                            <td className="py-3 px-4 text-right text-slate-700 dark:text-slate-300">100%</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

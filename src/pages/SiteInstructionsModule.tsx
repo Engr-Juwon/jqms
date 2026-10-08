@@ -27,7 +27,9 @@ import {
   Building2,
   Layers,
   ArrowRight,
+  MessageSquareWarning,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 export const SiteInstructionsModule: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -193,6 +195,27 @@ export const SiteInstructionsModule: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Module Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Non-Conformance Reports (NCR)",
+            path: "/project/ncrs",
+            icon: AlertOctagon,
+          },
+          {
+            label: "Site Instructions (SI)",
+            path: "/project/site-instructions",
+            icon: FileWarning,
+          },
+          {
+            label: "Site Observations & Comments",
+            path: "/project/site-comments",
+            icon: MessageSquareWarning,
+          },
+        ]}
+      />
 
       {/* Overdue NCRs Immediate Alert Banner */}
       {overdueNcrs.length > 0 && (

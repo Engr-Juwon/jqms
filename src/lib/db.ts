@@ -446,6 +446,72 @@ export const dbService = {
     }
   },
 
+  async updateProjectCostRates(
+    projectId: string,
+    costRates: any,
+    companyId?: string,
+  ): Promise<void> {
+    const payload = cleanForFirestore({
+      costRates,
+      currency: costRates?.currencySymbol || "$",
+      updatedAt: new Date().toISOString(),
+    });
+    const cacheKey = `jqms_projects_${companyId || "all"}`;
+    const list = getCache<Project[]>(cacheKey, []);
+    const idx = list.findIndex((p) => p.id === projectId);
+    if (idx >= 0) {
+      list[idx] = {
+        ...list[idx],
+        costRates,
+        currency: costRates?.currencySymbol || list[idx].currency || "$",
+        updatedAt: new Date().toISOString(),
+      };
+      setCache(cacheKey, list);
+    }
+
+    try {
+      await setDoc(
+        doc(firestore, "projects", projectId),
+        payload,
+        { merge: true },
+      );
+    } catch (e) {
+      console.error("Firestore updateProjectCostRates error:", e);
+    }
+  },
+
+  async updateProjectCarbonFactors(
+    projectId: string,
+    carbonFactors: any,
+    companyId?: string,
+  ): Promise<void> {
+    const payload = cleanForFirestore({
+      carbonFactors,
+      updatedAt: new Date().toISOString(),
+    });
+    const cacheKey = `jqms_projects_${companyId || "all"}`;
+    const list = getCache<Project[]>(cacheKey, []);
+    const idx = list.findIndex((p) => p.id === projectId);
+    if (idx >= 0) {
+      list[idx] = {
+        ...list[idx],
+        carbonFactors,
+        updatedAt: new Date().toISOString(),
+      };
+      setCache(cacheKey, list);
+    }
+
+    try {
+      await setDoc(
+        doc(firestore, "projects", projectId),
+        payload,
+        { merge: true },
+      );
+    } catch (e) {
+      console.error("Firestore updateProjectCarbonFactors error:", e);
+    }
+  },
+
   // --- Project Levels (Dual Scoped: projectId AND companyId) ---
   async getLevels(
     projectId: string,

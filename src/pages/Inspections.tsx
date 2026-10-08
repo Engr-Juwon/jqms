@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   ChevronRight,
 } from 'lucide-react';
+import { ModuleTabNav } from '@/components/common/ModuleTabNav';
 
 export const Inspections: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -91,6 +92,22 @@ export const Inspections: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Module Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Inspection Requests (IR/WIR)",
+            path: "/project/inspections",
+            icon: ClipboardCheck,
+          },
+          {
+            label: "Inspection Timetable & Schedule",
+            path: "/project/inspections/schedule",
+            icon: Calendar,
+          },
+        ]}
+      />
 
       {/* Search & Filter */}
       <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl">

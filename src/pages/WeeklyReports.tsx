@@ -25,7 +25,9 @@ import {
   X,
   Check,
   FileText,
+  TrendingUp,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 export const WeeklyReports: React.FC = () => {
   const { projectId: paramProjId } = useParams<{ projectId?: string }>();
@@ -158,6 +160,22 @@ export const WeeklyReports: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {/* Module Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Quality Analytics & KPIs",
+            path: "/project/reporting",
+            icon: TrendingUp,
+          },
+          {
+            label: "Weekly Quality Reports",
+            path: "/project/weekly-reports",
+            icon: FileSpreadsheet,
+          },
+        ]}
+      />
 
       {/* Reports Grid */}
       <div className="space-y-4">

@@ -40,7 +40,9 @@ import {
   RefreshCw,
   FolderLock,
   Lock,
+  FileText,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
 interface Chapter {
   id: string;
@@ -822,6 +824,37 @@ export const QAQCHandbookPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* QA/QC Engineering Submittals Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Inspection & Test Plans (ITP)",
+            path: "/project/itp",
+            icon: ClipboardList,
+          },
+          {
+            label: "Material Approvals (MAR)",
+            path: "/project/mar",
+            icon: FileCheck2,
+          },
+          {
+            label: "Requests for Information (RFI)",
+            path: "/project/rfi",
+            icon: FileQuestion,
+          },
+          {
+            label: "Method Statements (RAMS)",
+            path: "/project/method-statements",
+            icon: FileText,
+          },
+          {
+            label: "QA/QC SOP Manual",
+            path: "/project/qaqc-handbook",
+            icon: BookOpen,
+          },
+        ]}
+      />
 
       {/* Filter & Search Bar */}
       <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-3 shadow-md no-print">

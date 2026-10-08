@@ -24,7 +24,9 @@ import {
   FileText,
   Layers,
   Download,
+  FileSpreadsheet,
 } from "lucide-react";
+import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 import {
   SiteCommentReport,
   NonConformanceReport,
@@ -231,6 +233,22 @@ export const Reporting: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Module Navigation Tabs */}
+      <ModuleTabNav
+        items={[
+          {
+            label: "Quality Analytics & KPIs",
+            path: "/project/reporting",
+            icon: TrendingUp,
+          },
+          {
+            label: "Weekly Quality Reports",
+            path: "/project/weekly-reports",
+            icon: FileSpreadsheet,
+          },
+        ]}
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">

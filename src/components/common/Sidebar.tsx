@@ -8,40 +8,25 @@ import { hasMinRole, isQAQCUser, canAccessRoute } from "@/lib/permissions";
 import {
   LayoutDashboard,
   Box,
-  MessageSquareWarning,
   AlertOctagon,
-  FileWarning,
-  FileQuestion,
-  FileCheck2,
   ClipboardCheck,
   ClipboardList,
   MessageSquare,
-  Calendar,
-  Layers,
-  FlaskConical,
-  Award,
   Truck,
   CalendarClock,
   Camera,
   FolderLock,
   Calculator,
-  FileSpreadsheet,
   History,
   Settings,
   Users,
   Wrench,
-  Sparkles,
   TrendingUp,
   FileText,
   ChevronRight,
   HardHat,
-  ShieldCheck,
-  Scissors,
   CheckCheck,
   Building2,
-  Grid,
-  Briefcase,
-  Compass,
   Home,
   X,
   BookOpen,
@@ -75,88 +60,14 @@ export const Sidebar: React.FC = () => {
           dataTour: "nav-approvals",
         },
         {
-          label: "Quality Analytics & KPIs",
+          label: "Quality Analytics & Reports",
           path: "/project/reporting",
           icon: TrendingUp,
         },
-        {
-          label: "Weekly Quality Reports",
-          path: "/project/weekly-reports",
-          icon: FileSpreadsheet,
-        },
       ],
     },
     {
-      title: "Technical & Submittals",
-      items: [
-        {
-          label: "Method Statements (RAMS)",
-          path: "/project/method-statements",
-          icon: FileText,
-          dataTour: "nav-method-statements",
-        },
-        {
-          label: "Inspection & Test Plans (ITP)",
-          path: "/project/itp",
-          icon: ClipboardList,
-          dataTour: "nav-itp",
-        },
-        {
-          label: "Submittals (MAR)",
-          path: "/project/mar",
-          icon: FileCheck2,
-          dataTour: "nav-mar",
-        },
-        {
-          label: "Requests for Info (RFI)",
-          path: "/project/rfi",
-          icon: FileQuestion,
-          dataTour: "nav-rfi",
-        },
-        {
-          label: "Document Control & Drawings",
-          path: "/project/documents",
-          icon: FolderLock,
-        },
-      ],
-    },
-    {
-      title: "BIM & Spatial Assets",
-      items: [
-        {
-          label: "Element Register & 3D BIM",
-          path: "/project/elements",
-          icon: Box,
-        },
-        {
-          label: "2D Spatial Grid Plan",
-          path: "/project/grid-plan",
-          icon: Grid,
-        },
-        {
-          label: "Material Take-Off & MTO",
-          path: "/project/mto",
-          icon: Layers,
-        },
-        {
-          label: "Floor Level Hierarchy",
-          path: "/project/levels",
-          icon: Building2,
-        },
-        {
-          label: "Work Packages",
-          path: "/project/packages",
-          icon: Briefcase,
-        },
-        {
-          label: "Gridline Management",
-          path: "/project/gridlines",
-          icon: Compass,
-        },
-      ],
-    },
-    {
-      title: "Site Quality & Inspections",
+      title: "Site Quality & Compliance",
       items: [
         {
           label: "Inspections & Hold Points",
@@ -165,29 +76,20 @@ export const Sidebar: React.FC = () => {
           dataTour: "nav-inspections",
         },
         {
-          label: "Inspection Scheduler",
-          path: "/project/inspections/schedule",
-          icon: Calendar,
-        },
-        {
           label: "Non-Conformance (NCR)",
           path: "/project/ncrs",
           icon: AlertOctagon,
           dataTour: "nav-ncr",
         },
         {
-          label: "Site Instructions (SI)",
-          path: "/project/site-instructions",
-          icon: FileWarning,
+          label: "QA/QC Submittals & ITP",
+          path: "/project/itp",
+          icon: ClipboardList,
+          dataTour: "nav-itp",
         },
         {
-          label: "Site Observations",
-          path: "/project/site-comments",
-          icon: MessageSquareWarning,
-        },
-        {
-          label: "QA/QC SOP Field Manual",
-          path: "/project/qaqc-handbook",
+          label: "Daily Site Log & Diary",
+          path: "/project/daily-logs",
           icon: BookOpen,
         },
       ],
@@ -202,52 +104,40 @@ export const Sidebar: React.FC = () => {
           dataTour: "nav-permit",
         },
         {
-          label: "Concrete Cube Tests",
-          path: "/project/concrete",
-          icon: FlaskConical,
-        },
-        {
-          label: "Steel Rebar Testing",
-          path: "/project/steel",
-          icon: Award,
-        },
-        {
-          label: "Bar Bending Schedule (BBS)",
-          path: "/project/bar-cutting",
-          icon: Scissors,
-          dataTour: "nav-bar-cutting",
-        },
-        {
-          label: "Material Deliveries",
+          label: "Material Deliveries & MIR",
           path: "/project/deliveries",
           icon: Truck,
-        },
-        {
-          label: "Material Inspections (MIR)",
-          path: "/project/mir",
-          icon: ShieldCheck,
-          dataTour: "nav-mir",
         },
       ],
     },
     {
-      title: "Field Diary & Handover",
+      title: "BIM & Spatial Twin",
       items: [
         {
-          label: "Daily Site Log (Diary)",
-          path: "/project/daily-logs",
-          icon: BookOpen,
+          label: "BIM & Asset Register (2D-7D)",
+          path: "/project/elements",
+          icon: Box,
+        },
+      ],
+    },
+    {
+      title: "Site Utilities & Operations",
+      items: [
+        {
+          label: "Document Control & Vault",
+          path: "/project/documents",
+          icon: FolderLock,
         },
         {
-          label: "Punch List & Handover (TOC)",
+          label: "Site Photos Gallery",
+          path: "/project/photos",
+          icon: Camera,
+        },
+        {
+          label: "Punch List & Handover",
           path: "/project/punch-list",
           icon: Home,
           dataTour: "nav-punch-list",
-        },
-        {
-          label: "Site Photo Gallery",
-          path: "/project/photos",
-          icon: Camera,
         },
         {
           label: "4D Quality Planner",
@@ -255,7 +145,7 @@ export const Sidebar: React.FC = () => {
           icon: CalendarClock,
         },
         {
-          label: "Team Chat & Groups",
+          label: "Team Chat & Messages",
           path: "/project/chat",
           icon: MessageSquare,
         },
@@ -264,18 +154,19 @@ export const Sidebar: React.FC = () => {
           path: "/project/calculators",
           icon: Calculator,
         },
+        {
+          label: "Project Settings",
+          path: activeProject
+            ? `/company/projects/${activeProject.id}/edit`
+            : "/company/projects",
+          icon: Settings,
+          dataTour: "nav-settings",
+        },
       ],
     },
     {
       title: "Company Administration",
       items: [
-        {
-          label: "Project Settings & Matrix",
-          path: activeProject
-            ? `/company/projects/${activeProject.id}/edit`
-            : "/company/projects",
-          icon: Settings,
-        },
         {
           label: "Company Personnel",
           path: "/company/users",

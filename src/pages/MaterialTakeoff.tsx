@@ -6,6 +6,7 @@ import { dbService } from "@/lib/db";
 import { StructuralElement, ProjectLevel } from "@/types";
 import { ElementSizeSchedule } from "@/components/registry/ElementSizeSchedule";
 import { printMaterialTakeoffReport } from "@/services/pdf/materialTakeoffReport";
+import { BIMDimensionNav } from "@/components/bim/BIMDimensionNav";
 import {
   Layers,
   Box,
@@ -538,6 +539,15 @@ export const MaterialTakeoff: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* BIM Dimension Navigation Bar */}
+      <BIMDimensionNav
+        activeDimension="MTO"
+        counts={{
+          elements: elements.length,
+          levels: levels.length,
+        }}
+      />
 
       {/* ─── Top 4 Dynamic KPI Summary Metric Cards ─── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -87,7 +87,7 @@ export class EmailService {
 
     const logoHtml =
       includeLogo && companyLogoUrl
-        ? `<div style="margin: 10px 0;"><img src="${companyLogoUrl}" alt="${companyName}" style="max-height: 48px; max-width: 180px; object-fit: contain; display: block;" /></div>`
+        ? `<div style="margin: 12px 0 8px 0;"><img src="${companyLogoUrl}" alt="${companyName}" style="max-height: 48px; max-width: 180px; object-fit: contain; display: block;" /></div>`
         : "";
 
     if (signatureText && signatureText.trim()) {
@@ -95,48 +95,65 @@ export class EmailService {
       
       // If signature already has explicit logo placeholder tag
       if (raw.includes("{{logo}}") || raw.includes("[LOGO]")) {
-        return raw
+        const formatted = raw
           .replace(/\{\{logo\}\}|\[LOGO\]/g, logoHtml)
           .replace(/\n/g, "<br/>");
+        return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: #0f172a; line-height: 1.5; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 16px;">${formatted}</div>`;
       }
 
-      // If logo is enabled and logoHtml exists, insert it between the role line and contact lines
-      if (logoHtml) {
-        const lines = raw.split("\n");
-        const cleanLines = lines[0] === "--" ? lines.slice(1) : lines;
-        
-        let logoInserted = false;
-        const resultLines: string[] = [];
-        
-        for (let i = 0; i < cleanLines.length; i++) {
-          const line = cleanLines[i];
-          const isContactLine = /^(email|tel|phone|mobile|addr|web):/i.test(line.trim());
-          
-          if (isContactLine && !logoInserted) {
-            resultLines.push(logoHtml);
-            logoInserted = true;
-          }
-          resultLines.push(line);
+      const rawLines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+      const lines = rawLines[0] === "--" ? rawLines.slice(1) : rawLines;
+      
+      // Build structured lines with professional formatting
+      let logoInserted = false;
+      const resultElements: string[] = [];
+
+      lines.forEach((line, idx) => {
+        const isEmailLine = /^email:\s*/i.test(line);
+        const isTelLine = /^(tel|phone|mobile):\s*/i.test(line);
+        const isContactLine = isEmailLine || isTelLine || /^(addr|web|website):/i.test(line);
+
+        if (isContactLine && !logoInserted && logoHtml) {
+          resultElements.push(logoHtml);
+          logoInserted = true;
         }
 
-        if (!logoInserted) {
-          resultLines.push(logoHtml);
+        if (idx === 0) {
+          // First line: Author Name
+          resultElements.push(`<div style="font-weight: 800; font-size: 14px; color: #0f172a;">${line}</div>`);
+        } else if (idx === 1 && !isContactLine) {
+          // Second line: Title / Designation
+          resultElements.push(`<div style="font-weight: 600; font-size: 13px; color: #475569; margin-top: 2px;">${line}</div>`);
+        } else if (isEmailLine) {
+          const mailVal = line.replace(/^email:\s*/i, "").trim();
+          resultElements.push(`<div style="font-size: 12px; color: #334155; margin-top: 4px;"><strong>Email:</strong> <a href="mailto:${mailVal}" style="color: #2563eb; text-decoration: underline;">${mailVal}</a></div>`);
+        } else if (isTelLine) {
+          const telVal = line.replace(/^(tel|phone|mobile):\s*/i, "").trim();
+          resultElements.push(`<div style="font-size: 12px; color: #334155; margin-top: 2px;"><strong>Tel:</strong> <a href="tel:${telVal}" style="color: #334155; text-decoration: none;">${telVal}</a></div>`);
+        } else {
+          resultElements.push(`<div style="font-size: 12px; color: #475569; margin-top: 2px;">${line}</div>`);
         }
+      });
 
-        return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: #1e293b; line-height: 1.5; margin-top: 16px;">${resultLines.join("<br/>")}</div>`;
+      if (!logoInserted && logoHtml) {
+        resultElements.push(logoHtml);
       }
 
-      return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: #1e293b; line-height: 1.5; margin-top: 16px;">${raw.replace(/\n/g, "<br/>")}</div>`;
+      return `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+          ${resultElements.join("")}
+        </div>
+      `;
     }
 
-    // Default Structured Signature matching user image
+    // Default Structured Signature
     return `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: #0f172a; line-height: 1.4; margin-top: 16px;">
-        <div style="font-weight: 800; font-size: 14px; color: #0f172a;">${fullName}</div>
-        ${title ? `<div style="font-weight: 700; font-size: 13px; color: #1e293b; margin-top: 2px;">${title}</div>` : ""}
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+        <div style="font-weight: 800; font-size: 14px; color: #0f172a;">${fullName || "QA/QC Engineer"}</div>
+        ${title ? `<div style="font-weight: 600; font-size: 13px; color: #475569; margin-top: 2px;">${title}</div>` : ""}
         ${logoHtml}
-        ${email ? `<div style="font-size: 12px; color: #334155; margin-top: 4px;">Email: <a href="mailto:${email}" style="color: #2563eb; text-decoration: underline;">${email}</a></div>` : ""}
-        ${phone ? `<div style="font-size: 12px; color: #334155; margin-top: 2px;">Tel: ${phone}</div>` : ""}
+        ${email ? `<div style="font-size: 12px; color: #334155; margin-top: 4px;"><strong>Email:</strong> <a href="mailto:${email}" style="color: #2563eb; text-decoration: underline;">${email}</a></div>` : ""}
+        ${phone ? `<div style="font-size: 12px; color: #334155; margin-top: 2px;"><strong>Tel:</strong> <a href="tel:${phone}" style="color: #334155; text-decoration: none;">${phone}</a></div>` : ""}
       </div>
     `;
   }

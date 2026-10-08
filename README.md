@@ -1,10 +1,10 @@
-# JQMS Enterprise — Construction Quality Management System
+# JQMS Enterprise — Multi-Dimensional Civil & Structural Quality Management System
 
 <div align="center">
 
 ![JQMS Enterprise Banner](https://raw.githubusercontent.com/lucide-react/lucide/main/icons/shield-check.svg)
 
-**Enterprise-Grade Civil & Structural Quality Management, Digital Inspections, Concrete & Rebar Analytics, Executive Presentation Reporting, and Multi-Tenant Project Governance.**
+**Enterprise-Grade Civil & Structural Quality Governance, 2D–7D BIM Digital Twinning, ISO 9001:2015 Engineering Workflows, Materials Lab Analytics, 1D Rebar Optimization, Executive Landscape Presentation Decks, and Multi-Tenant RBAC.**
 
 [![React](https://img.shields.io/badge/React-18.3.1-blue.svg?logo=react&logoColor=white)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7.3-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -13,9 +13,10 @@
 [![Three.js](https://img.shields.io/badge/Three.js-0.173.0-black.svg?logo=three.js&logoColor=white)](https://threejs.org/)
 [![Firebase](https://img.shields.io/badge/Firebase-Firestore_%26_Auth-FFCA28.svg?logo=firebase&logoColor=black)](https://firebase.google.com/)
 [![Netlify](https://img.shields.io/badge/Netlify-Serverless_Functions-00C7B7.svg?logo=netlify&logoColor=white)](https://www.netlify.com/)
+[![ISO Standard](https://img.shields.io/badge/ISO-9001%3A2015_Compliant-success.svg)](https://www.iso.org/iso-9001-quality-management.html)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 
-[Features](#-key-features--modules) • [Architecture](#-architecture--data-flow) • [Engineering Standards](#-engineering-standards--compliance) • [Getting Started](#-getting-started) • [Configuration](#-configuration--environment) • [Deployment](#-deployment-guide) • [RBAC](#-role-based-access-control-rbac)
+[Executive Summary](#-executive-summary) • [2D–7D BIM Ecosystem](#-2d7d-bim-digital-twin-ecosystem) • [Quality Modules](#-core-quality--engineering-modules) • [Navigation Architecture](#-streamlined-navigation--module-tabs) • [System Architecture](#-system-architecture--data-flow) • [Engineering Standards](#-engineering-standards--compliance) • [RBAC Security](#-role-based-access-control-rbac) • [Getting Started](#-getting-started) • [Deployment](#-build--deployment)
 
 ---
 
@@ -23,94 +24,149 @@
 
 ## 📌 Executive Summary
 
-**JQMS Enterprise** is a mission-critical digital quality management platform engineered specifically for high-rise, infrastructure, and large-scale civil construction developments. It bridges the gap between field engineering teams, QA/QC managers, project directors, and consultants by replacing paper checklists and disjointed spreadsheets with real-time auditability, standard-compliant structural registries, and executive-level landscape reporting decks.
+**JQMS Enterprise (Jay-QMS)** is an end-to-end digital quality management and virtual design construction (VDC) platform engineered for tier-1 contractors, structural consultants, supervising engineers, and project owners. 
 
-### Core Objectives
-- **Zero-Loss Traceability**: Track structural elements from design intent, bar cutting, pre-pour inspection, concrete batching, compressive strength curing, to handover sign-off.
-- **Standards-Grounded Engineering**: Built natively around British Standards (`BS EN`), American Standards (`ASTM`), and International Quality Systems (`ISO 9001:2015`).
-- **Real-Time Multi-Tenant Governance**: Granular 5-level role-based access control (RBAC) supporting multi-company environments and project-specific permission boundaries.
-- **Offline-First Resilience**: IndexedDB-backed offline vault (`idb`) that caches field inputs and automatically syncs when network connectivity is restored.
-- **Dual-Engine Executive Reporting**: High-resolution vector PDF generators (`jsPDF`) combined with an interactive 16:9 landscape presentation deck engine for weekly client and executive boardroom reviews.
+By unifying **multi-dimensional BIM modeling (2D–7D)**, statutory **ISO 9001:2015 quality assurance workflows**, **concrete & steel laboratory registries**, **material supply chain gatekeeping**, and **executive landscape reporting**, JQMS eliminates disjointed paper documentation and disconnected spreadsheets in favor of an auditable, real-time single source of truth.
+
+```mermaid
+graph LR
+    subgraph DesignAndBIM ["2D-7D BIM & Virtual Design"]
+        A1["2D Spatial CAD"] --> A2["3D WebGL Twin"]
+        A2 --> A3["4D Time Schedule"]
+        A3 --> A4["5D Cost Valuation"]
+        A4 --> A5["6D Carbon / ESG"]
+        A5 --> A6["7D Asset Passports"]
+    end
+
+    subgraph LabAndTesting ["Materials Lab & Engineering"]
+        B1["PTP Clearance"] --> B2["Concrete Cube Registry"]
+        B3["1D BBS Cutting"] --> B4["Steel Tensile/Bend"]
+        B5["Delivery Tracking"] --> B6["MIR Inspection Gate"]
+    end
+
+    subgraph QualityGovernance ["ISO 9001:2015 Quality & Governance"]
+        C1["ITP & RAMS"] --> C2["Site Inspections"]
+        C2 --> C3["NCR Lifecycle"]
+        C3 --> C4["SI / Observations"]
+        C4 --> C5["RFI Clarifications"]
+    end
+
+    subgraph ExecutiveOutputs ["Executive Transmittals & Reporting"]
+        D1["16:9 Landscape Slide Deck"]
+        D2["High-Resolution Vector PDFs"]
+        D3["Corporate SMTP Gateway"]
+    end
+
+    DesignAndBIM --> ExecutiveOutputs
+    LabAndTesting --> ExecutiveOutputs
+    QualityGovernance --> ExecutiveOutputs
+```
 
 ---
 
-## 🚀 Key Features & Modules
+## 🌐 2D–7D BIM Digital Twin Ecosystem
 
-### 1. Quality Assurance & Non-Conformance Management
-- **NCR (Non-Conformance Reports)**: Full lifecycle workflow (Issuance $\rightarrow$ Root Cause Analysis $\rightarrow$ Proposed Disposition $\rightarrow$ Corrective & Preventive Action $\rightarrow$ Re-inspection $\rightarrow$ Close-out) with photographic evidence and digital signature sign-offs.
-- **Site Instructions (SI)**: Formal engineer instructions linked directly to structural levels and elements with mandatory contractor acknowledgment and compliance tracking.
-- **Site Comments (SC)**: Rapid field observation logging with geotagged media and priority grading (Minor, Moderate, Critical).
-- **RFI (Request for Information)**: Clarification query engine connecting contractor site teams with structural, architectural, and MEP consultants.
-- **MAR & MIR (Material Submittals & Site Ingestion)**:
-  - **MAR (Material Approval Request)**: Spec sheet verification, manufacturer test certificate (MTC) audits, and consultant approvals.
-  - **MIR (Material Inspection Request)**: Gatekeeper receiving inspection on physical site delivery with batch number verification and QA/QC approval.
+JQMS features a dedicated multi-dimensional BIM suite accessible via the unified BIM Dimension Navigator (`BIMDimensionNav`), enabling cross-functional tracking from spatial coordinates to lifecycle asset operations:
 
-### 2. Inspection & Test Plans (ITP) & Digital Checklists
-- **Dynamic Trade & ITP Registry**: Built-in master templates across Earthworks, Concrete, Structural Steel, Waterproofing, Masonry, MEP, and Architectural Finishes.
-- **Inspection Gates**: Strict enforcement of **Hold Points (H)**, **Witness Points (W)**, **Review Points (R)**, and **Surveillance Points (S)**.
-- **Interactive Checklists**: Real-time pass/fail inspection item sign-offs with GPS-validated timestamps and audit signatures.
+| Dimension | Module Path | Domain | Description & Capabilities |
+| :--- | :--- | :--- | :--- |
+| **2D Spatial CAD** | `/project/grid-plan` | Spatial Layout | Interactive structural slab layout with CAD gridline axes (X/Y), element boundary envelopes, click-to-inspect member cards, and real-time inspection defect heatmaps. |
+| **3D Structural Twin** | `/project/bim-3d` | Geometric Twin | High-performance Three.js WebGL viewport rendering structural elements (columns, beams, slabs, shear walls) with interactive orbital controls, level slicing, and pour-state color coding. |
+| **4D Quality Planner** | `/project/planner` | Time & Gating | Gantt-style time-phased construction timeline synchronizing structural milestones, planned vs. actual concrete pours, and inspection hold point dependencies. |
+| **5D Cost & BOQ** | `/project/5d-cost` | Commercial Valuation | Dynamic Bill of Quantities (BOQ) takeoff engine calculating trade breakdown costs (Concrete, Rebar, Formwork, Labor, Plant). Includes project rate overrides and direct Firestore persistence (`updateProjectCostRates`). |
+| **6D Embodied Carbon** | `/project/6d-carbon` | Sustainability & ESG | Embodied carbon accounting based on the Inventory of Carbon and Energy (ICE). Computes total $tCO_2e$, carbon intensity ($kgCO_2e/m^3$), and SCM clinker replacement offsets (GGBS/PFA) with Firestore persistence (`updateProjectCarbonFactors`). |
+| **7D Asset Passports** | `/project/elements` | Lifecycle & Maintenance | Comprehensive structural member registry providing serialized asset passports, scannable adhesive QR codes, full quality inspection histories, maintenance records, and warranty documentation. |
+| **MTO Take-Off** | `/project/mto` | Material Schedules | Automated volumetric and tonnage takeoff engine generating aggregated schedules for concrete grades, rebar weights, and formwork surface areas. |
 
-### 3. Concrete Batching & Early Strength Analytics
-- **Permit to Pour (PTP)**: Multi-trade digital clearance gate (Rebar, Formwork, MEP Cast-in, Cleanliness, Surveyor Levels) required before any concrete discharge.
-- **Concrete Cube Compression Registry**:
+---
+
+## 🛡 Core Quality & Engineering Modules
+
+### 1. ISO 9001:2015 Quality Assurance & Defect Management
+- **Non-Conformance Reports (NCR)** (`/project/ncr`): Full lifecycle governance: Identification $\rightarrow$ Root Cause Analysis $\rightarrow$ Proposed Disposition $\rightarrow$ Corrective & Preventive Action (CAPA) $\rightarrow$ Verification & Close-out, with photo evidence and digital sign-offs.
+- **Site Instructions (SI)** (`/project/site-instructions`): Formal contractual directives issued by the Engineer/Consultant with mandatory contractor acknowledgment and real-time compliance tracking.
+- **Site Comments & Observations (SC)** (`/project/site-comments`): Rapid on-site snag and hazard logging with severity classification (Minor, Moderate, Critical) and geotagged photographic logs.
+- **Request for Information (RFI)** (`/project/rfis`): Engineering clarification tracking connecting contractor technical teams with architectural, structural, and MEP consultants.
+
+### 2. Engineering Submittals & Gating
+- **Inspection & Test Plans (ITP)** (`/project/itp`): Master quality inspection plans defining statutory hold points (**H**), witness points (**W**), review points (**R**), and surveillance points (**S**).
+- **Material Approval Requests (MAR)** (`/project/mar`): Engineering material submittals with manufacturer test certificates (MTC), technical datasheets, compliance verifications, and consultant approval stamps.
+- **Method Statements & RAMS** (`/project/method-statements`): Work execution procedures and Risk Assessment Method Statements (RAMS) review and clearance.
+- **QA/QC SOP Manual** (`/project/sop-manual`): Standard Operating Procedures, regulatory references, and quality handbooks accessible directly to field teams.
+
+### 3. Concrete Batching & Testing Laboratory
+- **Permit to Pour (PTP)** (`/project/permit-to-pour`): Multi-trade clearance gate requiring sequential sign-offs (Surveyor, Rebar, Formwork, MEP Cast-in, Quality Engineer) prior to authorizing concrete discharge.
+- **Concrete Cube Compression Registry** (`/project/cube-tests`):
   - Compliant with **BS EN 12390-3**, **ASTM C39**, and **IS 516**.
-  - Track 3-day, 7-day, 14-day, and 28-day curing tests against target characteristic strength ($f_{ck}$).
-  - Real-time early-strength regression forecasting: warns engineers if 7-day results project a 28-day failure.
-  - Density calculations ($kg/m^3$), fracture type classification, and automated batch compliance flags.
+  - Automated tracking of 3-day, 7-day, 14-day, and 28-day curing intervals against specified characteristic strength ($f_{ck}$).
+  - **Early-Strength Predictive Regression**: Early warning algorithm alerting engineers when 7-day compressive test results project a probable 28-day failure.
+  - Density calculations ($kg/m^3$), fracture pattern classification (Satisfactory/Unsatisfactory), and automated batch compliance flags.
 
-### 4. Bar Bending Schedule (BBS) & Rebar Optimization
-- **Rebar Cutting Registry**: Compliant with **BS 8666** and **ASTM A615** standard shape codes.
-- **1D Cutting Stock Optimization**: Algorithmic linear-programming optimizer to calculate minimum scrap patterns from standard 12-meter commercial stock lengths.
-- **Tensile & Bend Test Log**: Yield strength ($R_e$), ultimate tensile strength ($R_m$), elongation ratio, and cold-bend test verification.
+### 4. Rebar Analytics & 1D Cutting Optimization
+- **Bar Bending Schedules (BBS)** (`/project/bar-cutting`): Rebar scheduling and shape code compliance adhering to **BS 8666** and **ASTM A615**.
+- **1D Stock Cutting Optimizer**: Algorithmic linear-programming cutting optimizer calculating optimal cut patterns from 12-meter commercial stock lengths to minimize scrap waste.
+- **Steel Tensile & Bend Test Register** (`/project/steel-tests`): Quality records for yield strength ($R_e$), ultimate tensile strength ($R_m$), elongation ratio, and cold-bend ductility testing.
 
-### 5. Spatial 2D & 3D Interactive Visualization
-- **3D Structural Model Viewer**: WebGL canvas powered by **Three.js** and **React Three Fiber** for visualizing building levels, structural elements, and real-time pour status.
-- **Interactive 2D Grid Plan Overlays**: Interactive structural slab layouts with click-to-inspect element cards, CAD gridlines, and defect heatmaps.
+### 5. Material Supply Chain & Receiving
+- **Material Deliveries** (`/project/deliveries`): Real-time tracking of site material deliveries, delivery dockets, batch numbers, and stock receipts.
+- **Material Inspection Requests (MIR)** (`/project/mir`): Physical gatekeeper receiving inspections on arrival to verify physical condition against approved MAR submittals.
 
-### 6. Executive Weekly Reporting & Presentation Deck Engine
-- **16:9 Landscape Executive Slides**: Interactive cockpit featuring Executive Command Matrix, Level Progress Completion, Quality KPI Trendlines, Cube Strength Histograms, and Photographic Progress.
-- **Direct PDF Export**: High-resolution print engine matching presentation styling with embedded SVG vector charts and CAD overlays.
-- **Theme-Responsive UI**: Seamless switching between Dark Slate and Clean Light presentation modes.
-
-### 7. Action Center, Site Diary & Handover
-- **Action Center**: Consolidated cockpit of pending sign-offs, overdue NCRs, expiring RFIs, and high-priority inspections.
-- **Daily Site Diary**: Manpower headcounts, plant/equipment utilization, weather logs, and daily progress logs.
-- **Punch List & Handover**: Room-by-room snagging tracker with handover Taking-Over Certificate (TOC) generation.
-
-### 8. Corporate SMTP Gateway & Email Relay
-- **Netlify Serverless Relay**: Secure backend function (`netlify/functions/send-email.ts`) powered by **Nodemailer**.
-- **Per-Company SMTP Server Configuration**: Support for custom corporate SMTP relays (Host, Port, Secure/TLS, Username, Password).
-- **Personal Engineer Credentials & Auto-Signatures**: Engineers can configure individual sender mailboxes and embed high-resolution company logos in their HTML email signatures.
+### 6. Executive Reporting & Presentation Deck Engine
+- **16:9 Landscape Presentation Deck** (`/project/weekly-reports`): Interactive boardroom-ready reporting cockpit featuring Executive Summaries, Level-by-Level Completion Matrices, Quality Trendlines, Cube Strength Histograms, and Photographic Progress.
+- **High-Resolution Vector PDF Generator**: Direct client-side PDF export matching executive slide styling with embedded SVG vector charts and CAD overlays.
+- **Corporate SMTP Relay & Signatures**: Serverless email relay sending formal notices with embedded corporate logos and engineer digital signatures.
 
 ---
 
-## 🏗 Architecture & Data Flow
+## 🧭 Streamlined Navigation & Module Tabs
+
+To maintain a clean and uncluttered user interface, JQMS employs a **Streamlined Sidebar** paired with contextual **In-Page Sub-Navigation (`ModuleTabNav`)**:
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│  Streamlined Primary Sidebar       Contextual In-Page Sub-Navigation Tabs        │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│  📁 Quality Assurance       ───►  [ NCRs ] [ Site Instructions ] [ Observations ] │
+│  📋 Submittals & Gating     ───►  [ ITPs ] [ MAR ] [ RFIs ] [ RAMS ] [ SOP Manual]│
+│  🧪 Testing & Concrete Lab  ───►  [ Concrete ] [ Steel Tests ] [ BBS ] [ PTP ]   │
+│  📦 Supply Chain            ───►  [ Deliveries ] [ Material Inspections (MIR) ]  │
+│  📅 Inspections             ───►  [ Quality Inspections ] [ Inspection Schedule ]│
+│  📊 Executive Reporting     ───►  [ Executive Overview ] [ Weekly Reports Archive]│
+│  🌐 BIM Digital Twin        ───►  [ 2D ] [ 3D ] [ 4D ] [ 5D ] [ 6D ] [ 7D ] [MTO] │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+This dual-tier navigation ensures that all related modules are accessible within one click while keeping the primary workspace free of repetitive menu items.
+
+---
+
+## 🏗 System Architecture & Data Flow
 
 ```mermaid
 flowchart TD
-    subgraph Client ["Client Browser (React 18 + Vite 6 + Tailwind CSS)"]
-        UI["Application UI / Dashboard / Modules"]
-        Zustand["Zustand State Store"]
-        IDB[("IndexedDB Vault (Offline Cache)")]
+    subgraph ClientLayer ["Client Browser (React 18 + Vite 6 + Tailwind CSS)"]
+        UI["Application Shell & Pages"]
+        Zustand["Zustand Store (useProjectStore / useAuthStore)"]
+        IDB[("IndexedDB Vault (Offline Storage)")]
         ThreeJS["Three.js / WebGL 3D Viewport"]
-        PDFGen["jsPDF & HTML2Canvas Engine"]
+        PDFGen["jsPDF Vector & Canvas Print Engine"]
     end
 
-    subgraph FirebaseServices ["Firebase Cloud Infrastructure"]
-        Auth["Firebase Authentication"]
-        Firestore[("Cloud Firestore (Real-time DB)")]
-        RTDB[("Firebase Realtime Database (Presence/Chat)")]
-        Storage[("Firebase Storage / Cloudinary CDN")]
+    subgraph FirebaseCloud ["Google Firebase Infrastructure"]
+        Auth["Firebase Authentication (JWT)"]
+        Firestore[("Cloud Firestore (Real-Time NoSQL)")]
+        RTDB[("Firebase Realtime DB (Presence / Alerts)")]
+        Storage[("Firebase Storage (Attachments)")]
     end
 
-    subgraph ServerlessLayer ["Netlify Cloud Infrastructure"]
+    subgraph ServerlessGateway ["Netlify Cloud Layer"]
         NetlifyEdge["Netlify Edge Router (SPA Rewrites)"]
-        NetlifyFn["Netlify Serverless Function (send-email)"]
+        NetlifyFn["Netlify Serverless Function (/send-email)"]
     end
 
-    subgraph ExternalGateways ["External Enterprise Services"]
-        SMTP["Corporate SMTP Server (TLS/SSL)"]
-        CloudinaryAPI["Cloudinary Optimized Image CDN"]
+    subgraph ExternalServices ["External Corporate Integrations"]
+        SMTP["Corporate SMTP Server (TLS/STARTTLS)"]
+        CloudinaryAPI["Cloudinary Image Optimization CDN"]
     end
 
     UI <--> Zustand
@@ -125,7 +181,7 @@ flowchart TD
 
     UI -- "POST /api/send-email" --> NetlifyEdge --> NetlifyFn
     NetlifyFn -- "Authenticated SMTP" --> SMTP
-    UI -- "Asset Uploads" --> CloudinaryAPI
+    UI -- "Photo Uploads" --> CloudinaryAPI
 ```
 
 ---
@@ -140,36 +196,51 @@ jay-qms/
 ├── public/                          # Static assets, fallback logos, fonts
 ├── src/
 │   ├── components/
-│   │   ├── common/                  # Shared UI (Navigation, ErrorBoundary, Guards, Modals)
-│   │   ├── cube/                    # Concrete cube forms, graphs, test matrices
+│   │   ├── bim/                     # 2D–7D BIM Navigation & Viewport components
+│   │   │   ├── BIMDimensionNav.tsx  # Unified 2D–7D pill navigation bar
+│   │   │   ├── Element3DViewer.tsx  # Three.js 3D WebGL structural viewport
+│   │   │   ├── Element5DCostViewer.tsx   # 5D BOQ Cost takeoff & DB persist
+│   │   │   └── Element6DCarbonViewer.tsx # 6D Embodied Carbon & DB persist
+│   │   ├── common/                  # Shared UI (Sidebar, ModuleTabNav, Navbar, Modals)
+│   │   │   ├── ModuleTabNav.tsx     # Contextual in-page horizontal sub-navigation
+│   │   │   └── Sidebar.tsx          # Streamlined domain-grouped sidebar
+│   │   ├── cube/                    # Concrete cube forms, regression graphs, test matrices
 │   │   ├── dashboard/               # Executive dashboard widgets & metric cards
-│   │   ├── itp/                     # Inspection and Test Plan builder & cards
+│   │   ├── itp/                     # Inspection & Test Plan builder and cards
 │   │   ├── projects/                # Multi-project selector, creator, editor
+│   │   ├── registry/                # Structural element cards, filters & table views
 │   │   └── reporting/               # Weekly report deck, matrix cockpit, slide components
 │   ├── lib/
 │   │   ├── audit.ts                 # Audit logging helper
 │   │   ├── barCuttingOptimizer.ts   # 1D knapsack stock cutting optimizer
-│   │   ├── bbsParser.ts             # BBS shape code and bend parser
+│   │   ├── bbsParser.ts             # BBS shape code and bend dimension parser
 │   │   ├── cloudinary.ts            # Image optimization and Cloudinary upload helper
 │   │   ├── companyHelper.ts         # Company settings & SMTP configuration manager
-│   │   ├── db.ts                    # Firestore CRUD, queries, and offline cache hydration
+│   │   ├── db.ts                    # Firestore CRUD, rates persistence & cache hydration
 │   │   ├── idbVault.ts              # IndexedDB local storage engine
 │   │   ├── pdfGenerators.ts         # Multi-module jsPDF vector document builder
 │   │   ├── permissions.ts           # Role hierarchy, capabilities, and permission checks
 │   │   └── rbac.tsx                 # React RBAC Gate components & hooks
-│   ├── pages/                       # 30+ Dedicated Module & Registry Pages
-│   │   ├── Dashboard.tsx            # Project executive KPI dashboard
-│   │   ├── WeeklyReportDetail.tsx   # 16:9 Landscape Executive Report Deck
+│   ├── pages/                       # 30+ Dedicated Domain & Module Pages
+│   │   ├── Dashboard.tsx            # Executive KPI cockpit
+│   │   ├── ElementRegistry.tsx      # 7D Asset Passport & Member Registry
+│   │   ├── GridPlanPage.tsx         # 2D Spatial CAD Grid & Defect Heatmaps
+│   │   ├── BIM3DViewerPage.tsx      # 3D Structural WebGL Twin
+│   │   ├── QualityPlannerPage.tsx   # 4D Quality & Inspection Timeline Planner
+│   │   ├── Cost5DViewerPage.tsx     # 5D Commercial BOQ Cost Takeoff
+│   │   ├── Carbon6DViewerPage.tsx   # 6D Embodied Carbon & Sustainability
+│   │   ├── MTOViewerPage.tsx        # Material Take-Off Volume/Weight Schedules
 │   │   ├── NCRModule.tsx            # Non-conformance registry & workflow
 │   │   ├── PermitToPourDetail.tsx   # Concrete pour permit & sign-off gate
 │   │   ├── CubeDetails.tsx          # Concrete test register & early strength curve
-│   │   ├── BarCuttingRegistryPage.tsx # Rebar cutting schedule manager
-│   │   ├── Settings.tsx             # Company & corporate SMTP configuration
-│   │   ├── ProfilePage.tsx          # Personal mailbox, signatures & company logo
-│   │   └── ...
-│   ├── services/
-│   │   ├── emailService.ts          # Email dispatch helper & HTML signature builder
-│   │   └── pdf/                     # Modular PDF generators (Weekly Reports, NCR, etc.)
+│   │   ├── SteelTestsPage.tsx       # Rebar tensile & cold-bend test register
+│   │   ├── BarCuttingRegistryPage.tsx # 1D Rebar cutting schedule manager
+│   │   ├── WeeklyReportDetail.tsx   # 16:9 Landscape Executive Report Deck
+│   │   ├── Settings.tsx             # Corporate SMTP configuration & branding
+│   │   └── ProfilePage.tsx          # Personal mailbox, signatures & company logo
+│   ├── stores/                      # Zustand State Stores
+│   │   ├── useAuthStore.ts          # Authentication, user profile & permissions
+│   │   └── useProjectStore.ts       # Active project data, cost rates, carbon factors
 │   ├── types/                       # TypeScript domain interfaces & enumerations
 │   ├── App.tsx                      # App routing, code-splitting & layout wrappers
 │   ├── firebase.ts                  # Firebase client SDK initialization
@@ -178,7 +249,7 @@ jay-qms/
 ├── netlify.toml                     # Netlify build configuration & redirect routes
 ├── package.json                     # NPM project metadata & dependencies
 ├── tsconfig.json                    # TypeScript compiler configuration
-├── vite.config.ts                   # Vite configuration (Path aliases, plugins)
+├── vite.config.ts                   # Vite configuration & path aliases
 └── tailwind.config.js               # Tailwind styling & dark mode palette
 ```
 
@@ -186,21 +257,21 @@ jay-qms/
 
 ## 🛡 Role-Based Access Control (RBAC)
 
-JQMS enforces a hierarchical 5-level security matrix to guarantee data governance across corporate management, engineering teams, and subcontractors:
+JQMS enforces a strict 5-tier hierarchical security matrix governing multi-tenant organizations, projects, and field actions:
 
-| Level | Role Identifier | Title | Core Capabilities |
+| Tier | Role Identifier | Level Title | Permissions & Capabilities |
 | :---: | :--- | :--- | :--- |
-| **5** | `SUPER_ADMIN`<br>`QUALITY_DIRECTOR`<br>`EXECUTIVE_MANAGEMENT` | **Corporate Executive** | Full multi-company control, corporate SMTP configuration, company-wide user management, master trade definitions, global audit trail access. |
-| **4** | `PROJECT_MANAGER`<br>`OPERATIONS_MANAGER`<br>`QAQC_MANAGER` | **Project Director / Lead** | Project creation & configuration, team role assignments, ITP master sign-offs, Weekly Report approval, high-level project deletion/archival. |
-| **3** | `QAQC_ENGINEER`<br>`SENIOR_INSPECTOR`<br>`CONSULTANT_REPRESENTATIVE` | **QA/QC Engineer / Consultant** | Approve & close NCRs, sign off Permit to Pour gates, approve Material Submittals (MAR/MIR), approve RFI resolutions, issue Site Instructions. |
-| **2** | `SITE_ENGINEER`<br>`FIELD_INSPECTOR`<br>`SUBCONTRACTOR_LEAD` | **Field Engineer** | Create & submit inspection requests, log daily site entries, record concrete cube test readings, draft NCRs and RFIs, enter bar cutting schedules. |
-| **1** | `SUBCONTRACTOR_WORKER`<br>`CONSULTANT_OBSERVER`<br>`VIEWER` | **Observer / Subcontractor** | Read-only access to assigned projects, view open punch lists, acknowledge site instructions, view approved construction drawings. |
+| **5** | `SUPER_ADMIN`<br>`QUALITY_DIRECTOR`<br>`EXECUTIVE_MANAGEMENT` | **Corporate Executive** | Full multi-company management, corporate SMTP configuration, company-wide user management, master trade definitions, and global audit log access. |
+| **4** | `PROJECT_MANAGER`<br>`OPERATIONS_MANAGER`<br>`QAQC_MANAGER` | **Project Director / Lead** | Project creation & configuration, team role assignments, ITP master approvals, Weekly Report sign-offs, 5D/6D rate baseline management, and project archival. |
+| **3** | `QAQC_ENGINEER`<br>`SENIOR_INSPECTOR`<br>`CONSULTANT_REPRESENTATIVE` | **QA/QC Engineer / Consultant** | Close NCRs, sign off Permit to Pour gates, approve Material Submittals (MAR/MIR), approve RFI responses, and issue formal Site Instructions. |
+| **2** | `SITE_ENGINEER`<br>`FIELD_INSPECTOR`<br>`SUBCONTRACTOR_LEAD` | **Field Engineer** | Raise inspection requests, log daily site diary entries, record concrete cube test readings, draft NCRs and RFIs, and enter bar cutting schedules. |
+| **1** | `SUBCONTRACTOR_WORKER`<br>`CONSULTANT_OBSERVER`<br>`VIEWER` | **Observer / Subcontractor** | Read-only access to assigned projects, view open punch lists, acknowledge site instructions, and view approved construction drawings. |
 
 ---
 
 ## 📐 Engineering Standards & Compliance
 
-The calculation engines within JQMS are strictly modeled after international standards:
+All engineering calculations, test schedules, and reporting structures comply with international standards:
 
 - **Concrete Compressive Strength**:
   - `BS EN 12390-3`: Testing hardened concrete — Compressive strength of test specimens.
@@ -210,7 +281,10 @@ The calculation engines within JQMS are strictly modeled after international sta
   - `BS 8666`: Scheduling, dimensioning, bending, and cutting of steel reinforcement for concrete.
   - `BS 4449`: Steel for the reinforcement of concrete — Weldable reinforcing steel.
   - `ASTM A615 / A615M`: Standard Specification for Deformed and Plain Carbon-Steel Bars for Concrete Reinforcement.
-- **Quality Management System**:
+- **Embodied Carbon & Sustainability**:
+  - `ICE Database v3.0`: Inventory of Carbon and Energy embodied carbon factors.
+  - `EN 15978`: Sustainability of construction works — Assessment of environmental performance of buildings.
+- **Quality Management Systems**:
   - `ISO 9001:2015 Clause 9.1`: Monitoring, measurement, analysis, and evaluation of quality performance.
 
 ---
@@ -220,7 +294,7 @@ The calculation engines within JQMS are strictly modeled after international sta
 ### Prerequisites
 - **Node.js**: `v18.x` or `v20.x` LTS recommended
 - **npm**: `v9.x` or higher (or `pnpm` / `yarn`)
-- **Firebase Project**: An active Firebase project with Firestore, Authentication, and Storage enabled.
+- **Firebase Project**: Firestore, Authentication, and Storage enabled.
 
 ### Installation
 
@@ -236,98 +310,62 @@ The calculation engines within JQMS are strictly modeled after international sta
    ```
 
 3. **Configure Environment Variables**:
-   Create a `.env.local` file in the root directory (refer to [Configuration](#-configuration--environment)):
-   ```bash
-   cp .env.example .env.local
+   Create a `.env.local` file in the root directory:
+   ```env
+   VITE_FIREBASE_API_KEY=your_api_key
+   VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+   VITE_FIREBASE_PROJECT_ID=your_project_id
+   VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+   VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+   VITE_FIREBASE_APP_ID=your_app_id
+   
+   # Optional: Cloudinary Media CDN for Photo Optimization
+   VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name
+   VITE_CLOUDINARY_UPLOAD_PRESET=your_unsigned_preset
    ```
 
 4. **Start Local Development Server**:
    ```bash
    npm run dev
    ```
-   Open your browser at `http://localhost:5173`.
+   Open `http://localhost:5173` in your browser.
 
 ---
 
-## ⚙ Configuration & Environment
+## ⚙ Corporate SMTP & Email Configuration
 
-### 1. Firebase Client Configuration (`src/firebase.ts`)
-Update `src/firebase.ts` or provide environment variables for your Firebase project:
-```typescript
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
-```
+JQMS supports sending formal notices and reports via custom corporate SMTP relays (e.g., Microsoft 365, Google Workspace, AWS SES, or private SMTP servers):
 
-### 2. Cloudinary Media CDN (Optional for High-Res Photos)
-To enable automatic client-side photo compression and Cloudinary CDN uploads:
-```env
-VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name
-VITE_CLOUDINARY_UPLOAD_PRESET=your_unsigned_preset
-```
-
-### 3. Corporate SMTP & Email Server Relay
-JQMS allows companies to send emails through their own corporate SMTP gateway (e.g., Microsoft 365, Google Workspace, AWS SES, or private SMTP servers):
-
-1. **Navigate to Company Settings** (`/company/settings`).
-2. **Configure Corporate SMTP Relay**:
-   - **SMTP Host**: `smtp.office365.com` / `smtp.gmail.com` / `mail.yourcompany.com`
-   - **SMTP Port**: `587` (STARTTLS) or `465` (SSL)
-   - **Secure Connection**: `TLS` / `SSL`
-   - **Sender Email & Authentication**: Corporate system sender address and credentials.
-3. **Configure Engineer Mailbox & Email Signature** (`/project/profile`):
-   - Set individual engineer credentials if sending via personal mailbox.
-   - Click **"Embed Company Logo in Email Signature"** to automatically include the high-resolution company branding logo in all outgoing formal emails (NCRs, Weekly Reports, RFIs).
+1. **Configure Corporate SMTP Relay** (`/company/settings`):
+   - **Host**: `smtp.office365.com` / `smtp.gmail.com` / `mail.yourcompany.com`
+   - **Port**: `587` (STARTTLS) or `465` (SSL)
+   - **Authentication**: System sender credentials.
+2. **Personal Engineer Signature & Branding** (`/project/profile`):
+   - Configure personal sender mailbox credentials if sending directly.
+   - Toggle **"Embed Company Logo in Email Signature"** to automatically append company branding to all outgoing emails (NCRs, Weekly Reports, RFIs).
 
 ---
 
 ## 📦 Build & Deployment
 
 ### Production Build
-To create an optimized, type-checked production bundle:
 ```bash
 npm run build
 ```
-This executes `tsc` (TypeScript compiler) followed by `vite build`, outputting compiled assets into the `dist/` directory.
+Executes TypeScript compilation (`tsc`) and Vite bundling, generating optimized production assets in `dist/`.
 
-### Deploying to Netlify (Recommended)
-This repository contains a pre-configured `netlify.toml` file with serverless function routing:
-
-1. **Connect Git Repository** to [Netlify](https://www.netlify.com/).
-2. **Build Settings**:
-   - **Build Command**: `npm run build`
-   - **Publish Directory**: `dist`
-   - **Functions Directory**: `netlify/functions`
-3. **Environment Variables**:
-   Add `VITE_FIREBASE_*` and any other custom environment variables in **Site configuration $\rightarrow$ Environment variables**.
-4. **Deploy**: Netlify will automatically build the React SPA and compile the `netlify/functions/send-email.ts` serverless relay.
-
-### Testing Netlify Functions Locally
-To test the serverless SMTP relay locally:
-```bash
-npx netlify dev
-```
-
----
-
-## 🧪 Available Scripts
-
-| Command | Description |
-| :--- | :--- |
-| `npm run dev` | Starts the Vite local development server with Hot Module Replacement (HMR). |
-| `npm run build` | Runs full TypeScript static analysis and builds the production bundle in `dist/`. |
-| `npm run preview` | Spins up a local web server to preview the production build output. |
+### Netlify Deployment
+The project is pre-configured with `netlify.toml` for seamless continuous deployment:
+1. Link your repository to **Netlify**.
+2. Set build command to `npm run build` and publish directory to `dist`.
+3. Configure environment variables in Netlify site settings.
+4. Deploy — Netlify will build the SPA and deploy the `netlify/functions/send-email.ts` serverless relay.
 
 ---
 
 ## 📄 License & Intellectual Property
 
-This software and associated documentation files are proprietary and confidential. Unauthorized copying, distribution, modification, or deployment of this software, via any medium, is strictly prohibited without the express written permission of the copyright holder.
+This software and associated documentation files are proprietary and confidential. Unauthorized copying, distribution, modification, or deployment of this software, via any medium, is strictly prohibited without express written permission.
 
 ---
 

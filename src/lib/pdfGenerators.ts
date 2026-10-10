@@ -1343,6 +1343,81 @@ export function generateInspectionRequestPDF(
 
 export const generateInspectionPDF = generateInspectionRequestPDF;
 
+// Helper to format multi-line observation conditions and directives
+function formatObservationItemsHtml(
+  rawText: string,
+  options: {
+    title: string;
+    titleColor: string;
+    bulletColor?: string;
+    textColor?: string;
+  }
+): string {
+  if (!rawText || !rawText.trim()) {
+    return `
+      <div style="font-size: 7.5px; color: #64748b; margin-bottom: 3.5px;">
+        <strong style="color: ${options.titleColor}; text-transform: uppercase; font-size: 6.8px; display: block; margin-bottom: 1.5px;">${options.title}:</strong>
+        <span style="font-style: italic;">—</span>
+      </div>
+    `;
+  }
+
+  // Normalize HTML line breaks and split by newline
+  const normalized = rawText.replace(/<br\s*\/?>/gi, "\n");
+  const lines = normalized
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return `
+      <div style="font-size: 7.5px; color: #64748b; margin-bottom: 3.5px;">
+        <strong style="color: ${options.titleColor}; text-transform: uppercase; font-size: 6.8px; display: block; margin-bottom: 1.5px;">${options.title}:</strong>
+        <span style="font-style: italic;">—</span>
+      </div>
+    `;
+  }
+
+  // Single line: Render cleanly with white-space pre-line so any soft wraps are preserved
+  if (lines.length === 1) {
+    return `
+      <div style="font-size: 7.5px; color: ${options.textColor || "#0f172a"}; margin-bottom: 3.5px;">
+        <strong style="color: ${options.titleColor}; text-transform: uppercase; font-size: 6.8px; display: block; margin-bottom: 1.5px;">${options.title}:</strong>
+        <div style="white-space: pre-line; line-height: 1.45;">${lines[0]}</div>
+      </div>
+    `;
+  }
+
+  // Multiple lines (e.g. Issue 1, Issue 2 or Directive 1, Directive 2 entered with Enter key)
+  // Check if lines already have manual numbering or bullets (e.g. "1.", "a)", "•", "-")
+  const alreadyNumbered = lines.every((l) =>
+    /^(\d+[\.\)]|[a-zA-Z][\.\)]|[-•*])\s*/.test(l)
+  );
+
+  const itemsHtml = lines
+    .map((line, idx) => {
+      const prefix = alreadyNumbered
+        ? ""
+        : `<span style="font-weight: 700; color: ${options.bulletColor || options.titleColor}; margin-right: 4px; min-width: 13px; display: inline-block;">${idx + 1}.</span>`;
+      return `
+        <div style="display: flex; align-items: flex-start; line-height: 1.4; margin-bottom: 2.5px;">
+          ${prefix}
+          <span style="flex: 1; white-space: pre-line;">${line}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  return `
+    <div style="font-size: 7.5px; color: ${options.textColor || "#0f172a"}; margin-bottom: 4px;">
+      <strong style="color: ${options.titleColor}; text-transform: uppercase; font-size: 6.8px; display: block; margin-bottom: 2px;">${options.title}:</strong>
+      <div style="padding-left: 1px;">
+        ${itemsHtml}
+      </div>
+    </div>
+  `;
+}
+
 // =========================================================================
 // 3. SITE COMMENTS / QUALITY OBSERVATION REPORT
 // =========================================================================
@@ -1443,15 +1518,19 @@ export function generateSiteCommentsPDF(
                 <div style="font-size: 7px; color: #475569; margin-top: 2px;"><strong>Trade:</strong> ${obs.tradeName || obs.trade || "Civil"}</div>
               </td>
               <td>
-                <div style="font-size: 7.5px; color: #0f172a; margin-bottom: 3px;">
-                  <strong style="color: #991b1b; text-transform: uppercase; font-size: 6.8px; display: block;">Observed Condition:</strong>
-                  ${text}
-                </div>
-                <div style="font-size: 7.5px; color: #166534; margin-bottom: 3px;">
-                  <strong style="color: #15803d; text-transform: uppercase; font-size: 6.8px; display: block;">Corrective Directive:</strong>
-                  ${directive}
-                </div>
-                <div style="font-size: 7px; color: #64748b;">
+                ${formatObservationItemsHtml(text, {
+                  title: "Observed Condition",
+                  titleColor: "#991b1b",
+                  bulletColor: "#991b1b",
+                  textColor: "#0f172a",
+                })}
+                ${formatObservationItemsHtml(directive, {
+                  title: "Corrective Directive",
+                  titleColor: "#15803d",
+                  bulletColor: "#15803d",
+                  textColor: "#166534",
+                })}
+                <div style="font-size: 7px; color: #64748b; margin-top: 2px;">
                   Assigned To: <strong>${obs.assignedTo || obs.assignedSubcontractor || "Contractor"}</strong>
                   ${obs.dueDate ? ` | Target Due: ${formatDate(obs.dueDate)}` : ""}
                 </div>
@@ -3545,7 +3624,7 @@ export function generateWeeklyReportPDF(
                 <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(c.date || c.createdAt)}</td>
                 <td>${c.level || selectedLevel} &bull; ${c.location || "3-5/C-D"}</td>
                 <td style="font-weight: 700;">${c.element || "Structural Element"}</td>
-                <td style="font-size: 7.5px; line-height: 1.4; color: #334155;">${c.comments || c.text || "Routine inspection observation"}</td>
+                <td style="font-size: 7.5px; line-height: 1.4; color: #334155; white-space: pre-line;">${(c.comments || c.text || "Routine inspection observation").replace(/<br\s*\/?>/gi, "\n")}</td>
                 <td>${c.inspector || compilerName}${c.vendorCheck ? ` / ${c.vendorCheck}` : ""}</td>
                 <td style="text-align: center; font-weight: 800; color: ${color}; font-size: 7.5px;">${st}</td>
               </tr>

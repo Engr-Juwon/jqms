@@ -1,0 +1,88 @@
+{
+  "name": "JQMS Enterprise — Civil & Structural Quality Management System",
+  "short_name": "JQMS",
+  "description": "Enterprise-grade Civil & Structural Quality Management, 2D–7D BIM, Digital Inspections, Materials Lab Analytics, and Executive Reporting.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/assets/jqms-icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/jqms-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/jqms-icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/jqms-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Quality Inspections",
+      "short_name": "Inspections",
+      "description": "View and record site quality inspections",
+      "url": "/project/inspections",
+      "icons": [
+        {
+          "src": "/assets/jqms-icon.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Non-Conformance Reports",
+      "short_name": "NCRs",
+      "description": "Manage and resolve non-conformance reports",
+      "url": "/project/ncr",
+      "icons": [
+        {
+          "src": "/assets/jqms-icon.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Permit to Pour",
+      "short_name": "PTP",
+      "description": "Pre-pour inspection clearance gates",
+      "url": "/project/permit-to-pour",
+      "icons": [
+        {
+          "src": "/assets/jqms-icon.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Concrete Cube Registry",
+      "short_name": "Cubes",
+      "description": "Concrete compressive strength testing and early prediction",
+      "url": "/project/cube-tests",
+      "icons": [
+        {
+          "src": "/assets/jqms-icon.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

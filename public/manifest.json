@@ -1,4 +1,6 @@
 {
+  "$schema": "https://json.schemastore.org/web-manifest-combined.json",
+  "id": "/?source=pwa",
   "name": "JQMS Enterprise — Civil & Structural Quality Management System",
   "short_name": "JQMS",
   "description": "Enterprise-grade Civil & Structural Quality Management, 2D–7D BIM, Digital Inspections, Materials Lab Analytics, and Executive Reporting.",
@@ -11,28 +13,34 @@
   "categories": ["business", "productivity", "utilities"],
   "icons": [
     {
-      "src": "/assets/jqms-icon.png",
+      "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/jqms-icon.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/assets/jqms-icon.png",
+      "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/jqms-icon.png",
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/jqms-icon.png",
+      "sizes": "300x300",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
   "shortcuts": [
@@ -43,8 +51,9 @@
       "url": "/project/inspections",
       "icons": [
         {
-          "src": "/assets/jqms-icon.png",
-          "sizes": "192x192"
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     },
@@ -55,8 +64,9 @@
       "url": "/project/ncr",
       "icons": [
         {
-          "src": "/assets/jqms-icon.png",
-          "sizes": "192x192"
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     },
@@ -67,8 +77,9 @@
       "url": "/project/permit-to-pour",
       "icons": [
         {
-          "src": "/assets/jqms-icon.png",
-          "sizes": "192x192"
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     },
@@ -79,10 +90,27 @@
       "url": "/project/cube-tests",
       "icons": [
         {
-          "src": "/assets/jqms-icon.png",
-          "sizes": "192x192"
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/screenshot-desktop.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "JQMS Enterprise Executive Quality Cockpit & 3D BIM Twin"
+    },
+    {
+      "src": "/screenshots/screenshot-mobile.png",
+      "sizes": "750x1334",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "JQMS Mobile Field Inspections, PTP Gates & Non-Conformance Reports"
     }
   ]
 }

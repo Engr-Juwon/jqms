@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { getRoleLevel, ROLE_TITLES, canAccessRoute } from '@/lib/permissions';
 import { ShieldAlert, ArrowLeft, Loader2 } from 'lucide-react';
+import PageLoadingFallback from './PageLoadingFallback';
 
 interface CompanyGuardProps {
   minRole?: number;
@@ -20,12 +21,7 @@ export const CompanyGuard: React.FC<CompanyGuardProps> = ({ minRole, children })
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-slate-300">
-        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin mb-3" />
-        <span className="text-xs font-semibold tracking-wider uppercase text-slate-400">
-          Authenticating Workspace Session...
-        </span>
-      </div>
+      <PageLoadingFallback />
     );
   }
 

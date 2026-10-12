@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -6,8 +6,9 @@ import { dbService, sortByNewestFirst } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { hasPermission } from "@/lib/rbac";
 import { generateSiteCommentsPDF } from "@/lib/pdfGenerators";
-import { SiteCommentReport, ObservationItem } from "@/types";
+import { SiteCommentReport, ObservationItem, ProjectLevel, StructuralElement } from "@/types";
 import { parseTradeAndSubtrade } from "@/lib/tradeUtils";
+import { toast } from "react-hot-toast";
 import {
   MessageSquareWarning,
   Plus,
@@ -25,6 +26,12 @@ import {
   Calendar,
   Edit3,
   FileWarning,
+  Filter,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  Clock,
+  Sparkles,
 } from "lucide-react";
 import { ModuleTabNav } from "@/components/common/ModuleTabNav";
 
@@ -47,18 +54,48 @@ export const SiteCommentsRegistry: React.FC = () => {
   const [reports, setReports] = useState<SiteCommentReport[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [severityFilter, setSeverityFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "OPEN" | "RECTIFIED">("ALL");
+  const [selectedLevelFilter, setSelectedLevelFilter] = useState<string>("ALL");
+  const [selectedElementFilter, setSelectedElementFilter] = useState<string>("ALL");
   const [selectedPhoto, setSelectedPhoto] = useState<NormalizedPhoto | null>(
     null,
   );
 
-  const loadData = async () => {
-    if (!currentProjId) return;
-    const list = await dbService.getSiteComments(currentProjId, currentCompId);
-    setReports(sortByNewestFirst(list));
+  // Expanded report cards state for mobile (defaults to expanded)
+  const [collapsedReports, setCollapsedReports] = useState<Record<string, boolean>>({});
+
+  const toggleReportCollapse = (reportId: string) => {
+    setCollapsedReports((prev) => ({
+      ...prev,
+      [reportId]: !prev[reportId],
+    }));
   };
 
+  // Real-time live listener for Site Comments
   useEffect(() => {
-    loadData();
+    if (!currentProjId) return;
+
+    // Load initial cache first for instant UI response
+    dbService.getSiteComments(currentProjId, currentCompId).then((cached) => {
+      if (cached && cached.length > 0) {
+        setReports(sortByNewestFirst(cached));
+      }
+    });
+
+    const unsubscribe = dbService.subscribeSiteComments(
+      currentProjId,
+      (liveList) => {
+        setReports((prev) => {
+          if (prev.length > 0 && liveList.length > prev.length) {
+            toast.success("New site observation report synced!", { id: "live-site-obs-sync" });
+          }
+          return sortByNewestFirst(liveList);
+        });
+      },
+      currentCompId,
+    );
+
+    return () => unsubscribe();
   }, [currentProjId, currentCompId]);
 
   // Helpers to extract fields seamlessly across Firestore and local schemas
@@ -154,52 +191,96 @@ export const SiteCommentsRegistry: React.FC = () => {
     0,
   );
 
-  const filteredReports = sortByNewestFirst(
-    reports.filter((r) => {
-      const term = searchTerm.toLowerCase().trim();
-      const title = getReportTitle(r).toLowerCase();
-      const repNum = (r.reportNumber || "").toLowerCase();
-      const projName = (r.projectName || "").toLowerCase();
-      const locDesc = (r.locationDescription || "").toLowerCase();
-      const inspector = getInspectorName(r).toLowerCase();
-
-      const matchesObservations = (r.observations || []).some((o) => {
-        const text = getObsText(o).toLowerCase();
-        const directive = getObsDirective(o).toLowerCase();
-        const assigned = getObsAssigned(o).toLowerCase();
-        const element = getObsElement(o).toLowerCase();
-        const grid = getObsGrid(o).toLowerCase();
-        const parsedTrade = parseTradeAndSubtrade(o);
-        const trade = parsedTrade.trade.toLowerCase();
-        const subtrade = parsedTrade.subtrade.toLowerCase();
-        return (
-          text.includes(term) ||
-          directive.includes(term) ||
-          assigned.includes(term) ||
-          element.includes(term) ||
-          grid.includes(term) ||
-          trade.includes(term) ||
-          subtrade.includes(term)
-        );
+  // Derive distinct levels and elements present across current reports for instant filtering
+  const availableLevels = useMemo(() => {
+    const set = new Set<string>();
+    reports.forEach((r) => {
+      r.observations?.forEach((o) => {
+        const lvl = getObsLevel(o);
+        if (lvl && lvl !== "General Site") set.add(lvl);
       });
+    });
+    return Array.from(set).sort();
+  }, [reports]);
 
-      const matchSearch =
-        !term ||
-        repNum.includes(term) ||
-        title.includes(term) ||
-        projName.includes(term) ||
-        locDesc.includes(term) ||
-        inspector.includes(term) ||
-        matchesObservations;
+  const availableElements = useMemo(() => {
+    const set = new Set<string>();
+    reports.forEach((r) => {
+      r.observations?.forEach((o) => {
+        const el = getObsElement(o);
+        if (el) set.add(el);
+      });
+    });
+    return Array.from(set).sort();
+  }, [reports]);
 
-      const matchSeverity =
-        severityFilter === "ALL" ||
-        (r.observations &&
-          r.observations.some((o) => getObsSeverity(o) === severityFilter));
+  const filteredReports = useMemo(() => {
+    return sortByNewestFirst(
+      reports.filter((r) => {
+        const term = searchTerm.toLowerCase().trim();
+        const title = getReportTitle(r).toLowerCase();
+        const repNum = (r.reportNumber || "").toLowerCase();
+        const projName = (r.projectName || "").toLowerCase();
+        const locDesc = (r.locationDescription || "").toLowerCase();
+        const inspector = getInspectorName(r).toLowerCase();
 
-      return matchSearch && matchSeverity;
-    }),
-  );
+        const matchesObservations = (r.observations || []).some((o) => {
+          const text = getObsText(o).toLowerCase();
+          const directive = getObsDirective(o).toLowerCase();
+          const assigned = getObsAssigned(o).toLowerCase();
+          const element = getObsElement(o).toLowerCase();
+          const grid = getObsGrid(o).toLowerCase();
+          const parsedTrade = parseTradeAndSubtrade(o);
+          const trade = parsedTrade.trade.toLowerCase();
+          const subtrade = parsedTrade.subtrade.toLowerCase();
+          return (
+            text.includes(term) ||
+            directive.includes(term) ||
+            assigned.includes(term) ||
+            element.includes(term) ||
+            grid.includes(term) ||
+            trade.includes(term) ||
+            subtrade.includes(term)
+          );
+        });
+
+        const matchSearch =
+          !term ||
+          repNum.includes(term) ||
+          title.includes(term) ||
+          projName.includes(term) ||
+          locDesc.includes(term) ||
+          inspector.includes(term) ||
+          matchesObservations;
+
+        const matchSeverity =
+          severityFilter === "ALL" ||
+          (r.observations &&
+            r.observations.some((o) => getObsSeverity(o) === severityFilter));
+
+        const matchStatus =
+          statusFilter === "ALL" ||
+          (statusFilter === "OPEN" &&
+            r.observations &&
+            r.observations.some(isObsOpen)) ||
+          (statusFilter === "RECTIFIED" &&
+            r.observations &&
+            r.observations.some(isObsRectified));
+
+        const matchLevel =
+          selectedLevelFilter === "ALL" ||
+          (r.observations &&
+            r.observations.some((o) => getObsLevel(o) === selectedLevelFilter));
+
+        const matchElement =
+          selectedElementFilter === "ALL" ||
+          (r.observations &&
+            r.observations.some((o) => getObsElement(o) === selectedElementFilter));
+
+        return matchSearch && matchSeverity && matchStatus && matchLevel && matchElement;
+      }),
+    );
+  }, [reports, searchTerm, severityFilter, statusFilter, selectedLevelFilter, selectedElementFilter]);
 
   const handleUpdateObservationStatus = async (
     report: SiteCommentReport,
@@ -394,33 +475,140 @@ export const SiteCommentsRegistry: React.FC = () => {
         </div>
       </div>
 
-      {/* Search & Filter Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl">
-        <div className="relative flex-1 min-w-[240px] max-w-sm">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search ref, element, grid, comments, assignee..."
-            className="w-full pl-9 pr-4 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-brand-500 transition"
-          />
-        </div>
+      {/* Search & Filter Bar with Quick Chips */}
+      <div className="space-y-3 p-4 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search ref, element name, grid location, directive..."
+              className="w-full pl-9 pr-9 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-brand-500 transition"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
-        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs">
-          {["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"].map((sev) => (
+          {/* Status Quick Filter Pills */}
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs shrink-0 overflow-x-auto scrollbar-none">
             <button
-              key={sev}
-              onClick={() => setSeverityFilter(sev)}
-              className={`px-3 py-1.5 rounded-lg font-semibold transition ${
-                severityFilter === sev
-                  ? "bg-brand-600 text-white shadow"
+              onClick={() => setStatusFilter("ALL")}
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1 whitespace-nowrap min-h-[36px] ${
+                statusFilter === "ALL"
+                  ? "bg-brand-600 text-white shadow-sm"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
               }`}
             >
-              {sev}
+              <span>All Statuses</span>
             </button>
-          ))}
+            <button
+              onClick={() => setStatusFilter("OPEN")}
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1 whitespace-nowrap min-h-[36px] ${
+                statusFilter === "OPEN"
+                  ? "bg-red-600 text-white shadow-sm"
+                  : "text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Open ({openObs})</span>
+            </button>
+            <button
+              onClick={() => setStatusFilter("RECTIFIED")}
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1 whitespace-nowrap min-h-[36px] ${
+                statusFilter === "RECTIFIED"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Rectified ({rectifiedObs})</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Level and Element Dropdowns & Quick Pills */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+            <Filter className="w-3.5 h-3.5 text-brand-500" />
+            <span>Filter By:</span>
+          </div>
+
+          {/* Level Filter Dropdown */}
+          {availableLevels.length > 0 && (
+            <div className="relative">
+              <select
+                value={selectedLevelFilter}
+                onChange={(e) => setSelectedLevelFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-brand-500 transition"
+              >
+                <option value="ALL">🏢 All Levels ({availableLevels.length})</option>
+                {availableLevels.map((lvl) => (
+                  <option key={lvl} value={lvl}>
+                    {lvl}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Element Filter Dropdown */}
+          {availableElements.length > 0 && (
+            <div className="relative">
+              <select
+                value={selectedElementFilter}
+                onChange={(e) => setSelectedElementFilter(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-brand-500 transition max-w-[200px] truncate"
+              >
+                <option value="ALL">🧱 All Elements ({availableElements.length})</option>
+                {availableElements.map((el) => (
+                  <option key={el} value={el}>
+                    {el}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Severity Badges */}
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-none ml-auto">
+            {["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"].map((sev) => (
+              <button
+                key={sev}
+                onClick={() => setSeverityFilter(sev)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition whitespace-nowrap ${
+                  severityFilter === sev
+                    ? "bg-brand-600 text-white shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800/60"
+                }`}
+              >
+                {sev}
+              </button>
+            ))}
+          </div>
+
+          {(selectedLevelFilter !== "ALL" || selectedElementFilter !== "ALL" || severityFilter !== "ALL" || statusFilter !== "ALL" || searchTerm) && (
+            <button
+              onClick={() => {
+                setSelectedLevelFilter("ALL");
+                setSelectedElementFilter("ALL");
+                setSeverityFilter("ALL");
+                setStatusFilter("ALL");
+                setSearchTerm("");
+              }}
+              className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline ml-1"
+            >
+              Reset filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -433,7 +621,7 @@ export const SiteCommentsRegistry: React.FC = () => {
               No site comments found
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Try changing your search keywords or severity filter.
+              Try changing your search keywords or active filters.
             </p>
           </div>
         ) : (
@@ -442,69 +630,96 @@ export const SiteCommentsRegistry: React.FC = () => {
             const inspectorName = getInspectorName(report);
             const inspectorRole = getInspectorRole(report);
             const obsList = report.observations || [];
+            const isCollapsed = Boolean(collapsedReports[report.id]);
+            const reportOpenCount = obsList.filter(isObsOpen).length;
+            const reportRectifiedCount = obsList.filter(isObsRectified).length;
 
             return (
               <div
                 key={report.id}
-                className="p-5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-sm dark:shadow-xl space-y-4 transition"
+                className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-sm dark:shadow-xl space-y-3 sm:space-y-4 transition"
               >
-                {/* Report Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
-                  <div className="flex flex-wrap items-center gap-3">
+                {/* Report Header - Optimized for Mobile Tapping */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleReportCollapse(report.id)}
+                      className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                      title={isCollapsed ? "Expand Observations" : "Collapse Observations"}
+                    >
+                      {isCollapsed ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronUp className="w-4 h-4" />
+                      )}
+                    </button>
+
                     <span className="font-mono text-xs font-bold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 px-2.5 py-1 rounded-lg border border-brand-200 dark:border-brand-500/20">
                       {report.reportNumber || "QC/COMMENTS"}
                     </span>
+
                     {report.status === "DRAFT" && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30">
                         DRAFT
                       </span>
                     )}
+
                     <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                       {reportTitle}
                     </h3>
-                    {report.projectName && (
-                      <span className="text-[11px] text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                        {report.projectName}
-                      </span>
-                    )}
-                  </div>
 
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-                      <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
-                      <span>{report.inspectionDate || "N/A"}</span>
-                      {report.inspectionTime && (
-                        <span className="text-slate-400 dark:text-slate-500">
-                          ({report.inspectionTime})
+                    {/* Quick status counters */}
+                    <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
+                      {reportOpenCount > 0 && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800/40">
+                          {reportOpenCount} Open
+                        </span>
+                      )}
+                      {reportRectifiedCount > 0 && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/40">
+                          {reportRectifiedCount} Rectified
                         </span>
                       )}
                     </div>
-                    <Link
-                      to={`/project/site-comments/edit/${report.id}`}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition shadow-sm ml-1"
-                      title="Edit Site Observation Report"
-                    >
-                      <Edit3 className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
-                      <span>Edit</span>
-                    </Link>
-                    <button
-                      onClick={() =>
-                        generateSiteCommentsPDF(
-                          report,
-                          activeProject || {},
-                          company || {},
-                        )
-                      }
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition shadow-sm"
-                      title="Download Publication-Ready PDF Report"
-                    >
-                      <FileDown className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
-                      <span>PDF Report</span>
-                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                      <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                      <span>{report.inspectionDate || "N/A"}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        to={`/project/site-comments/edit/${report.id}`}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition shadow-sm min-h-[34px]"
+                        title="Edit Site Observation Report"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
+                        <span>Edit</span>
+                      </Link>
+                      <button
+                        onClick={() =>
+                          generateSiteCommentsPDF(
+                            report,
+                            activeProject || {},
+                            company || {},
+                          )
+                        }
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition shadow-sm min-h-[34px]"
+                        title="Download Publication-Ready PDF Report"
+                      >
+                        <FileDown className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                        <span className="hidden sm:inline">PDF Report</span>
+                        <span className="sm:hidden">PDF</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Observations Table / Cards */}
+                {/* Observations Table / Cards (Collapsible) */}
+                {!isCollapsed && (
                 <div className="space-y-3">
                   {obsList.map((obs, idx) => {
                     const photos = getObsPhotos(obs);
@@ -524,7 +739,7 @@ export const SiteCommentsRegistry: React.FC = () => {
                         className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800/80 grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs"
                       >
                         {/* Left: Location & Metadata */}
-                        <div className="lg:col-span-3 space-y-2 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-800 pb-2 lg:pb-0 lg:pr-3">
+                        <div className="lg:col-span-3 space-y-2 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-800 pb-3 lg:pb-0 lg:pr-3">
                           <div className="flex items-center justify-between">
                             <span className="font-bold text-slate-800 dark:text-slate-300">
                               Observation #{idx + 1}
@@ -550,7 +765,7 @@ export const SiteCommentsRegistry: React.FC = () => {
                                     e.target.value,
                                   )
                                 }
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold border cursor-pointer focus:outline-none transition ${
+                                className={`px-2 py-1 rounded-lg text-xs font-bold border cursor-pointer focus:outline-none transition min-h-[32px] ${
                                   rectified
                                     ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700/50"
                                     : status === "Non-Compliant"
@@ -728,6 +943,7 @@ export const SiteCommentsRegistry: React.FC = () => {
                     );
                   })}
                 </div>
+                )}
 
                 {/* Footer Sign-off Info */}
                 <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-200 dark:border-slate-800 gap-2">

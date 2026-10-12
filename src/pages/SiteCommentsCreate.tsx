@@ -39,6 +39,8 @@ import {
   ArrowLeft,
   PenTool,
   Edit3,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 export const SiteCommentsCreate: React.FC = () => {
@@ -134,6 +136,16 @@ export const SiteCommentsCreate: React.FC = () => {
   const [draftTime, setDraftTime] = useState("");
   const [rawDraft, setRawDraft] = useState<any>(null);
   const [isDraftSaving, setIsDraftSaving] = useState(false);
+
+  // Collapsible observation items for mobile ergonomics
+  const [collapsedObs, setCollapsedObs] = useState<Record<number, boolean>>({});
+
+  const toggleObsCollapse = (index: number) => {
+    setCollapsedObs((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
 
   // Check and detect draft from IDB / LocalStorage
   useEffect(() => {
@@ -763,20 +775,41 @@ export const SiteCommentsCreate: React.FC = () => {
             const assignedVal =
               obs.assignedTo || obs.assignedSubcontractor || "";
 
+            const isItemCollapsed = Boolean(collapsedObs[idx]);
+            const elementPreview = obs.structuralElement || obs.elementName || "No element selected";
+            const levelPreview = obs.levelName || "No level";
+
             return (
               <div
                 key={obs.id || idx}
-                className="p-6 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl space-y-4 relative group"
+                className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl space-y-4 relative group"
               >
                 {/* Item Top Bar */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 gap-2">
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleObsCollapse(idx)}
+                      className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                      title={isItemCollapsed ? "Expand Observation" : "Collapse Observation"}
+                    >
+                      {isItemCollapsed ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronUp className="w-4 h-4" />
+                      )}
+                    </button>
                     <span className="w-6 h-6 rounded-lg bg-brand-50 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300 font-bold flex items-center justify-center font-mono text-xs">
                       #{idx + 1}
                     </span>
-                    <span className="font-bold text-slate-800 dark:text-slate-200">
-                      Observation #{idx + 1} & Corrective Directives
+                    <span className="font-bold text-slate-800 dark:text-slate-200 text-xs sm:text-sm">
+                      Observation #{idx + 1}
                     </span>
+                    {isItemCollapsed && (
+                      <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded truncate max-w-[180px]">
+                        {elementPreview} ({levelPreview})
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -787,17 +820,18 @@ export const SiteCommentsCreate: React.FC = () => {
                         setActiveObsIndexForSnippet(idx);
                         setIsSnippetDrawerOpen(true);
                       }}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 dark:hover:bg-purple-900/70 border border-purple-200 dark:border-purple-800/60 text-purple-700 dark:text-purple-300 text-[11px] font-semibold transition shadow-sm"
+                      className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 dark:hover:bg-purple-900/70 border border-purple-200 dark:border-purple-800/60 text-purple-700 dark:text-purple-300 text-[11px] font-semibold transition shadow-sm min-h-[32px]"
                     >
                       <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-                      <span>Insert QA/QC Remark Snippet</span>
+                      <span className="hidden sm:inline">Insert QA/QC Remark Snippet</span>
+                      <span className="sm:hidden">Snippet</span>
                     </button>
 
                     {observations.length > 1 && (
                       <button
                         type="button"
                         onClick={() => handleRemoveObservation(idx)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition min-h-[32px] min-w-[32px] flex items-center justify-center"
                         title="Delete this observation"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -806,9 +840,12 @@ export const SiteCommentsCreate: React.FC = () => {
                   </div>
                 </div>
 
+                {!isItemCollapsed && (
+                  <>
+
                 {/* Master Data Selectors */}
                 <div className="space-y-3">
-                  <LevelElementSelect
+                    <LevelElementSelect
                     projectId={currentProjId}
                     selectedLevelId={obs.levelId}
                     selectedElementId={obs.elementId}
@@ -816,10 +853,13 @@ export const SiteCommentsCreate: React.FC = () => {
                       updateObservationField(idx, "levelId", lId);
                       updateObservationField(idx, "levelName", lName);
                     }}
-                    onElementChange={(elId, elName) => {
+                    onElementChange={(elId, elName, gridLoc) => {
                       updateObservationField(idx, "elementId", elId);
                       updateObservationField(idx, "elementName", elName);
                       updateObservationField(idx, "structuralElement", elName);
+                      if (gridLoc && !obs.gridLocation) {
+                        updateObservationField(idx, "gridLocation", gridLoc);
+                      }
                     }}
                     required
                   />
@@ -1101,6 +1141,8 @@ export const SiteCommentsCreate: React.FC = () => {
                     })}
                   </div>
                 </div>
+                </>
+                )}
               </div>
             );
           })}

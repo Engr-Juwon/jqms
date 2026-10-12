@@ -645,6 +645,48 @@ export const dbService = {
     }
   },
 
+  subscribeElements(
+    projectId: string,
+    callback: (elements: StructuralElement[]) => void,
+    companyId?: string,
+  ): () => void {
+    if (!projectId) {
+      callback([]);
+      return () => {};
+    }
+    try {
+      const constraints: QueryConstraint[] = [
+        where("projectId", "==", projectId),
+      ];
+      if (companyId) constraints.push(where("companyId", "==", companyId));
+
+      const q = query(
+        collection(firestore, "structuralElements"),
+        ...constraints,
+      );
+
+      const unsub = onSnapshot(
+        q,
+        (snap) => {
+          const list = snap.docs.map(
+            (d) => ({ ...d.data(), id: d.id }) as StructuralElement,
+          );
+          if (list.length > 0) {
+            setCache(`jqms_elements_${projectId}`, list);
+          }
+          callback(list);
+        },
+        (err) => {
+          console.warn("subscribeElements snapshot listener warning:", err);
+        },
+      );
+      return unsub;
+    } catch (e) {
+      console.warn("subscribeElements error:", e);
+      return () => {};
+    }
+  },
+
   async saveElement(element: StructuralElement): Promise<void> {
     const cleaned = cleanForFirestore(element);
     const cacheKey = `jqms_elements_${cleaned.projectId}`;
@@ -1017,6 +1059,45 @@ export const dbService = {
     }
   },
 
+  subscribeSiteComments(
+    projectId: string,
+    callback: (reports: SiteCommentReport[]) => void,
+    companyId?: string,
+  ): () => void {
+    if (!projectId) {
+      callback([]);
+      return () => {};
+    }
+    try {
+      const constraints: QueryConstraint[] = [
+        where("projectId", "==", projectId),
+      ];
+      if (companyId) constraints.push(where("companyId", "==", companyId));
+
+      const q = query(collection(firestore, "site_comments"), ...constraints);
+      const unsub = onSnapshot(
+        q,
+        (snap) => {
+          const rawList = snap.docs.map(
+            (d) => ({ ...d.data(), id: d.id }) as SiteCommentReport,
+          );
+          const list = sortByNewestFirst(rawList);
+          if (list.length > 0) {
+            setCache(`jqms_site_comments_${projectId}`, list);
+          }
+          callback(list);
+        },
+        (err) => {
+          console.warn("subscribeSiteComments snapshot listener warning:", err);
+        },
+      );
+      return unsub;
+    } catch (e) {
+      console.warn("subscribeSiteComments error:", e);
+      return () => {};
+    }
+  },
+
   // --- Non-Conformance Reports (NCR) ---
   async getNCR(id: string): Promise<NonConformanceReport | null> {
     try {
@@ -1096,6 +1177,45 @@ export const dbService = {
       await setDoc(doc(firestore, "ncrs", cleaned.id), cleaned, { merge: true });
     } catch (e) {
       console.warn("Firestore saveNCR error:", e);
+    }
+  },
+
+  subscribeNCRs(
+    projectId: string,
+    callback: (ncrs: NonConformanceReport[]) => void,
+    companyId?: string,
+  ): () => void {
+    if (!projectId) {
+      callback([]);
+      return () => {};
+    }
+    try {
+      const constraints: QueryConstraint[] = [
+        where("projectId", "==", projectId),
+      ];
+      if (companyId) constraints.push(where("companyId", "==", companyId));
+
+      const q = query(collection(firestore, "ncrs"), ...constraints);
+      const unsub = onSnapshot(
+        q,
+        (snap) => {
+          const rawList = snap.docs.map(
+            (d) => ({ ...d.data(), id: d.id }) as NonConformanceReport,
+          );
+          const list = sortByNewestFirst(rawList);
+          if (list.length > 0) {
+            setCache(`jqms_ncrs_${projectId}`, list);
+          }
+          callback(list);
+        },
+        (err) => {
+          console.warn("subscribeNCRs snapshot listener warning:", err);
+        },
+      );
+      return unsub;
+    } catch (e) {
+      console.warn("subscribeNCRs error:", e);
+      return () => {};
     }
   },
 
@@ -1583,6 +1703,45 @@ export const dbService = {
       });
     } catch (e) {
       console.warn("Firestore saveInspection error:", e);
+    }
+  },
+
+  subscribeInspections(
+    projectId: string,
+    callback: (inspections: InspectionRequest[]) => void,
+    companyId?: string,
+  ): () => void {
+    if (!projectId) {
+      callback([]);
+      return () => {};
+    }
+    try {
+      const constraints: QueryConstraint[] = [
+        where("projectId", "==", projectId),
+      ];
+      if (companyId) constraints.push(where("companyId", "==", companyId));
+
+      const q = query(collection(firestore, "inspections"), ...constraints);
+      const unsub = onSnapshot(
+        q,
+        (snap) => {
+          const rawList = snap.docs.map(
+            (d) => ({ ...d.data(), id: d.id }) as InspectionRequest,
+          );
+          const list = sortByNewestFirst(rawList);
+          if (list.length > 0) {
+            setCache(`jqms_inspections_${projectId}`, list);
+          }
+          callback(list);
+        },
+        (err) => {
+          console.warn("subscribeInspections snapshot listener warning:", err);
+        },
+      );
+      return unsub;
+    } catch (e) {
+      console.warn("subscribeInspections error:", e);
+      return () => {};
     }
   },
 

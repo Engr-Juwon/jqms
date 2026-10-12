@@ -151,7 +151,8 @@ export const Index: React.FC = () => {
 
               {/* Go to Dashboard */}
               <Link
-                to="/select-project"
+                to="/project/dashboard"
+                aria-label="Go to dashboard"
                 className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-lg shadow-brand-500/25 transition flex items-center gap-1.5"
               >
                 <LayoutDashboard className="w-3.5 h-3.5" />

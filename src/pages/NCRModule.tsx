@@ -41,6 +41,12 @@ export const NCRModule: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [severityFilter, setSeverityFilter] = useState("ALL");
 
+  const ncrsRef = React.useRef<NonConformanceReport[]>([]);
+  const isInitialLoadRef = React.useRef(true);
+  useEffect(() => {
+    ncrsRef.current = ncrs;
+  }, [ncrs]);
+
   const loadData = async () => {
     if (!currentProjId) return;
     const list = await dbService.getNCRs(currentProjId, currentCompId);
@@ -48,8 +54,58 @@ export const NCRModule: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!currentProjId) return;
+    isInitialLoadRef.current = true;
     loadData();
-  }, [currentProjId, currentCompId]);
+
+    const unsub = dbService.subscribeNCRs(
+      currentProjId,
+      (incoming) => {
+        if (!incoming) return;
+
+        if (isInitialLoadRef.current) {
+          isInitialLoadRef.current = false;
+          setNcrs(sortByNewestFirst(incoming));
+          return;
+        }
+
+        const prevList = ncrsRef.current;
+        const prevMap = new Map(prevList.map((n) => [n.id, n]));
+        const incomingMap = new Map(incoming.map((n) => [n.id, n]));
+        const currentUid = currentUser?.uid;
+
+        incoming.forEach((item) => {
+          const prev = prevMap.get(item.id);
+          if (!prev) {
+            if (item.raisedBy?.uid && item.raisedBy.uid !== currentUid) {
+              toast.error(`⚠️ New NCR ${item.ncrNumber || "Defect"} raised: ${item.title || ""}`, {
+                duration: 5000,
+              });
+            }
+          } else if (prev.status !== item.status) {
+            toast(`⚡ NCR ${item.ncrNumber} status changed to ${item.status}`, {
+              icon: "📋",
+              duration: 4000,
+            });
+          }
+        });
+
+        prevList.forEach((prevItem) => {
+          if (!incomingMap.has(prevItem.id)) {
+            toast(`NCR ${prevItem.ncrNumber} was removed`, {
+              icon: "🗑️",
+              duration: 4000,
+            });
+          }
+        });
+
+        setNcrs(sortByNewestFirst(incoming));
+      },
+      currentCompId,
+    );
+
+    return () => unsub();
+  }, [currentProjId, currentCompId, currentUser?.uid]);
 
   const handleDeleteNCR = async (ncr: NonConformanceReport) => {
     const confirmDelete = window.confirm(

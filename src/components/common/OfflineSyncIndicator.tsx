@@ -68,7 +68,7 @@ export const OfflineSyncIndicator: React.FC = () => {
       )}
 
       {/* Floating Network & Sync Status Pill (Bottom-Right across all pages) */}
-      <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 font-sans select-none">
+      <div className="fixed bottom-12 left-4 z-40 flex flex-col items-end gap-2 font-sans select-none">
         {/* Expanded Panel */}
         {expanded && (
           <div className="w-80 p-4 rounded-2xl bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-800 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200 space-y-3.5 text-xs text-slate-800 dark:text-slate-200">
@@ -177,7 +177,7 @@ export const OfflineSyncIndicator: React.FC = () => {
               }`}
             />
           </span>
-
+{/* 
           <span className="tracking-tight">
             {!isOnline
               ? "Offline"
@@ -188,7 +188,7 @@ export const OfflineSyncIndicator: React.FC = () => {
               : latencyMs !== null
               ? `Online (${latencyMs}ms)`
               : "Online"}
-          </span>
+          </span> */}
 
           {expanded ? (
             <ChevronDown className="w-3.5 h-3.5 opacity-60" />

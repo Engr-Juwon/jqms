@@ -12,7 +12,7 @@ export const PageLoadingFallback: React.FC<{ message?: string }> = ({
         </div>
         <div className="absolute -inset-1 rounded-2xl border-2 border-emerald-500/20 animate-spin [animation-duration:3s]" />
       </div>
-
+ 
       <div className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
         <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
         <span>{message}</span>

@@ -29,6 +29,7 @@ import { mapNCRToPDFData } from "@/pages/NCRDetail";
 import { renderCompanyBrandCell } from "@/lib/companyHelper";
 import { renderStructuredInspectionHTML } from "@/lib/inspectionTextFormatter";
 import { useAuthStore } from "@/stores/useAuthStore";
+import { useProjectStore } from "@/stores/useProjectStore";
 
 // ==========================================
 // COMMON STYLES & PRINT ENGINE
@@ -1426,9 +1427,21 @@ export function generateSiteCommentsPDF(
   project: Partial<Project> = {},
   company: Partial<Company> = {},
 ): void {
+  const storeProject = useProjectStore?.getState?.()?.activeProject;
+  const storeProjects = useProjectStore?.getState?.()?.projects || [];
+  const matchedProject = storeProjects.find(
+    (p) => p.id === (report.projectId || (report as any).project)
+  );
+
   const companyName =
-    company.name || report.companyName || "Collection Developments LTD";
-  const projectName = project.name || report.projectName || "Bankside";
+    company?.name || report.companyName || "Collection Developments LTD";
+  const projectName =
+    project?.name ||
+    report.projectName ||
+    (report as any).projectTitle ||
+    matchedProject?.name ||
+    storeProject?.name ||
+    "Site Construction Operations";
   const docRef =
     report.reportNumber || `QC-COMM-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -1466,9 +1479,9 @@ export function generateSiteCommentsPDF(
       <table class="grid-table">
         <tr>
           <td class="grid-label" style="width: 18%;">Project Name:</td>
-            <td class="grid-value" style="width: 32%;">${report.projectName}</td>
-            <td class="grid-label" style="width: 18%;">Inspection Date:</td>
-            <td class="grid-value" style="width: 32%;">${formatDate(report.inspectionDate)}</td>
+          <td class="grid-value" style="width: 32%;">${projectName}</td>
+          <td class="grid-label" style="width: 18%;">Inspection Date:</td>
+          <td class="grid-value" style="width: 32%;">${formatDate(report.inspectionDate)}</td>
         </tr>
         <tr>
           <td class="grid-label">RAISED BY:</td>
@@ -2405,6 +2418,7 @@ export interface WeeklyReportPrintOptions {
   includeSiteInstructions?: boolean; // default true
 }
 
+
 export function generateWeeklyReportPDF(
   report: WeeklyReport,
   project: Partial<Project> = {},
@@ -2449,11 +2463,41 @@ export function generateWeeklyReportPDF(
       ? options.includeSiteInstructions
       : report.includeSiteInstructions !== false;
 
-  const rawStart = report.startDate || report.weekStart || "2026-09-28";
-  const rawEnd = report.endDate || report.weekEnd || "2026-10-03";
-  const startDateStr = formatDateYMD(rawStart);
-  const endDateStr = formatDateYMD(rawEnd);
-  const reportDate = endDateStr;
+  // Helper to format Date string as YYYY-MM-DD
+  function formatDateYMD(dVal?: any): string {
+    if (!dVal) return "";
+    if (typeof dVal === "string") {
+      const trimmed = dVal.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      const parsed = new Date(trimmed);
+      if (!isNaN(parsed.getTime())) {
+        return parsed.toISOString().split("T")[0];
+      }
+      return trimmed;
+    }
+    if (typeof dVal === "number") {
+      return new Date(dVal).toISOString().split("T")[0];
+    }
+    if (dVal instanceof Date && !isNaN(dVal.getTime())) {
+      return dVal.toISOString().split("T")[0];
+    }
+    return "";
+  }
+
+  function currentUserEmail(): string {
+    try {
+      const u = useAuthStore.getState().currentUser;
+      return u?.email || "";
+    } catch {
+      return "";
+    }
+  }
+
+  const rawStart = report.startDate || report.weekStart || "";
+  const rawEnd = report.endDate || report.weekEnd || "";
+  const startDateStr = formatDateYMD(rawStart) || "—";
+  const endDateStr = formatDateYMD(rawEnd) || "—";
+  const reportDate = endDateStr !== "—" ? endDateStr : (formatDateYMD(report.reportDate || report.createdAt) || formatDateYMD(new Date()));
 
   const compiler =
     typeof report.preparedBy === "object" && report.preparedBy
@@ -2462,13 +2506,17 @@ export function generateWeeklyReportPDF(
           name:
             typeof report.preparedBy === "string"
               ? report.preparedBy
-              : "Jesujuwon Oladejo",
+              : "",
           designation: "QA/QC ENGINEER",
           role: "QA/QC ENGINEER",
         };
-  const compilerName = compiler.name || "Jesujuwon Oladejo";
+  const compilerName =
+    compiler.name ||
+    useAuthStore.getState().currentUser?.fullName ||
+    useAuthStore.getState().currentUser?.displayName ||
+    "Authorized QA/QC Engineer";
   const compilerRole = compiler.designation || compiler.role || "QA/QC ENGINEER";
-  const compilerEmail = compiler.email || (currentUserEmail() || "joladejo@collection.gp");
+  const compilerEmail = compiler.email || currentUserEmail() || "—";
   const isCompilerSigned = Boolean(compiler.signed);
   const signatureUrl = compiler.signatureUrl || "";
 
@@ -2540,7 +2588,7 @@ export function generateWeeklyReportPDF(
   const selectedLevel = (
     report.selectedLevel ||
     report.selectedLevelName ||
-    "000 - MEZZANINE"
+    "—"
   ).toUpperCase();
 
   // Aggregate Volumes calculation
@@ -2566,13 +2614,12 @@ export function generateWeeklyReportPDF(
   if (totalScopeVol === 0 && report.totalVolumeCalculated) {
     totalScopeVol = Number(report.totalVolumeCalculated) || 0;
   }
-  if (totalScopeVol === 0) totalScopeVol = 270.7;
-  if (totalAchievedVol === 0 && totalScopeVol > 0) {
-    totalAchievedVol = Math.round(totalScopeVol * 0.98 * 10) / 10;
+  if (totalAchievedVol === 0 && report.totalVolumeAchieved) {
+    totalAchievedVol = Number(report.totalVolumeAchieved) || 0;
   }
 
   const overallPercentage =
-    totalScopeVol > 0 ? Math.round((totalAchievedVol / totalScopeVol) * 100) : 98;
+    totalScopeVol > 0 ? Math.round((totalAchievedVol / totalScopeVol) * 100) : 0;
 
   const openFindingsCount =
     (report.ncrStats?.openTotal ?? 0) +
@@ -2582,38 +2629,11 @@ export function generateWeeklyReportPDF(
     }).length);
 
   const complianceRate =
-    report.overallQualityCompliance ??
-    report.metrics?.inspectionPassRate ??
-    100;
-
-  // Helper to format Date string as YYYY-MM-DD
-  function formatDateYMD(dVal?: any): string {
-    if (!dVal) return "2026-10-03";
-    if (typeof dVal === "string") {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(dVal.trim())) return dVal.trim();
-      const parsed = new Date(dVal);
-      if (!isNaN(parsed.getTime())) {
-        return parsed.toISOString().split("T")[0];
-      }
-      return dVal;
-    }
-    if (typeof dVal === "number") {
-      return new Date(dVal).toISOString().split("T")[0];
-    }
-    if (dVal instanceof Date && !isNaN(dVal.getTime())) {
-      return dVal.toISOString().split("T")[0];
-    }
-    return "2026-10-03";
-  }
-
-  function currentUserEmail(): string {
-    try {
-      const u = useAuthStore.getState().currentUser;
-      return u?.email || "joladejo@collection.gp";
-    } catch {
-      return "joladejo@collection.gp";
-    }
-  }
+    report.overallQualityCompliance !== undefined && report.overallQualityCompliance !== null
+      ? Number(report.overallQualityCompliance)
+      : report.metrics?.inspectionPassRate !== undefined && report.metrics?.inspectionPassRate !== null
+        ? Number(report.metrics.inspectionPassRate)
+        : 100;
 
   // Header Brand Renderer
   const renderHeaderBrand = () => `
@@ -2768,14 +2788,14 @@ export function generateWeeklyReportPDF(
           <!-- Card 1: Total Scope Volume -->
           <div style="background: #ffffff; border: 1px solid #e2e8f0; border-top: 3px solid #0f172a; border-radius: 4px; padding: 12px 14px;">
             <div style="font-size: 7.5px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">TOTAL SCOPE VOLUME</div>
-            <div style="font-size: 24px; font-weight: 900; color: #0f172a; margin: 4px 0 2px 0;">${totalScopeVol.toFixed(0)} m³</div>
+            <div style="font-size: 24px; font-weight: 900; color: #0f172a; margin: 4px 0 2px 0;">${totalScopeVol.toLocaleString(undefined, { maximumFractionDigits: 1 })} m³</div>
             <div style="font-size: 7.5px; color: #94a3b8; font-weight: 600;">Design Volume Target</div>
           </div>
 
           <!-- Card 2: Achieved Volume -->
           <div style="background: #ffffff; border: 1px solid #e2e8f0; border-top: 3px solid #0284c7; border-radius: 4px; padding: 12px 14px;">
             <div style="font-size: 7.5px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">ACHIEVED VOLUME</div>
-            <div style="font-size: 24px; font-weight: 900; color: #0f172a; margin: 4px 0 2px 0;">${totalAchievedVol.toFixed(0)} m³</div>
+            <div style="font-size: 24px; font-weight: 900; color: #0f172a; margin: 4px 0 2px 0;">${totalAchievedVol.toLocaleString(undefined, { maximumFractionDigits: 1 })} m³</div>
             <div style="font-size: 7.5px; color: #94a3b8; font-weight: 600;">${overallPercentage}% Cumulative</div>
           </div>
 
@@ -2804,9 +2824,9 @@ export function generateWeeklyReportPDF(
           <div style="width: 100%; height: 1px; background: #f1f5f9; margin-bottom: 16px;"></div>
           <div style="font-size: 10.5px; line-height: 1.7; color: #334155; font-weight: 500;">
             ${
-              report.synopsis ||
-              report.executiveSummary ||
-              "During the reporting period, structural operations for the active suspended slab advanced with the erection of modular false-work towers reaching substantial completion, along with soffit shuttering using timber H-beams and perimeter formwork panels."
+              (report.synopsis || report.executiveSummary)?.trim()
+                ? (report.synopsis || report.executiveSummary)
+                : `<span style="color: #94a3b8; font-style: italic;">No executive synopsis provided for this reporting period.</span>`
             }
           </div>
         </div>
@@ -2818,8 +2838,8 @@ export function generateWeeklyReportPDF(
   // =========================================================================
   // SLIDE 3: EXECUTIVE SUMMARY: STRATEGIC INSIGHTS
   // =========================================================================
-  const formatBulletSection = (rawText?: string, fallbackText: string = "") => {
-    const text = rawText && rawText.trim().length > 0 ? rawText : fallbackText;
+  const formatBulletSection = (rawText?: string) => {
+    const text = rawText && rawText.trim().length > 0 ? rawText.trim() : "";
     if (!text) return "";
     
     // Split by double newline or linebreaks and render formatted paragraphs
@@ -2859,10 +2879,7 @@ export function generateWeeklyReportPDF(
               KEY PROJECT HIGHLIGHTS
             </div>
             <div style="flex: 1; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 4px 4px; padding: 16px; font-size: 9px; line-height: 1.5; color: #334155; background: #ffffff;">
-              ${formatBulletSection(
-                report.highlights,
-                "Falsework & Prop Support Systems: Complete erection, leveling, and structural alignment of modular scaffolding falsework towers across designated floor deck sections.\n\nSoffit & Edge-Beam Shuttering: Installation and dimensional verification of timber H-beam secondary/primary supports and perimeter edge-beam formwork panels.\n\nReinforcement Inspection: Pre-pour QA/QC review of beam rebar cages, link spacing, stirrup detailing, lap lengths, and cover block positioning prior to deck closure.\n\nMaterial Verification: Physical inspection, quantity reconciliation, and logging of incoming MEP site infrastructure items.",
-              )}
+              ${formatBulletSection(report.highlights)}
             </div>
           </div>
 
@@ -2872,10 +2889,7 @@ export function generateWeeklyReportPDF(
               CRITICAL RISKS &amp; OPEN CONCERNS
             </div>
             <div style="flex: 1; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 4px 4px; padding: 16px; font-size: 9px; line-height: 1.5; color: #334155; background: #ffffff;">
-              ${formatBulletSection(
-                report.concerns,
-                "Formwork Rigidity & Column Alignment: Active QA monitoring on column starter bar verticality and formwork bracing rigidity to mitigate risk of lateral displacement or concrete bulging during high-rate pours.\n\nScaffolding Component Shortage: Site supply deficit of scaffolding clips/couplers currently delaying final connection and cross-bracing of the falsework system.\n\nPending Demolition: Demolition and structural removal of non-conforming elements remain pending final QA clearance sign-off.\n\nOutstanding NCR Closures: Formal sign-off and closure of open Non-Conformance Reports (NCRs) regarding concrete honeycombing await approved repair method statements.",
-              )}
+              ${formatBulletSection(report.concerns)}
             </div>
           </div>
 
@@ -2885,10 +2899,7 @@ export function generateWeeklyReportPDF(
               LOOK-AHEAD PLAN &amp; ACTION TARGETS
             </div>
             <div style="flex: 1; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 4px 4px; padding: 16px; font-size: 9px; line-height: 1.5; color: #334155; background: #ffffff;">
-              ${formatBulletSection(
-                report.nextWeekPlan,
-                "Falsework & Scaffold Completion: Finalize structural erection, cross-bracing, and level checks of falsework scaffolding towers for the suspended slab upon receipt of additional components.\n\nFirst-Floor Slab Formwork: Complete deck shuttering, soffit lining, perimeter edge-beam formwork, and dimensional alignment for the entire active floor level.\n\nColumn Remediation: Conclude rectification of non-conforming column elements, followed by re-bar cage alignment, formwork shuttering, and reconstruction.\n\nSlab Reinforcement Commencement: Initiate bottom-mat rebar placement, chair support spacing, and cover block installation for the suspended slab deck.",
-              )}
+              ${formatBulletSection(report.nextWeekPlan)}
             </div>
           </div>
         </div>
@@ -2900,48 +2911,37 @@ export function generateWeeklyReportPDF(
   // =========================================================================
   // SLIDE 4: CONCRETE COMPRESSIVE STRENGTH TEST MATRIX
   // =========================================================================
-  const sampleCubes =
-    cubeList.length > 0
-      ? cubeList
-      : [
-          {
-            dateCast: "2026-08-12",
-            elementLevel: "WALL AND COLUMNS",
-            strength7Days: "30.52 N/mm²",
-            status7Days: "PASS",
-            strength28Days: "—",
-            status28Days: "pending",
-          },
-          {
-            dateCast: "2026-07-28",
-            elementLevel: "SLAB AND BEAMS",
-            strength7Days: "28.07 N/mm²",
-            status7Days: "PASS",
-            strength28Days: "32.41 N/mm²",
-            status28Days: "PASS",
-          },
-        ];
+  const sampleCubes = cubeList;
 
-  const cubeRowsHtml = sampleCubes
-    .map((c: any, idx: number) => {
-      const d7 = c.strength7Days || (c.day7Results?.[0]?.averageStrength ? `${c.day7Results[0].averageStrength} N/mm²` : "—");
-      const d28 = c.strength28Days || (c.day28Results?.[0]?.averageStrength ? `${c.day28Results[0].averageStrength} N/mm²` : "—");
-      const st7 = String(c.status7Days || (d7 !== "—" ? "PASS" : "pending")).toLowerCase();
-      const st28 = String(c.status28Days || (d28 !== "—" ? "PASS" : "pending")).toLowerCase();
+  const cubeRowsHtml =
+    sampleCubes.length > 0
+      ? sampleCubes
+          .map((c: any, idx: number) => {
+            const d7 = c.strength7Days || (c.day7Results?.[0]?.averageStrength ? `${c.day7Results[0].averageStrength} N/mm²` : "—");
+            const d28 = c.strength28Days || (c.day28Results?.[0]?.averageStrength ? `${c.day28Results[0].averageStrength} N/mm²` : "—");
+            const st7 = String(c.status7Days || (d7 !== "—" ? "PASS" : "pending")).toLowerCase();
+            const st28 = String(c.status28Days || (d28 !== "—" ? "PASS" : "pending")).toLowerCase();
 
-      return `
+            return `
+              <tr>
+                <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(idx + 1).padStart(2, "0")}</td>
+                <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(c.dateCast || c.castDate || c.date) || "—"}</td>
+                <td style="font-weight: 800; color: #0f172a; text-transform: uppercase;">${c.elementLevel || c.element || c.inscribedName || "Structural Element"}</td>
+                <td style="font-family: monospace; font-weight: 700; text-align: center;">${d7}</td>
+                <td style="text-align: center; font-weight: 800; color: ${st7.includes("pass") ? "#16a34a" : "#d97706"};">${st7.includes("pass") ? "PASS" : st7.toUpperCase()}</td>
+                <td style="font-family: monospace; font-weight: 700; text-align: center;">${d28}</td>
+                <td style="text-align: center; font-weight: 800; color: ${st28.includes("pass") ? "#16a34a" : "#d97706"};">${st28.includes("pass") ? "PASS" : st28.toUpperCase()}</td>
+              </tr>
+            `;
+          })
+          .join("")
+      : `
         <tr>
-          <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(idx + 1).padStart(2, "0")}</td>
-          <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(c.dateCast || c.castDate || c.date)}</td>
-          <td style="font-weight: 800; color: #0f172a; text-transform: uppercase;">${c.elementLevel || c.element || c.inscribedName || "Structural Element"}</td>
-          <td style="font-family: monospace; font-weight: 700; text-align: center;">${d7}</td>
-          <td style="text-align: center; font-weight: 800; color: ${st7.includes("pass") ? "#16a34a" : "#d97706"};">${st7.includes("pass") ? "PASS" : st7}</td>
-          <td style="font-family: monospace; font-weight: 700; text-align: center;">${d28}</td>
-          <td style="text-align: center; font-weight: 800; color: ${st28.includes("pass") ? "#16a34a" : "#d97706"};">${st28.includes("pass") ? "PASS" : st28}</td>
+          <td colspan="7" style="text-align: center; color: #64748b; padding: 24px; font-weight: 600;">
+            No concrete compressive strength test records logged for this reporting period.
+          </td>
         </tr>
       `;
-    })
-    .join("");
 
   slidesHtml.push(`
     <div class="pdf-sheet">
@@ -2982,25 +2982,38 @@ export function generateWeeklyReportPDF(
     "#f59e0b", // Amber
   ];
 
-  const elementVolumes: { name: string; scope: number; completion: number; color: string }[] = [
-    { name: "BEAM", scope: 42, completion: 97, color: "#3b82f6" },
-    { name: "SLAB", scope: 98, completion: 100, color: "#10b981" },
-    { name: "WALL", scope: 24, completion: 100, color: "#f97316" },
-    { name: "STAIR", scope: 71, completion: 100, color: "#8b5cf6" },
-    { name: "COLUMN", scope: 32, completion: 89, color: "#3b82f6" },
-  ];
+  const elementVolumes: { name: string; scope: number; completion: number; color: string }[] = [];
 
   // If quantity summary exists in report, map from live report
   if (quantityList.length > 0) {
-    elementVolumes.length = 0;
     quantityList.forEach((q: any, i: number) => {
       const scopeVal = parseFloat(String(q.calculatedVolume ?? q.plannedVolume ?? q.scope ?? 0)) || 0;
       const achVal = parseFloat(String(q.achievedVolume ?? q.actualVolume ?? 0)) || 0;
-      let pct = scopeVal > 0 ? Math.round((achVal / scopeVal) * 100) : parseInt(String(q.completion || 100));
+      let pct = scopeVal > 0 ? Math.round((achVal / scopeVal) * 100) : parseInt(String(q.completion || 0));
       pct = Math.min(100, Math.max(0, pct));
       elementVolumes.push({
         name: String(q.element || q.structuralElement || `Element ${i + 1}`).toUpperCase().trim(),
         scope: scopeVal,
+        completion: pct,
+        color: colorPalette[i % colorPalette.length],
+      });
+    });
+  } else if (allElements.length > 0) {
+    const grouped: Record<string, { scope: number; achieved: number }> = {};
+    allElements.forEach((el: any) => {
+      const type = (el.elementType || el.type || el.element || "OTHER").toUpperCase().trim();
+      const calcVol = parseFloat(String(el.calculatedVolume || el.volume || 0)) || 0;
+      const achVol = parseFloat(String(el.achievedVolume ?? el.completedVolume ?? 0)) || 0;
+      if (!grouped[type]) grouped[type] = { scope: 0, achieved: 0 };
+      grouped[type].scope += calcVol;
+      grouped[type].achieved += achVol;
+    });
+
+    Object.entries(grouped).forEach(([type, data], i) => {
+      const pct = data.scope > 0 ? Math.min(100, Math.max(0, Math.round((data.achieved / data.scope) * 100))) : 0;
+      elementVolumes.push({
+        name: type,
+        scope: Math.round(data.scope * 100) / 100,
         completion: pct,
         color: colorPalette[i % colorPalette.length],
       });
@@ -3011,10 +3024,26 @@ export function generateWeeklyReportPDF(
   const calcAvgCompletion =
     elementVolumes.length > 0
       ? Math.round(elementVolumes.reduce((acc, curr) => acc + curr.completion, 0) / elementVolumes.length)
-      : 98;
+      : 0;
 
   // Render SVG Solid Pie Chart
   const renderPieChart = () => {
+    if (elementVolumes.length === 0 || calcTotalScope === 0) {
+      return {
+        svg: `
+          <svg width="150" height="150" viewBox="0 0 150 150" style="display: block; margin: 0 auto;">
+            <circle cx="75" cy="75" r="62" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="3 3" />
+            <text x="75" y="78" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="-apple-system, sans-serif" font-weight="600">No Volume Data</text>
+          </svg>
+        `,
+        legend: `
+          <div style="margin-top: 10px; font-size: 7.5px; color: #94a3b8; text-align: center; font-style: italic;">
+            No quantity distribution recorded
+          </div>
+        `,
+      };
+    }
+
     const size = 150;
     const cx = 75;
     const cy = 75;
@@ -3069,6 +3098,14 @@ export function generateWeeklyReportPDF(
 
   // Render SVG Grouped Vertical Bar Chart (Scope vs Achieved)
   const renderBarChart = () => {
+    if (elementVolumes.length === 0) {
+      return `
+        <div style="margin-top: 10px; background: #fafbfd; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px; text-align: center; color: #94a3b8; font-size: 8.5px; font-style: italic;">
+          No element quantity comparison metrics logged for this level.
+        </div>
+      `;
+    }
+
     const chartW = 720;
     const chartH = 100;
     const baselineY = 78;
@@ -3122,22 +3159,31 @@ export function generateWeeklyReportPDF(
     `;
   };
 
-  const volumeRowsHtml = elementVolumes
-    .map((item) => {
-      return `
-      <tr>
-        <td style="font-weight: 800; color: #0f172a; text-transform: uppercase;">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="display: inline-block; width: 3px; height: 13px; background: ${item.color}; border-radius: 1px; shrink: 0;"></span>
-            <span>${item.name}</span>
-          </div>
-        </td>
-        <td style="font-family: monospace; font-weight: 700; color: #1e293b;">${item.scope.toFixed(0)}</td>
-        <td style="font-family: monospace; font-weight: 800; color: #0f172a;">${item.completion}</td>
-      </tr>
-    `;
-    })
-    .join("");
+  const volumeRowsHtml =
+    elementVolumes.length > 0
+      ? elementVolumes
+          .map((item) => {
+            return `
+            <tr>
+              <td style="font-weight: 800; color: #0f172a; text-transform: uppercase;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="display: inline-block; width: 3px; height: 13px; background: ${item.color}; border-radius: 1px; shrink: 0;"></span>
+                  <span>${item.name}</span>
+                </div>
+              </td>
+              <td style="font-family: monospace; font-weight: 700; color: #1e293b;">${item.scope.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+              <td style="font-family: monospace; font-weight: 800; color: #0f172a;">${item.completion}%</td>
+            </tr>
+          `;
+          })
+          .join("")
+      : `
+        <tr>
+          <td colspan="3" style="text-align: center; color: #64748b; padding: 18px; font-weight: 600;">
+            No quantity data recorded for this level.
+          </td>
+        </tr>
+      `;
 
   slidesHtml.push(`
     <div class="pdf-sheet">
@@ -3161,11 +3207,17 @@ export function generateWeeklyReportPDF(
               </thead>
               <tbody>
                 ${volumeRowsHtml}
-                <tr style="background: #f8fafc; font-weight: 900; border-top: 2px solid #cbd5e1;">
-                  <td style="font-size: 8.5px; color: #0f172a; text-transform: uppercase; font-weight: 900;">TOTAL</td>
-                  <td style="font-family: monospace; font-size: 9px; color: #0f172a; font-weight: 900;">${calcTotalScope.toFixed(0)}</td>
-                  <td style="font-family: monospace; font-size: 9px; color: #0f172a; font-weight: 900;">${calcAvgCompletion}%</td>
-                </tr>
+                ${
+                  elementVolumes.length > 0
+                    ? `
+                  <tr style="background: #f8fafc; font-weight: 900; border-top: 2px solid #cbd5e1;">
+                    <td style="font-size: 8.5px; color: #0f172a; text-transform: uppercase; font-weight: 900;">TOTAL</td>
+                    <td style="font-family: monospace; font-size: 9px; color: #0f172a; font-weight: 900;">${calcTotalScope.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                    <td style="font-family: monospace; font-size: 9px; color: #0f172a; font-weight: 900;">${calcAvgCompletion}%</td>
+                  </tr>
+                `
+                    : ""
+                }
               </tbody>
             </table>
           </div>
@@ -3231,13 +3283,51 @@ export function generateWeeklyReportPDF(
             let compPct = calcVol > 0 ? Math.round((achVol / calcVol) * 100) : Number(el.completionPercentage || el.completion || 0);
             compPct = Math.min(100, Math.max(0, compPct));
 
-            const rawStatus = String(el.status || (compPct === 100 ? "APPROVED" : compPct > 0 ? "APPROVED" : "REJECTED")).toUpperCase();
-            const isApproved = rawStatus.includes("APPROV") || rawStatus.includes("COMPLET") || rawStatus.includes("PASS") || compPct === 100;
-            const isRejected = rawStatus.includes("REJECT") || rawStatus.includes("FAIL") || (!isApproved && achVol === 0);
+            const rawStatus = (el.status || el.qaStatus || el.inspectionStatus || "PENDING").toString().trim();
+            const normalizedStatus = rawStatus.toUpperCase().replace(/\s+/g, "_");
+            const statusLabel = rawStatus.replace(/_/g, " ").toUpperCase();
 
-            const badgeText = isApproved ? "APPROVED" : isRejected ? "REJECTED" : "PENDING";
-            const badgeClass = isApproved ? "badge-approved" : isRejected ? "badge-rejected" : "badge-pending";
-            const barColor = isApproved ? "#16a34a" : isRejected ? "#d97706" : "#cbd5e1";
+            let badgeBg = "#f8fafc";
+            let badgeColor = "#475569";
+            let badgeBorder = "#cbd5e1";
+            let barColor = compPct > 0 ? "#3b82f6" : "#cbd5e1";
+
+            if (normalizedStatus.includes("APPROV") || normalizedStatus === "COMPLETED" || normalizedStatus === "PASS") {
+              badgeBg = "#ecfdf5";
+              badgeColor = "#059669";
+              badgeBorder = "#a7f3d0";
+              barColor = "#16a34a";
+            } else if (normalizedStatus === "POURED" || normalizedStatus.includes("CAST")) {
+              badgeBg = "#ecfeff";
+              badgeColor = "#0891b2";
+              badgeBorder = "#a5f3fc";
+              barColor = "#06b6d4";
+            } else if (normalizedStatus.includes("READY")) {
+              badgeBg = "#e0e7ff";
+              badgeColor = "#4338ca";
+              badgeBorder = "#c7d2fe";
+              barColor = "#6366f1";
+            } else if (normalizedStatus.includes("INSPECT")) {
+              badgeBg = "#f5f3ff";
+              badgeColor = "#7c3aed";
+              badgeBorder = "#ddd6fe";
+              barColor = "#8b5cf6";
+            } else if (normalizedStatus.includes("PROGRESS")) {
+              badgeBg = "#eff6ff";
+              badgeColor = "#2563eb";
+              badgeBorder = "#bfdbfe";
+              barColor = "#3b82f6";
+            } else if (normalizedStatus.includes("REJECT") || normalizedStatus.includes("FAIL") || normalizedStatus.includes("NCR")) {
+              badgeBg = "#fef2f2";
+              badgeColor = "#dc2626";
+              badgeBorder = "#fecaca";
+              barColor = "#ef4444";
+            } else {
+              badgeBg = "#f8fafc";
+              badgeColor = "#64748b";
+              badgeBorder = "#e2e8f0";
+              barColor = compPct > 0 ? "#3b82f6" : "#cbd5e1";
+            }
 
             const elName = (el.elementName || el.name || el.element || el.id || "—").toUpperCase();
             const gridLoc = el.gridLocation || el.grid || el.location || "—";
@@ -3254,7 +3344,7 @@ export function generateWeeklyReportPDF(
                       <div style="width: ${compPct}%; height: 100%; background: ${barColor}; border-radius: 999px;"></div>
                     </div>
                     <span style="font-size: 7px; font-weight: 800; font-family: monospace; min-width: 24px; text-align: right;">${compPct}%</span>
-                    <span class="${badgeClass}">${badgeText}</span>
+                    <span style="background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder}; border-radius: 4px; padding: 1.5px 7px; font-weight: 800; font-size: 7px; text-transform: uppercase; white-space: nowrap; display: inline-block;">${statusLabel}</span>
                   </div>
                 </td>
               </tr>
@@ -3307,7 +3397,7 @@ export function generateWeeklyReportPDF(
     }
 
     // CAD Drawing Slide
-    if (layoutImg || layoutDrawingTitle) {
+    if (layoutImg && typeof layoutImg === "string" && layoutImg.trim().length > 0) {
       slidesHtml.push(`
         <div class="pdf-sheet">
           <div>
@@ -3315,22 +3405,11 @@ export function generateWeeklyReportPDF(
             
             <div style="height: 154mm; background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 6px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; position: relative; margin-top: 6px;">
               <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; overflow: hidden; background: #ffffff;">
-                ${
-                  layoutImg
-                    ? `<img src="${layoutImg}" style="max-width: 100%; max-height: 100%; object-fit: contain;" alt="${layoutDrawingTitle}" />`
-                    : `
-                    <div style="text-align: center; padding: 20px; color: #64748b;">
-                      <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #0f172a; margin-bottom: 4px;">
-                        ${layoutDrawingTitle}
-                      </div>
-                      <div style="font-size: 8px;">Verified as-built CAD completion overlay</div>
-                    </div>
-                  `
-                }
+                <img src="${layoutImg}" style="max-width: 100%; max-height: 100%; object-fit: contain;" alt="${layoutDrawingTitle}" />
               </div>
               <div style="background: #0f172a; border-left: 5px solid #ea580c; color: #ffffff; padding: 8px 14px; font-size: 8px; font-weight: 800; display: flex; justify-content: space-between; align-items: center;">
                 <span style="letter-spacing: 0.5px; text-transform: uppercase;">
-                  ${layoutDrawingTitle} &nbsp;|&nbsp; VERIFIED AS-BUILT SURVEILLANCE OVERLAY
+                  ${layoutDrawingTitle || `${typeLabel.toUpperCase()} LAYOUT`} &nbsp;|&nbsp; VERIFIED AS-BUILT SURVEILLANCE OVERLAY
                 </span>
                 <span style="color: #4ade80; font-weight: 800;">&#10003; QC CLEARANCE COMPLETE</span>
               </div>
@@ -3386,11 +3465,11 @@ export function generateWeeklyReportPDF(
             return `
             <tr>
               <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(idx + 1).padStart(2, "0")}</td>
-              <td style="font-weight: 800; color: #0f172a;">${m.service || m.system || m.elementService || "Electrical / Plumbing"}</td>
-              <td>${m.contractor || m.trade || "Main MEP Subcontractor"}</td>
-              <td style="font-family: monospace; font-weight: 700; text-align: center;">${m.progress || 100}%</td>
+              <td style="font-weight: 800; color: #0f172a;">${m.service || m.system || m.elementService || "—"}</td>
+              <td>${m.subcontractor || m.trade || "—"}</td>
+              <td style="font-family: monospace; font-weight: 700; text-align: center;">${m.completionPct !== undefined ? m.completionPct : 0}%</td>
               <td style="text-align: center;"><span class="badge-approved">${m.status || "CLEARED"}</span></td>
-              <td style="font-size: 7.5px; color: #475569;">${m.remarks || "All box fixings and conduit sleeves cleared for casting"}</td>
+              <td style="font-size: 7.5px; color: #475569;">${m.remarks || "—"}</td>
             </tr>
           `;
           })
@@ -3441,16 +3520,16 @@ export function generateWeeklyReportPDF(
             const st = String(d.qcStatus || d.status || "APPROVED").toUpperCase();
             const badgeColor = st.includes("REJECT") ? "#dc2626" : st.includes("NOTED") ? "#0284c7" : "#16a34a";
             const unit = d.unit || "units";
-            const acc = d.quantityAccepted !== undefined ? d.quantityAccepted : d.quantity || 1;
+            const acc = d.quantityAccepted !== undefined ? d.quantityAccepted : d.quantity || 0;
             const rej = d.quantityRejected ?? 0;
-            const total = d.quantityReceived ?? d.quantity ?? 1;
+            const total = d.quantityReceived ?? d.quantity ?? 0;
 
             return `
             <tr>
               <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(idx + 1).padStart(2, "0")}</td>
-              <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(d.deliveryDate || d.date)}</td>
+              <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(d.deliveryDate || d.date) || "—"}</td>
               <td style="font-weight: 800; color: #0f172a;">${d.materialDescription || d.materialName || d.name || "Material"}</td>
-              <td>${d.supplier || d.supplierName || "LOCAL"}</td>
+              <td>${d.supplier || d.supplierName || "—"}</td>
               <td style="font-family: monospace; font-weight: 700;">${total} ${unit} [${acc} Acc / ${rej} Rej]</td>
               <td style="text-align: center; font-weight: 800; color: ${badgeColor}; font-size: 7.5px;">${st}</td>
             </tr>
@@ -3621,10 +3700,10 @@ export function generateWeeklyReportPDF(
               return `
               <tr>
                 <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(idx + 1).padStart(2, "0")}</td>
-                <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(c.date || c.createdAt)}</td>
-                <td>${c.level || selectedLevel} &bull; ${c.location || "3-5/C-D"}</td>
-                <td style="font-weight: 700;">${c.element || "Structural Element"}</td>
-                <td style="font-size: 7.5px; line-height: 1.4; color: #334155; white-space: pre-line;">${(c.comments || c.text || "Routine inspection observation").replace(/<br\s*\/?>/gi, "\n")}</td>
+                <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(c.date || c.createdAt) || "—"}</td>
+                <td>${c.level || selectedLevel}${c.location ? ` &bull; ${c.location}` : ""}</td>
+                <td style="font-weight: 700;">${c.element || "—"}</td>
+                <td style="font-size: 7.5px; line-height: 1.4; color: #334155; white-space: pre-line;">${(c.comments || c.text || "—").replace(/<br\s*\/?>/gi, "\n")}</td>
                 <td>${c.inspector || compilerName}${c.vendorCheck ? ` / ${c.vendorCheck}` : ""}</td>
                 <td style="text-align: center; font-weight: 800; color: ${color}; font-size: 7.5px;">${st}</td>
               </tr>
@@ -3716,7 +3795,7 @@ export function generateWeeklyReportPDF(
   const executiveOverviewText =
     report.synopsis ||
     report.executiveSummary ||
-    "Audit covers 80% completion checks on modular falsework, soffit/edge-beam formwork verification, incoming MEP materials receipt, and pending NCR remediation for concrete honeycombing and column alignment.";
+    "";
 
   slidesHtml.push(`
     <div class="pdf-sheet" style="padding: 0; display: flex; flex-direction: row; height: 210mm; overflow: hidden; position: relative;">

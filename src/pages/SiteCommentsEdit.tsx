@@ -46,6 +46,8 @@ import {
   Maximize2,
   X,
   Loader2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 export const SiteCommentsEdit: React.FC = () => {
@@ -94,6 +96,16 @@ export const SiteCommentsEdit: React.FC = () => {
 
   // Lightbox
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
+
+  // Collapsible observation items for mobile ergonomics
+  const [collapsedObs, setCollapsedObs] = useState<Record<number, boolean>>({});
+
+  const toggleObsCollapse = (index: number) => {
+    setCollapsedObs((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
 
   // Fetch Report Data
   useEffect(() => {
@@ -738,21 +750,41 @@ export const SiteCommentsEdit: React.FC = () => {
               obs.comments || obs.observationText || obs.fieldObservation || "";
             const directive = obs.correctiveDirective || "";
             const photos = obs.photos || [];
+            const isItemCollapsed = Boolean(collapsedObs[idx]);
+            const elementPreview = obs.structuralElement || obs.elementName || "No element selected";
+            const levelPreview = obs.levelName || "No level";
 
             return (
               <div
                 key={obs.id || idx}
-                className="p-5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl space-y-4"
+                className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl space-y-4"
               >
                 {/* Header row for observation */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 gap-2">
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleObsCollapse(idx)}
+                      className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                      title={isItemCollapsed ? "Expand Observation" : "Collapse Observation"}
+                    >
+                      {isItemCollapsed ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronUp className="w-4 h-4" />
+                      )}
+                    </button>
                     <span className="w-6 h-6 rounded-full bg-brand-50 dark:bg-brand-500/20 text-brand-700 dark:text-brand-400 text-xs font-bold flex items-center justify-center font-mono">
                       {idx + 1}
                     </span>
-                    <span className="font-bold text-slate-800 dark:text-slate-200 text-sm">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 text-xs sm:text-sm">
                       Observation #{idx + 1}
                     </span>
+                    {isItemCollapsed && (
+                      <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded truncate max-w-[180px]">
+                        {elementPreview} ({levelPreview})
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -762,7 +794,7 @@ export const SiteCommentsEdit: React.FC = () => {
                       onChange={(e) =>
                         updateObservationField(idx, "status", e.target.value)
                       }
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border cursor-pointer focus:outline-none transition ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border cursor-pointer focus:outline-none transition min-h-[32px] ${
                         obs.status === "Compliant" ||
                         obs.status === "RECTIFIED" ||
                         obs.status === "Rectified on Site" ||
@@ -798,7 +830,7 @@ export const SiteCommentsEdit: React.FC = () => {
                           e.target.value as ObservationSeverity,
                         )
                       }
-                      className="px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-brand-500"
+                      className="px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-brand-500 min-h-[32px]"
                     >
                       <option value="CRITICAL">CRITICAL</option>
                       <option value="HIGH">HIGH</option>
@@ -810,7 +842,7 @@ export const SiteCommentsEdit: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleRemoveObservation(idx)}
-                        className="p-1.5 rounded-lg bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-700 dark:hover:text-red-200 transition"
+                        className="p-1.5 rounded-lg bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-700 dark:hover:text-red-200 transition min-h-[32px] min-w-[32px] flex items-center justify-center"
                         title="Delete Observation"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -819,9 +851,12 @@ export const SiteCommentsEdit: React.FC = () => {
                   </div>
                 </div>
 
+                {!isItemCollapsed && (
+                  <>
+
                 {/* Level, Element & Trade pickers */}
                 <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
-                  <LevelElementSelect
+                    <LevelElementSelect
                     projectId={currentProjId}
                     selectedLevelId={obs.levelId}
                     selectedLevelName={obs.levelName}
@@ -832,10 +867,13 @@ export const SiteCommentsEdit: React.FC = () => {
                       updateObservationField(idx, "levelId", lvlId);
                       updateObservationField(idx, "levelName", lvlName);
                     }}
-                    onElementChange={(elemId, elemName) => {
+                    onElementChange={(elemId, elemName, gridLoc) => {
                       // Single atomic update
                       updateObservationField(idx, "elementId", elemId);
                       updateObservationField(idx, "elementName", elemName);
+                      if (gridLoc && !obs.gridLocation) {
+                        updateObservationField(idx, "gridLocation", gridLoc);
+                      }
                     }}
                   />
 
@@ -1030,6 +1068,8 @@ export const SiteCommentsEdit: React.FC = () => {
                     </div>
                   )}
                 </div>
+                </>
+                )}
               </div>
             );
           })}

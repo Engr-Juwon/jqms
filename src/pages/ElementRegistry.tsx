@@ -128,10 +128,10 @@ export const ElementRegistry: React.FC = () => {
   const isLvl2 = hasMinRole(currentUser?.role, 2);
   const isLvl3 = hasMinRole(currentUser?.role, 3);
 
-  // Load all structural data
-  const loadData = useCallback(async () => {
+  // Load all structural data (optional silent reload without triggering loading spinner)
+  const loadData = useCallback(async (isSilent = false) => {
     if (!currentProjId) return;
-    setLoading(true);
+    if (!isSilent) setLoading(true);
     try {
       const [
         elemList,
@@ -164,13 +164,101 @@ export const ElementRegistry: React.FC = () => {
     } catch (err) {
       console.error("Failed to load structural elements:", err);
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   }, [currentProjId, currentCompId]);
 
   useEffect(() => {
-    loadData();
+    loadData(false);
   }, [loadData]);
+
+  // Refs to track user actions vs remote real-time updates
+  const isInitialSnapshotRef = React.useRef(true);
+  const elementsRef = React.useRef<StructuralElement[]>([]);
+  useEffect(() => {
+    elementsRef.current = elements;
+  }, [elements]);
+
+  // Real-time Element listener: seamlessly appends/replaces elements without triggering loading state
+  // and alerts the user with a notification when a change is detected from someone else or background sync
+  useEffect(() => {
+    if (!currentProjId) return;
+    isInitialSnapshotRef.current = true;
+
+    const unsub = dbService.subscribeElements(
+      currentProjId,
+      (incomingElements) => {
+        if (!incomingElements) return;
+
+        // On first subscription mount, seed state without firing "changed by someone else" toasts
+        if (isInitialSnapshotRef.current) {
+          isInitialSnapshotRef.current = false;
+          setElements(incomingElements);
+          return;
+        }
+
+        const prevList = elementsRef.current;
+        const prevMap = new Map(prevList.map((e) => [e.id, e]));
+        const incomingMap = new Map(incomingElements.map((e) => [e.id, e]));
+
+        const currentUserId = currentUser?.uid;
+
+        // Check for newly added or updated elements
+        incomingElements.forEach((incoming) => {
+          const prev = prevMap.get(incoming.id);
+          if (!prev) {
+            // New element added
+            if (incoming.createdBy && incoming.createdBy !== currentUserId) {
+              const author = incoming.createdByName || "a team member";
+              toast(
+                `🆕 New element "${incoming.elementName}" registered by ${author}`,
+                { icon: "✨", duration: 4000 },
+              );
+            }
+          } else {
+            // Element updated: check if updatedAt or critical fields changed
+            const timeDiff = incoming.updatedAt !== prev.updatedAt;
+            const statusDiff = incoming.status !== prev.status;
+            const nameDiff = incoming.elementName !== prev.elementName;
+            const levelDiff = incoming.levelId !== prev.levelId;
+
+            if (timeDiff || statusDiff || nameDiff || levelDiff) {
+              if (incoming.updatedBy && incoming.updatedBy !== currentUserId) {
+                const editor = incoming.updatedByName || "another user";
+                if (statusDiff) {
+                  toast(
+                    `⚡ "${incoming.elementName}" status changed to ${incoming.status} by ${editor}`,
+                    { icon: "🔔", duration: 4500 },
+                  );
+                } else {
+                  toast(
+                    `📝 "${incoming.elementName}" updated by ${editor}`,
+                    { icon: "🔄", duration: 4000 },
+                  );
+                }
+              }
+            }
+          }
+        });
+
+        // Check for deleted elements
+        prevList.forEach((prevEl) => {
+          if (!incomingMap.has(prevEl.id)) {
+            toast(
+              `🗑️ Element "${prevEl.elementName}" was removed`,
+              { icon: "ℹ️", duration: 4000 },
+            );
+          }
+        });
+
+        // Update state in-place without loading screen
+        setElements(incomingElements);
+      },
+      currentCompId,
+    );
+
+    return () => unsub();
+  }, [currentProjId, currentCompId, currentUser?.uid]);
 
   // Derived Lookup Maps
   const levelNameMap = useMemo(() => {
@@ -479,6 +567,8 @@ export const ElementRegistry: React.FC = () => {
         area: payload.area || area,
       };
 
+      const currentUserName = currentUser?.fullName || currentUser?.displayName || currentUser?.email || "QA/QC User";
+
       if (editingId) {
         const existing = elements.find((e) => e.id === editingId);
         const updated: StructuralElement = {
@@ -488,10 +578,17 @@ export const ElementRegistry: React.FC = () => {
           projectId: currentProjId,
           companyId: currentCompId,
           updatedAt: new Date().toISOString(),
+          updatedBy: currentUser?.uid,
+          updatedByName: currentUserName,
         } as StructuralElement;
 
+        // In-place optimistic update: immediate UI reflect without loading state
+        setElements((prev) =>
+          prev.map((e) => (e.id === editingId ? updated : e)),
+        );
+
         await dbService.saveElement(updated);
-        toast.success(`Element "${updated.elementName}" updated.`);
+        toast.success(`Element "${updated.elementName}" saved.`);
       } else {
         const created: StructuralElement = {
           ...payloadWithTakeoffs,
@@ -501,7 +598,14 @@ export const ElementRegistry: React.FC = () => {
           status: payload.status || "PENDING",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          createdBy: currentUser?.uid,
+          createdByName: currentUserName,
+          updatedBy: currentUser?.uid,
+          updatedByName: currentUserName,
         } as StructuralElement;
+
+        // In-place append: immediate UI reflect without loading state
+        setElements((prev) => [created, ...prev]);
 
         await dbService.saveElement(created);
         toast.success(`Element "${created.elementName}" registered.`);
@@ -509,7 +613,7 @@ export const ElementRegistry: React.FC = () => {
 
       setShowElementModal(false);
       setEditingElement(null);
-      loadData();
+      loadData(true);
     } catch (err) {
       toast.error("Failed to save element.");
     }
@@ -522,14 +626,17 @@ export const ElementRegistry: React.FC = () => {
     }
     if (!window.confirm(`Are you sure you want to delete "${name}"?`)) return;
     try {
-      await dbService.deleteElement(elementId, currentProjId);
-      toast.success(`Deleted ${name}`);
+      // In-place optimistic removal
+      setElements((prev) => prev.filter((e) => e.id !== elementId));
       setSelectedIds((prev) => {
         const next = new Set(prev);
         next.delete(elementId);
         return next;
       });
-      loadData();
+
+      await dbService.deleteElement(elementId, currentProjId);
+      toast.success(`Deleted ${name}`);
+      loadData(true);
     } catch {
       toast.error("Failed to delete element.");
     }
@@ -562,18 +669,26 @@ export const ElementRegistry: React.FC = () => {
 
     const totalVol = getOrCalculateVolume(target);
     const isCompleted = newStatus === "POURED" || newStatus === "APPROVED";
+    const currentUserName = currentUser?.fullName || currentUser?.displayName || currentUser?.email || "QA/QC User";
 
     const updated: StructuralElement = {
       ...target,
       status: newStatus,
       achievedVolume: isCompleted ? totalVol : 0,
       updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.uid,
+      updatedByName: currentUserName,
     };
+
+    // In-place optimistic status update
+    setElements((prev) =>
+      prev.map((e) => (e.id === elementId ? updated : e)),
+    );
 
     try {
       await dbService.saveElement(updated);
       toast.success(`Status updated to ${newStatus}`);
-      loadData();
+      loadData(true);
     } catch {
       toast.error("Failed to update status.");
     }
@@ -604,6 +719,20 @@ export const ElementRegistry: React.FC = () => {
     }
 
     try {
+      // In-place optimistic status update
+      setElements((prev) =>
+        prev.map((e) => {
+          if (!selectedIds.has(e.id)) return e;
+          const totalVol = getOrCalculateVolume(e);
+          return {
+            ...e,
+            status: bulkStatus as ElementStatus,
+            achievedVolume: isCompleted ? totalVol : 0,
+            updatedAt: new Date().toISOString(),
+          };
+        }),
+      );
+
       await Promise.all(
         Array.from(selectedIds).map((id) => {
           const target = elements.find((e) => e.id === id);
@@ -621,7 +750,7 @@ export const ElementRegistry: React.FC = () => {
       toast.success(`${selectedIds.size} elements updated to ${bulkStatus}`);
       clearSelection();
       setBulkStatus("");
-      loadData();
+      loadData(true);
     } catch {
       toast.error("Bulk status update failed.");
     }
@@ -636,6 +765,15 @@ export const ElementRegistry: React.FC = () => {
     const lvl = levels.find((l) => l.id === bulkLevelId);
 
     try {
+      // In-place optimistic level update
+      setElements((prev) =>
+        prev.map((e) =>
+          selectedIds.has(e.id)
+            ? { ...e, levelId: bulkLevelId, levelName: lvl?.name || "Level" }
+            : e,
+        ),
+      );
+
       await dbService.bulkUpdateElements(
         Array.from(selectedIds),
         { levelId: bulkLevelId, levelName: lvl?.name || "Level" },
@@ -646,7 +784,7 @@ export const ElementRegistry: React.FC = () => {
       );
       clearSelection();
       setBulkLevelId("");
-      loadData();
+      loadData(true);
     } catch {
       toast.error("Bulk level move failed.");
     }
@@ -661,6 +799,19 @@ export const ElementRegistry: React.FC = () => {
     const pkg = packages.find((p) => p.id === bulkPkgId);
 
     try {
+      // In-place optimistic package update
+      setElements((prev) =>
+        prev.map((e) =>
+          selectedIds.has(e.id)
+            ? {
+                ...e,
+                workPackageId: bulkPkgId,
+                workPackageName: pkg?.name || "Package",
+              }
+            : e,
+        ),
+      );
+
       await dbService.bulkUpdateElements(
         Array.from(selectedIds),
         { workPackageId: bulkPkgId, workPackageName: pkg?.name || "Package" },
@@ -669,7 +820,7 @@ export const ElementRegistry: React.FC = () => {
       toast.success(`${selectedIds.size} elements assigned to package`);
       clearSelection();
       setBulkPkgId("");
-      loadData();
+      loadData(true);
     } catch {
       toast.error("Bulk package assignment failed.");
     }
@@ -689,13 +840,16 @@ export const ElementRegistry: React.FC = () => {
       return;
 
     try {
+      // In-place optimistic deletion
+      setElements((prev) => prev.filter((e) => !selectedIds.has(e.id)));
+
       await dbService.bulkDeleteElements(
         Array.from(selectedIds),
         currentProjId,
       );
       toast.success(`${selectedIds.size} elements deleted.`);
       clearSelection();
-      loadData();
+      loadData(true);
     } catch {
       toast.error("Bulk delete failed.");
     }
@@ -1381,7 +1535,7 @@ export const ElementRegistry: React.FC = () => {
           isOpen={showBulkGen}
           levels={levels.map((l) => ({ id: l.id, name: l.name }))}
           onClose={() => setShowBulkGen(false)}
-          onSuccess={loadData}
+          onSuccess={() => loadData(true)}
         />
       )}
 

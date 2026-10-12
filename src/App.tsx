@@ -1,5 +1,6 @@
 import React, { Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Toaster } from "react-hot-toast";
 import { OfflineSyncIndicator } from "./components/common/OfflineSyncIndicator";
 import { ProjectGuard } from "./components/common/ProjectGuard";
 import { ProjectLayout } from "./components/common/ProjectLayout";
@@ -701,6 +702,33 @@ export const App: React.FC = () => {
             {/* 404 Fallback */}
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              duration: 4000,
+              style: {
+                background: "#0f172a",
+                color: "#f8fafc",
+                borderRadius: "1rem",
+                fontSize: "0.875rem",
+                fontWeight: 600,
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2)",
+              },
+              success: {
+                iconTheme: {
+                  primary: "#10b981",
+                  secondary: "#0f172a",
+                },
+              },
+              error: {
+                iconTheme: {
+                  primary: "#ef4444",
+                  secondary: "#0f172a",
+                },
+              },
+            }}
+          />
         </Suspense>
       </BrowserRouter>
     </ErrorBoundary>

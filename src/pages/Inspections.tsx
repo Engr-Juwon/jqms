@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { dbService, sortByNewestFirst } from '@/lib/db';
 import { hasPermission } from '@/lib/rbac';
 import { InspectionRequest } from '@/types';
+import { toast } from 'react-hot-toast';
 import {
   ClipboardCheck,
   Plus,
@@ -29,14 +30,73 @@ export const Inspections: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState('ALL');
 
+  const inspectionsRef = React.useRef<InspectionRequest[]>([]);
+  const isInitialLoadRef = React.useRef(true);
   useEffect(() => {
-    async function load() {
-      if (!currentProjId) return;
-      const list = await dbService.getInspections(currentProjId, currentCompId);
+    inspectionsRef.current = inspections;
+  }, [inspections]);
+
+  useEffect(() => {
+    if (!currentProjId) return;
+    isInitialLoadRef.current = true;
+
+    // Load initial data
+    dbService.getInspections(currentProjId, currentCompId).then((list) => {
       setInspections(sortByNewestFirst(list));
-    }
-    load();
-  }, [currentProjId, currentCompId]);
+    });
+
+    // Real-time listener without page reload or loading state
+    const unsub = dbService.subscribeInspections(
+      currentProjId,
+      (incoming) => {
+        if (!incoming) return;
+
+        if (isInitialLoadRef.current) {
+          isInitialLoadRef.current = false;
+          setInspections(sortByNewestFirst(incoming));
+          return;
+        }
+
+        const prevList = inspectionsRef.current;
+        const prevMap = new Map(prevList.map((i) => [i.id, i]));
+        const incomingMap = new Map(incoming.map((i) => [i.id, i]));
+        const currentUid = currentUser?.uid;
+
+        incoming.forEach((item) => {
+          const prev = prevMap.get(item.id);
+          if (!prev) {
+            // New inspection created
+            if (item.inspector?.uid && item.inspector.uid !== currentUid) {
+              const by = item.inspector.name || "a site inspector";
+              toast.success(`📋 New Inspection ${item.inspectionNumber} logged by ${by}`, {
+                icon: "🔔",
+                duration: 4000,
+              });
+            }
+          } else if (prev.status !== item.status) {
+            toast(`⚡ Inspection ${item.inspectionNumber} status updated to ${item.status}`, {
+              icon: "📝",
+              duration: 4000,
+            });
+          }
+        });
+
+        prevList.forEach((prevItem) => {
+          if (!incomingMap.has(prevItem.id)) {
+            toast(`Inspection ${prevItem.inspectionNumber} was removed`, {
+              icon: "🗑️",
+              duration: 4000,
+            });
+          }
+        });
+
+        setInspections(sortByNewestFirst(incoming));
+      },
+      currentCompId,
+    );
+
+    return () => unsub();
+  }, [currentProjId, currentCompId, currentUser?.uid]);
 
   const filtered = sortByNewestFirst(inspections.filter((i) => {
     const matchSearch =

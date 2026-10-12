@@ -14,6 +14,7 @@ import {
   canAccessRoute,
 } from "@/lib/permissions";
 import { ShieldAlert, ArrowLeft, Loader2, FolderX } from "lucide-react";
+import PageLoadingFallback from "./PageLoadingFallback";
 
 interface ProjectGuardProps {
   minRole?: number; // 1 to 5
@@ -52,12 +53,7 @@ export const ProjectGuard: React.FC<ProjectGuardProps> = ({
 
   if (isAuthLoading || (isProjLoading && projects.length === 0)) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-slate-300">
-        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin mb-3" />
-        <span className="text-xs font-semibold tracking-wider uppercase text-slate-400">
-          Authenticating Workspace Session...
-        </span>
-      </div>
+      <PageLoadingFallback message="Loading project workspace..." />
     );
   }
 

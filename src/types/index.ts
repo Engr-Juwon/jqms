@@ -391,8 +391,11 @@ export interface StructuralElement {
   projectId: string;
   companyId?: string;
   createdBy?: string;
+  createdByName?: string;
   createdAt: number | string;
   updatedAt?: number | string;
+  updatedBy?: string;
+  updatedByName?: string;
 
   // Common fields
   levelId: string;

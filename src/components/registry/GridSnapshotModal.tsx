@@ -67,6 +67,7 @@ export type LegendPos =
   | "BOTTOM_RIGHT"
   | "BOTTOM_LEFT"
   | "TOP_RIGHT";
+export type LegendSize = "COMPACT" | "STANDARD" | "LARGE" | "XLARGE" | "CUSTOM";
 export type WatermarkType =
   | "NONE"
   | "FOR_CONSTRUCTION"
@@ -117,6 +118,8 @@ export interface GridSnapshotConfig {
   revisionText: string;
   showLegend: boolean;
   legendPosition: LegendPos;
+  legendSize: LegendSize;
+  legendScale: number;
   watermark: WatermarkType;
   customWatermarkText: string;
   format: ExportFormat;
@@ -280,6 +283,8 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
       revisionText: saved.revisionText || "Rev 01 - Quality Verification",
       showLegend: saved.showLegend ?? true,
       legendPosition: saved.legendPosition || "BOTTOM_HORIZONTAL",
+      legendSize: (saved.legendSize as LegendSize) || "STANDARD",
+      legendScale: typeof saved.legendScale === "number" ? saved.legendScale : 1.0,
       watermark: saved.watermark || "FOR_CONSTRUCTION",
       customWatermarkText:
         saved.customWatermarkText || "APPROVED FOR CONSTRUCTION",
@@ -765,6 +770,17 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
 
           // 5. Integrated Legend Overlay (Horizontal Dock or Floating Card)
           if (config.showLegend) {
+            const legScale =
+              typeof config.legendScale === "number" && config.legendScale > 0
+                ? config.legendScale
+                : config.legendSize === "COMPACT"
+                  ? 0.75
+                  : config.legendSize === "LARGE"
+                    ? 1.25
+                    : config.legendSize === "XLARGE"
+                      ? 1.5
+                      : 1.0;
+
             const isTopHorizontal = config.legendPosition === "TOP_HORIZONTAL";
             const isBottomHorizontal =
               config.legendPosition === "BOTTOM_HORIZONTAL";
@@ -772,7 +788,7 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
 
             if (isHorizontal) {
               const lgW = exportWidth - 64 * targetScale;
-              const lgH = 40 * targetScale;
+              const lgH = Math.round(40 * targetScale * legScale);
               const lgX = 32 * targetScale;
               let lgY = isBottomHorizontal
                 ? exportHeight - lgH - 24 * targetScale
@@ -795,11 +811,17 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                   : "rgba(15, 23, 42, 0.94)";
               ctx.strokeStyle =
                 config.theme === "LIGHT" ? "#cbd5e1" : "#0284c7";
-              ctx.lineWidth = 1.5 * targetScale;
+              ctx.lineWidth = 1.5 * targetScale * Math.min(legScale, 1.4);
 
               if (ctx.roundRect) {
                 ctx.beginPath();
-                ctx.roundRect(lgX, lgY, lgW, lgH, 8 * targetScale);
+                ctx.roundRect(
+                  lgX,
+                  lgY,
+                  lgW,
+                  lgH,
+                  8 * targetScale * Math.min(legScale, 1.2),
+                );
                 ctx.fill();
                 ctx.stroke();
               } else {
@@ -808,22 +830,28 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
               }
 
               // Left Accent Badge
-              const badgeW = 124 * targetScale;
-              const badgeH = 26 * targetScale;
+              const badgeW = Math.round(124 * targetScale * legScale);
+              const badgeH = Math.round(26 * targetScale * legScale);
               const badgeX = lgX + 8 * targetScale;
               const badgeY = lgY + (lgH - badgeH) / 2;
 
               ctx.fillStyle = "#0284c7";
               if (ctx.roundRect) {
                 ctx.beginPath();
-                ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6 * targetScale);
+                ctx.roundRect(
+                  badgeX,
+                  badgeY,
+                  badgeW,
+                  badgeH,
+                  6 * targetScale * Math.min(legScale, 1.2),
+                );
                 ctx.fill();
               } else {
                 ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
               }
 
               ctx.fillStyle = "#ffffff";
-              ctx.font = `bold ${Math.round(11 * targetScale)}px sans-serif`;
+              ctx.font = `bold ${Math.round(11 * targetScale * legScale)}px sans-serif`;
               ctx.textAlign = "center";
               ctx.textBaseline = "middle";
               ctx.fillText(
@@ -833,8 +861,8 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
               );
 
               // Horizontal items
-              const startX = badgeX + badgeW + 18 * targetScale;
-              const availableW = lgW - (badgeW + 36 * targetScale);
+              const startX = badgeX + badgeW + 18 * targetScale * legScale;
+              const availableW = lgW - (badgeW + 36 * targetScale * legScale);
 
               if (activeLayer === "STATUS") {
                 const statusItems = [
@@ -852,20 +880,24 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                 statusItems.forEach((item, idx) => {
                   const ix = startX + idx * colW;
                   const iy = lgY + lgH / 2;
-                  const sz = 12 * targetScale;
+                  const sz = Math.round(12 * targetScale * legScale);
 
                   ctx.fillStyle = item.fill;
                   ctx.fillRect(ix, iy - sz / 2, sz, sz);
                   ctx.strokeStyle = item.color;
-                  ctx.lineWidth = 1.2 * targetScale;
+                  ctx.lineWidth = 1.2 * targetScale * Math.min(legScale, 1.3);
                   ctx.strokeRect(ix, iy - sz / 2, sz, sz);
 
                   ctx.fillStyle =
                     config.theme === "LIGHT" ? "#1e293b" : "#e2e8f0";
-                  ctx.font = `bold ${Math.round(10.5 * targetScale)}px sans-serif`;
+                  ctx.font = `bold ${Math.round(10.5 * targetScale * legScale)}px sans-serif`;
                   ctx.textAlign = "left";
                   ctx.textBaseline = "middle";
-                  ctx.fillText(item.label, ix + sz + 6 * targetScale, iy);
+                  ctx.fillText(
+                    item.label,
+                    ix + sz + 6 * targetScale * legScale,
+                    iy,
+                  );
                 });
               } else if (activeLayer === "RISK") {
                 const riskItems = [
@@ -878,7 +910,7 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                 ];
                 const colW = Math.min(
                   availableW / riskItems.length,
-                  240 * targetScale,
+                  240 * targetScale * legScale,
                 );
 
                 riskItems.forEach((item, idx) => {
@@ -888,9 +920,9 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                   ctx.fillStyle = item.color;
                   ctx.beginPath();
                   ctx.arc(
-                    ix + 6 * targetScale,
+                    ix + 6 * targetScale * legScale,
                     iy,
-                    5 * targetScale,
+                    Math.round(5 * targetScale * legScale),
                     0,
                     Math.PI * 2,
                   );
@@ -898,10 +930,14 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
 
                   ctx.fillStyle =
                     config.theme === "LIGHT" ? "#1e293b" : "#e2e8f0";
-                  ctx.font = `bold ${Math.round(11 * targetScale)}px sans-serif`;
+                  ctx.font = `bold ${Math.round(11 * targetScale * legScale)}px sans-serif`;
                   ctx.textAlign = "left";
                   ctx.textBaseline = "middle";
-                  ctx.fillText(item.label, ix + 16 * targetScale, iy);
+                  ctx.fillText(
+                    item.label,
+                    ix + 16 * targetScale * legScale,
+                    iy,
+                  );
                 });
               } else {
                 // Formwork
@@ -912,36 +948,44 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                 ];
                 const colW = Math.min(
                   availableW / fwItems.length,
-                  240 * targetScale,
+                  240 * targetScale * legScale,
                 );
 
                 fwItems.forEach((item, idx) => {
                   const ix = startX + idx * colW;
                   const iy = lgY + lgH / 2;
-                  const sz = 12 * targetScale;
+                  const sz = Math.round(12 * targetScale * legScale);
 
                   ctx.fillStyle = item.color;
                   ctx.fillRect(ix, iy - sz / 2, sz, sz);
                   ctx.strokeStyle =
                     config.theme === "LIGHT" ? "#0f172a" : "#ffffff";
-                  ctx.lineWidth = 0.8 * targetScale;
+                  ctx.lineWidth = 0.8 * targetScale * Math.min(legScale, 1.3);
                   ctx.strokeRect(ix, iy - sz / 2, sz, sz);
 
                   ctx.fillStyle =
                     config.theme === "LIGHT" ? "#1e293b" : "#e2e8f0";
-                  ctx.font = `bold ${Math.round(11 * targetScale)}px sans-serif`;
+                  ctx.font = `bold ${Math.round(11 * targetScale * legScale)}px sans-serif`;
                   ctx.textAlign = "left";
                   ctx.textBaseline = "middle";
-                  ctx.fillText(item.label, ix + sz + 6 * targetScale, iy);
+                  ctx.fillText(
+                    item.label,
+                    ix + sz + 6 * targetScale * legScale,
+                    iy,
+                  );
                 });
               }
             } else {
               // Floating Box Corner Legend
               const lgW = Math.min(
-                380 * targetScale,
+                Math.round(380 * targetScale * legScale),
                 exportWidth - 80 * targetScale,
               );
-              const lgH = (activeLayer === "STATUS" ? 240 : 160) * targetScale;
+              const baseH = activeLayer === "STATUS" ? 240 : 160;
+              const lgH = Math.min(
+                Math.round(baseH * targetScale * legScale),
+                exportHeight - 80 * targetScale,
+              );
               let lgX = exportWidth - lgW - 40 * targetScale;
               let lgY = exportHeight - lgH - 40 * targetScale;
 
@@ -957,20 +1001,21 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                   : "rgba(15, 23, 42, 0.94)";
               ctx.fillRect(lgX, lgY, lgW, lgH);
               ctx.strokeStyle = "#0284c7";
-              ctx.lineWidth = 1.5 * targetScale;
+              ctx.lineWidth = 1.5 * targetScale * Math.min(legScale, 1.4);
               ctx.strokeRect(lgX, lgY, lgW, lgH);
 
               // Header Banner
+              const bannerH = Math.round(30 * targetScale * legScale);
               ctx.fillStyle = "#0284c7";
-              ctx.fillRect(lgX, lgY, lgW, 30 * targetScale);
+              ctx.fillRect(lgX, lgY, lgW, bannerH);
               ctx.fillStyle = "#ffffff";
-              ctx.font = `bold ${Math.round(12 * targetScale)}px sans-serif`;
+              ctx.font = `bold ${Math.round(12 * targetScale * legScale)}px sans-serif`;
               ctx.textAlign = "left";
-              ctx.textBaseline = "alphabetic";
+              ctx.textBaseline = "middle";
               ctx.fillText(
                 `PLAN LEGEND (${activeLayer} OVERLAY)`,
-                lgX + 14 * targetScale,
-                lgY + 20 * targetScale,
+                lgX + 14 * targetScale * legScale,
+                lgY + bannerH / 2,
               );
 
               if (activeLayer === "STATUS") {
@@ -988,20 +1033,32 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                 statusItems.forEach((item, idx) => {
                   const col = idx < 4 ? 0 : 1;
                   const row = idx < 4 ? idx : idx - 4;
-                  const ix = lgX + (14 + col * 180) * targetScale;
-                  const iy = lgY + (48 + row * 40) * targetScale;
-                  const sz = 14 * targetScale;
+                  const colSpacing = (lgW - 28 * targetScale * legScale) / 2;
+                  const ix =
+                    lgX + (14 * targetScale * legScale + col * colSpacing);
+                  const iy =
+                    lgY +
+                    (bannerH +
+                      16 * targetScale * legScale +
+                      row * 44 * targetScale * legScale);
+                  const sz = Math.round(14 * targetScale * legScale);
 
                   ctx.fillStyle = item.fill;
-                  ctx.fillRect(ix, iy - sz + 2, sz, sz);
+                  ctx.fillRect(ix, iy - sz / 2, sz, sz);
                   ctx.strokeStyle = item.color;
-                  ctx.lineWidth = 1.5 * targetScale;
-                  ctx.strokeRect(ix, iy - sz + 2, sz, sz);
+                  ctx.lineWidth = 1.5 * targetScale * Math.min(legScale, 1.3);
+                  ctx.strokeRect(ix, iy - sz / 2, sz, sz);
 
                   ctx.fillStyle =
                     config.theme === "LIGHT" ? "#1e293b" : "#e2e8f0";
-                  ctx.font = `normal ${Math.round(11 * targetScale)}px sans-serif`;
-                  ctx.fillText(item.label, ix + 22 * targetScale, iy);
+                  ctx.font = `normal ${Math.round(11 * targetScale * legScale)}px sans-serif`;
+                  ctx.textAlign = "left";
+                  ctx.textBaseline = "middle";
+                  ctx.fillText(
+                    item.label,
+                    ix + sz + 8 * targetScale * legScale,
+                    iy,
+                  );
                 });
               } else if (activeLayer === "RISK") {
                 const riskItems = [
@@ -1014,15 +1071,20 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                 ];
 
                 riskItems.forEach((item, idx) => {
-                  const ix = lgX + 16 * targetScale;
-                  const iy = lgY + (52 + idx * 34) * targetScale;
+                  const ix = lgX + 16 * targetScale * legScale;
+                  const iy =
+                    lgY +
+                    (bannerH +
+                      20 * targetScale * legScale +
+                      idx * 36 * targetScale * legScale);
+                  const dotR = Math.round(6 * targetScale * legScale);
 
                   ctx.fillStyle = item.color;
                   ctx.beginPath();
                   ctx.arc(
-                    ix + 6 * targetScale,
-                    iy - 4 * targetScale,
-                    6 * targetScale,
+                    ix + dotR,
+                    iy,
+                    dotR,
                     0,
                     Math.PI * 2,
                   );
@@ -1030,8 +1092,14 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
 
                   ctx.fillStyle =
                     config.theme === "LIGHT" ? "#1e293b" : "#e2e8f0";
-                  ctx.font = `normal ${Math.round(11.5 * targetScale)}px sans-serif`;
-                  ctx.fillText(item.label, ix + 20 * targetScale, iy);
+                  ctx.font = `normal ${Math.round(11.5 * targetScale * legScale)}px sans-serif`;
+                  ctx.textAlign = "left";
+                  ctx.textBaseline = "middle";
+                  ctx.fillText(
+                    item.label,
+                    ix + dotR * 2 + 10 * targetScale * legScale,
+                    iy,
+                  );
                 });
               } else {
                 // Formwork
@@ -1042,21 +1110,36 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                 ];
 
                 fwItems.forEach((item, idx) => {
-                  const ix = lgX + 16 * targetScale;
-                  const iy = lgY + (52 + idx * 34) * targetScale;
+                  const ix = lgX + 16 * targetScale * legScale;
+                  const iy =
+                    lgY +
+                    (bannerH +
+                      20 * targetScale * legScale +
+                      idx * 36 * targetScale * legScale);
+                  const sz = Math.round(14 * targetScale * legScale);
 
                   ctx.fillStyle = item.color;
                   ctx.fillRect(
                     ix,
-                    iy - 10 * targetScale,
-                    14 * targetScale,
-                    10 * targetScale,
+                    iy - sz / 2,
+                    sz,
+                    sz,
                   );
+                  ctx.strokeStyle =
+                    config.theme === "LIGHT" ? "#0f172a" : "#ffffff";
+                  ctx.lineWidth = 1.0 * targetScale * Math.min(legScale, 1.3);
+                  ctx.strokeRect(ix, iy - sz / 2, sz, sz);
 
                   ctx.fillStyle =
                     config.theme === "LIGHT" ? "#1e293b" : "#e2e8f0";
-                  ctx.font = `normal ${Math.round(11.5 * targetScale)}px sans-serif`;
-                  ctx.fillText(item.label, ix + 22 * targetScale, iy);
+                  ctx.font = `normal ${Math.round(11.5 * targetScale * legScale)}px sans-serif`;
+                  ctx.textAlign = "left";
+                  ctx.textBaseline = "middle";
+                  ctx.fillText(
+                    item.label,
+                    ix + sz + 8 * targetScale * legScale,
+                    iy,
+                  );
                 });
               }
             }
@@ -2345,6 +2428,129 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                               </div>
                             </button>
                           ))}
+                        </div>
+
+                        {/* Legend Size & Scaling Controls */}
+                        <div className="pt-2.5 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                              Legend Size &amp; Scale
+                            </label>
+                            <span className="px-2 py-0.5 rounded-full bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 font-mono text-[11px] font-bold border border-brand-200 dark:border-brand-800">
+                              {Math.round((config.legendScale ?? 1.0) * 100)}%
+                            </span>
+                          </div>
+
+                          {/* Quick Size Presets */}
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {[
+                              {
+                                id: "COMPACT" as LegendSize,
+                                scale: 0.75,
+                                label: "Compact",
+                                sub: "75%",
+                              },
+                              {
+                                id: "STANDARD" as LegendSize,
+                                scale: 1.0,
+                                label: "Standard",
+                                sub: "100%",
+                              },
+                              {
+                                id: "LARGE" as LegendSize,
+                                scale: 1.25,
+                                label: "Large",
+                                sub: "125%",
+                              },
+                              {
+                                id: "XLARGE" as LegendSize,
+                                scale: 1.5,
+                                label: "X-Large",
+                                sub: "150%",
+                              },
+                            ].map((preset) => {
+                              const isActive =
+                                config.legendSize === preset.id ||
+                                Math.abs(
+                                  (config.legendScale ?? 1.0) - preset.scale,
+                                ) < 0.03;
+                              return (
+                                <button
+                                  key={preset.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setConfig((c) => ({
+                                      ...c,
+                                      legendSize: preset.id,
+                                      legendScale: preset.scale,
+                                    }))
+                                  }
+                                  className={`py-1.5 px-1 rounded-lg border text-center transition cursor-pointer ${
+                                    isActive
+                                      ? "bg-brand-50 dark:bg-brand-950/50 border-brand-500 text-brand-700 dark:text-brand-300 font-bold shadow-xs"
+                                      : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"
+                                  }`}
+                                >
+                                  <div className="text-[11px] font-bold leading-tight">
+                                    {preset.label}
+                                  </div>
+                                  <div className="text-[9px] text-slate-400 leading-tight">
+                                    {preset.sub}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Fine-Tuning Slider */}
+                          <div className="space-y-1 pt-1">
+                            <div className="flex items-center justify-between text-[10px] text-slate-500">
+                              <span>50% (Small)</span>
+                              <span>200% (Maximum)</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.5"
+                              max="2.0"
+                              step="0.05"
+                              value={config.legendScale ?? 1.0}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setConfig((c) => ({
+                                  ...c,
+                                  legendScale: val,
+                                  legendSize:
+                                    val === 0.75
+                                      ? "COMPACT"
+                                      : val === 1.0
+                                        ? "STANDARD"
+                                        : val === 1.25
+                                          ? "LARGE"
+                                          : val === 1.5
+                                            ? "XLARGE"
+                                            : "CUSTOM",
+                                }));
+                              }}
+                              className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                            />
+                            {(config.legendScale ?? 1.0) !== 1.0 && (
+                              <div className="flex justify-end pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setConfig((c) => ({
+                                      ...c,
+                                      legendSize: "STANDARD",
+                                      legendScale: 1.0,
+                                    }))
+                                  }
+                                  className="text-[10px] text-brand-600 dark:text-brand-400 hover:underline font-semibold cursor-pointer"
+                                >
+                                  Reset to 100% Default
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}

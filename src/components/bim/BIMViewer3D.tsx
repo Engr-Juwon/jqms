@@ -6,6 +6,7 @@ import React, {
   useCallback,
 } from "react";
 import * as THREE from "three";
+import * as BufferGeometryUtils from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
   StructuralElement,
   ElementStatus,
@@ -116,6 +117,116 @@ function createTextSprite(
   const sprite = new THREE.Sprite(mat);
   sprite.scale.set(2.2, 1.1, 1);
   return sprite;
+}
+
+/**
+ * Constructs an authentic 3D structural concrete staircase geometry:
+ * - Single Flight: stepped risers, horizontal treads, top landing platform, and sloped waist slab soffit.
+ * - Two Flights (Dogleg / Return): Flight 1, intermediate landing platform, and parallel Flight 2.
+ */
+function createStaircaseGeometry(
+  stairW: number,
+  stairRise: number,
+  waistT: number,
+  landT: number,
+  totalRun: number,
+  riserCount: number,
+  flights?: any[],
+  landings?: any[],
+): THREE.BufferGeometry {
+  const hasMultipleFlights = Array.isArray(flights) && flights.length >= 2;
+
+  if (hasMultipleFlights) {
+    const fl1 = flights[0];
+    const fl2 = flights[1];
+    const fl1Risers = Math.max(2, Number(fl1?.riserCount) || Math.round(riserCount / 2));
+    const fl2Risers = Math.max(2, Number(fl2?.riserCount) || Math.round(riserCount / 2));
+    const fl1Run = Number(fl1?.length) || Math.max(1.2, totalRun * 0.45);
+    const fl2Run = Number(fl2?.length) || Math.max(1.2, totalRun * 0.45);
+    const landRun =
+      landings && landings[0]?.length
+        ? Number(landings[0].length)
+        : Math.max(1.0, totalRun * 0.25);
+
+    const halfRise = stairRise / 2;
+    const wellGap = 0.12; // 120mm stairwell lightwell gap
+
+    // Flight 1: 0 to halfRise
+    const s1 = new THREE.Shape();
+    s1.moveTo(0, 0);
+    const stepT1 = fl1Run / fl1Risers;
+    const stepR1 = halfRise / fl1Risers;
+    for (let i = 0; i < fl1Risers; i++) {
+      s1.lineTo(i * stepT1, (i + 1) * stepR1);
+      s1.lineTo((i + 1) * stepT1, (i + 1) * stepR1);
+    }
+    s1.lineTo(fl1Run, halfRise - waistT);
+    s1.lineTo(0, -waistT);
+    s1.closePath();
+
+    const g1 = new THREE.ExtrudeGeometry(s1, { depth: stairW, bevelEnabled: false });
+    g1.translate(0, 0, -(stairW + wellGap / 2));
+
+    // Mid Landing Platform
+    const totalLandingW = 2 * stairW + wellGap;
+    const gLand = new THREE.BoxGeometry(landRun, landT, totalLandingW);
+    gLand.translate(fl1Run + landRun / 2, halfRise - landT / 2, 0);
+
+    // Flight 2: climbs from halfRise to stairRise in reverse direction
+    const s2 = new THREE.Shape();
+    s2.moveTo(0, 0);
+    const stepT2 = fl2Run / fl2Risers;
+    const stepR2 = halfRise / fl2Risers;
+    for (let i = 0; i < fl2Risers; i++) {
+      s2.lineTo(i * stepT2, (i + 1) * stepR2);
+      s2.lineTo((i + 1) * stepT2, (i + 1) * stepR2);
+    }
+    s2.lineTo(fl2Run, halfRise - waistT);
+    s2.lineTo(0, -waistT);
+    s2.closePath();
+
+    const g2 = new THREE.ExtrudeGeometry(s2, { depth: stairW, bevelEnabled: false });
+    g2.rotateY(Math.PI);
+    g2.translate(fl1Run, halfRise, wellGap / 2 + stairW);
+
+    try {
+      const merged = BufferGeometryUtils.mergeGeometries([g1, gLand, g2]);
+      if (merged) {
+        merged.center();
+        return merged;
+      }
+    } catch {
+      // Fall through to single flight on merge error
+    }
+  }
+
+  // Single Straight Flight with Top Landing
+  const risers = Math.max(4, riserCount || 14);
+  const landLen =
+    landings && landings.length > 0 && landings[0]?.length
+      ? Number(landings[0].length)
+      : Math.max(0.8, Math.min(1.5, totalRun * 0.25));
+  const flightRun = Math.max(1.5, totalRun - landLen);
+  const stepT = flightRun / risers;
+  const stepR = stairRise / risers;
+
+  const s = new THREE.Shape();
+  s.moveTo(0, 0);
+  for (let i = 0; i < risers; i++) {
+    s.lineTo(i * stepT, (i + 1) * stepR);
+    s.lineTo((i + 1) * stepT, (i + 1) * stepR);
+  }
+  // Top landing platform
+  s.lineTo(flightRun + landLen, stairRise);
+  s.lineTo(flightRun + landLen, stairRise - landT);
+  // Sloped waist soffit
+  s.lineTo(flightRun, stairRise - landT);
+  s.lineTo(0, -waistT);
+  s.closePath();
+
+  const geo = new THREE.ExtrudeGeometry(s, { depth: stairW, bevelEnabled: false });
+  geo.center();
+  return geo;
 }
 
 export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
@@ -937,16 +1048,192 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         }
         posY = floorElevation + storyHeight - depthM / 2;
       } else if (type.includes("SLAB")) {
-        posX = coords.midX - centerOffsetX;
-        posZ = coords.midY - centerOffsetZ;
         const slabW = coords.isArea
           ? Math.max(1.0, coords.sizeX)
           : lengthM || 6.0;
         const slabD = coords.isArea
           ? Math.max(1.0, coords.sizeY)
-          : widthM || 6.0;
+          : (el.cantileverDepth || widthM || 6.0);
         posY = floorElevation + storyHeight - thicknessM / 2;
-        geo = new THREE.BoxGeometry(slabW, thicknessM, slabD);
+
+        const shape = el.slabShape || "rectangular";
+        const dir = ((el.cantileverDirection || 'TOP') as string).toUpperCase();
+        const isMirr = !!(el as any).isMirrored;
+
+        if (shape === "circular") {
+          const rad = (el.radius || Math.min(slabW, slabD) / 2);
+          geo = new THREE.CylinderGeometry(rad, rad, thicknessM, 32);
+          posX = coords.midX - centerOffsetX;
+          posZ = coords.midY - centerOffsetZ;
+        } else if (shape === "semi_circular") {
+          const rad = slabW / 2;
+          const s = new THREE.Shape();
+          s.absarc(0, 0, rad, 0, Math.PI, false);
+          s.closePath();
+          const extrudeSettings = {
+            depth: thicknessM,
+            bevelEnabled: false,
+            curveSegments: 24,
+          };
+          geo = new THREE.ExtrudeGeometry(s, extrudeSettings);
+          geo.rotateX(Math.PI / 2);
+          posX = coords.midX - centerOffsetX;
+          posZ = coords.midY - centerOffsetZ;
+        } else if (shape === "circular_segment") {
+          const rad = el.radius || Math.max(slabW / 2, 1.0);
+          const rise = el.arcDepth || Math.min(rad, 1.5);
+          const chord = slabW;
+          const s = new THREE.Shape();
+          const startX = -chord / 2;
+          const endX = chord / 2;
+          s.moveTo(startX, 0);
+          s.quadraticCurveTo(0, rise, endX, 0);
+          s.lineTo(startX, 0);
+          const extrudeSettings = {
+            depth: thicknessM,
+            bevelEnabled: false,
+            curveSegments: 24,
+          };
+          geo = new THREE.ExtrudeGeometry(s, extrudeSettings);
+          geo.rotateX(Math.PI / 2);
+          posX = coords.midX - centerOffsetX;
+          posZ = coords.midY - centerOffsetZ;
+        } else if (shape === "curved_cantilever") {
+          const w = slabW;
+          const d = slabD;
+          const rise = el.arcDepth || Math.min(d * 0.8, 1.5);
+          const isDeduct = !!el.isArcDeduction;
+          const s = new THREE.Shape();
+
+          // Construct shape centered around (0,0) in the X-Z plane
+          const halfW = w / 2;
+          const halfD = d / 2;
+
+          if (dir === "TOP" || dir === "NORTH") {
+            s.moveTo(-halfW, halfD);
+            s.lineTo(halfW, halfD);
+            s.lineTo(halfW, -halfD);
+            if (isDeduct) {
+              s.quadraticCurveTo(0, -halfD + rise, -halfW, -halfD);
+            } else {
+              s.quadraticCurveTo(0, -halfD - rise, -halfW, -halfD);
+            }
+            s.lineTo(-halfW, halfD);
+          } else if (dir === "LEFT" || dir === "WEST") {
+            s.moveTo(halfW, -halfD);
+            s.lineTo(halfW, halfD);
+            s.lineTo(-halfW, halfD);
+            if (isDeduct) {
+              s.quadraticCurveTo(-halfW + rise, 0, -halfW, -halfD);
+            } else {
+              s.quadraticCurveTo(-halfW - rise, 0, -halfW, -halfD);
+            }
+            s.lineTo(halfW, -halfD);
+          } else if (dir === "RIGHT" || dir === "EAST") {
+            s.moveTo(-halfW, -halfD);
+            s.lineTo(-halfW, halfD);
+            s.lineTo(halfW, halfD);
+            if (isDeduct) {
+              s.quadraticCurveTo(halfW - rise, 0, halfW, -halfD);
+            } else {
+              s.quadraticCurveTo(halfW + rise, 0, halfW, -halfD);
+            }
+            s.lineTo(-halfW, -halfD);
+          } else {
+            // BOTTOM / SOUTH
+            s.moveTo(-halfW, -halfD);
+            s.lineTo(halfW, -halfD);
+            s.lineTo(halfW, halfD);
+            if (isDeduct) {
+              s.quadraticCurveTo(0, halfD - rise, -halfW, halfD);
+            } else {
+              s.quadraticCurveTo(0, halfD + rise, -halfW, halfD);
+            }
+            s.lineTo(-halfW, -halfD);
+          }
+
+          const extrudeSettings = {
+            depth: thicknessM,
+            bevelEnabled: true,
+            bevelSegments: 2,
+            steps: 1,
+            bevelSize: 0.02,
+            bevelThickness: 0.02,
+            curveSegments: 28,
+          };
+          geo = new THREE.ExtrudeGeometry(s, extrudeSettings);
+          geo.rotateX(Math.PI / 2);
+          geo.center();
+          posX = coords.midX - centerOffsetX;
+          posZ = coords.midY - centerOffsetZ;
+        } else if (shape === "trapezoidal_cantilever") {
+          // CAD 1BM78/79 vs 1BM80/81 cantilever: W1 start depth + corner fillet arc into column
+          const w = slabW;
+          const w1 = el.cantileverDepth || widthM || 1.95;
+          const w2 = (el as any).taperEndDepth ?? 0;
+          const rFillet = el.radius || 1.5;
+          const filletM = Math.min(w * 0.4, Math.max(0.5, rFillet * 0.7));
+          const h2M = w2 > 0 ? (w2 / (w1 || 1)) * slabD : 0;
+          const h1M = slabD;
+
+          const s = new THREE.Shape();
+          const halfW = w / 2;
+          const halfD = h1M / 2;
+
+          if (dir === "TOP" || dir === "NORTH") {
+            if (isMirr) {
+              s.moveTo(-halfW, -halfD);
+              s.lineTo(halfW, -halfD);
+              s.lineTo(halfW, halfD);
+              s.lineTo(-halfW + filletM, halfD * 0.2);
+              s.quadraticCurveTo(-halfW, halfD * 0.2, -halfW, -halfD + h2M);
+            } else {
+              s.moveTo(-halfW, -halfD);
+              s.lineTo(halfW, -halfD);
+              s.lineTo(halfW, -halfD + h2M);
+              s.quadraticCurveTo(halfW, halfD * 0.2, halfW - filletM, halfD * 0.2);
+              s.lineTo(-halfW, halfD);
+            }
+          } else {
+            // BOTTOM / SOUTH (Default CAD standard 1BM78/79 and 1BM80/81)
+            if (isMirr) {
+              // Mirrored (1BM80/81): Fillet arc on LEFT, W1 (1950mm) on RIGHT
+              s.moveTo(-halfW, -halfD);
+              s.lineTo(halfW, -halfD);
+              s.lineTo(halfW, halfD);
+              s.lineTo(-halfW + filletM, -halfD + Math.max(0.3, halfD * 0.8));
+              s.quadraticCurveTo(-halfW, -halfD + Math.max(0.3, halfD * 0.8), -halfW, -halfD + h2M);
+            } else {
+              // Standard (1BM78/79): W1 (1950mm) on LEFT, fillet arc on RIGHT
+              s.moveTo(-halfW, -halfD);
+              s.lineTo(halfW, -halfD);
+              s.lineTo(halfW, -halfD + h2M);
+              s.quadraticCurveTo(halfW, -halfD + Math.max(0.3, halfD * 0.8), halfW - filletM, -halfD + Math.max(0.3, halfD * 0.8));
+              s.lineTo(-halfW, halfD);
+            }
+          }
+          s.closePath();
+
+          const extrudeSettings = {
+            depth: thicknessM,
+            bevelEnabled: true,
+            bevelSegments: 2,
+            steps: 1,
+            bevelSize: 0.02,
+            bevelThickness: 0.02,
+            curveSegments: 28,
+          };
+          geo = new THREE.ExtrudeGeometry(s, extrudeSettings);
+          geo.rotateX(Math.PI / 2);
+          geo.center();
+          posX = coords.midX - centerOffsetX;
+          posZ = coords.midY - centerOffsetZ;
+        } else {
+          // Standard Rectangular Slab
+          posX = coords.midX - centerOffsetX;
+          posZ = coords.midY - centerOffsetZ;
+          geo = new THREE.BoxGeometry(slabW, thicknessM, slabD);
+        }
       } else if (type.includes("WALL") || type.includes("RETAINING")) {
         if (coords.isSpan) {
           posX = coords.midX - centerOffsetX;
@@ -975,6 +1262,56 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         const footThick = thicknessM || 0.6;
         posY = floorElevation + footThick / 2;
         geo = new THREE.BoxGeometry(footL, footThick, footW);
+      } else if (type.includes("STAIR")) {
+        const stairW = el.flightWidth || (widthM > 0.4 ? widthM : 1.2);
+        const waistT = el.waistThickness || 0.15;
+        const landT =
+          (typeof el.landingThickness === "number"
+            ? el.landingThickness
+            : Number(el.landingThickness)) || 0.2;
+        const stairRise = heightM > 0.5 ? heightM : storyHeight || 3.2;
+
+        let totalRun = lengthM || 3.6;
+        if (coords.isSpan && coords.spanLength > 0.5) {
+          totalRun = coords.spanLength;
+        } else if (coords.isArea && coords.sizeX > 0.5) {
+          totalRun = Math.max(coords.sizeX, coords.sizeY);
+        }
+
+        const riserCnt =
+          el.riserCount ||
+          (el.flights?.reduce(
+            (acc: number, f: any) => acc + (Number(f.riserCount) || 0),
+            0,
+          ) || 14);
+
+        geo = createStaircaseGeometry(
+          stairW,
+          stairRise,
+          waistT,
+          landT,
+          totalRun,
+          riserCnt,
+          el.flights,
+          el.landings,
+        );
+
+        posY = floorElevation + stairRise / 2;
+
+        if (coords.isSpan) {
+          posX = coords.midX - centerOffsetX;
+          posZ = coords.midY - centerOffsetZ;
+          rotationY = -coords.angleRad;
+        } else if (coords.isArea) {
+          posX = coords.midX - centerOffsetX;
+          posZ = coords.midY - centerOffsetZ;
+          if (coords.sizeY > coords.sizeX) {
+            rotationY = Math.PI / 2;
+          }
+        } else {
+          posX = coords.x1 - centerOffsetX;
+          posZ = coords.y1 - centerOffsetZ;
+        }
       } else {
         posX = coords.midX - centerOffsetX;
         posZ = coords.midY - centerOffsetZ;
@@ -1299,7 +1636,7 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
 
           {/* Element Type Filter Chips */}
           <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-900/95 backdrop-blur-md border border-slate-700 shadow-xl text-xs">
-            {["ALL", "COLUMN", "BEAM", "SLAB", "WALL", "FOOTING"].map(
+            {["ALL", "COLUMN", "BEAM", "SLAB", "WALL", "STAIR", "FOOTING"].map(
               (type) => (
                 <button
                   key={type}

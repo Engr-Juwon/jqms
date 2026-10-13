@@ -44,8 +44,8 @@ export const RFICreate: React.FC = () => {
   const [tradeId, setTradeId] = useState("");
   const [tradeName, setTradeName] = useState("Civil & Structural Works");
   const [subtradeName, setSubtradeName] = useState("");
-  const [levelId, setLevelId] = useState("");
-  const [levelName, setLevelName] = useState("");
+  const [levelId, setLevelId] = useState(activeProject?.currentLevelId || "");
+  const [levelName, setLevelName] = useState(activeProject?.currentLevelName || "");
   const [elementId, setElementId] = useState("");
   const [elementName, setElementName] = useState("");
   const [gridLocation, setGridLocation] = useState("");

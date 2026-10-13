@@ -46,8 +46,8 @@ export const PermitToPourCreate: React.FC = () => {
     }
   }, [getPrefix]);
 
-  const [levelId, setLevelId] = useState("");
-  const [levelName, setLevelName] = useState("");
+  const [levelId, setLevelId] = useState(activeProject?.currentLevelId || "");
+  const [levelName, setLevelName] = useState(activeProject?.currentLevelName || "");
   const [elementId, setElementId] = useState("");
   const [elementName, setElementName] = useState("");
   const [tradeId, setTradeId] = useState("");

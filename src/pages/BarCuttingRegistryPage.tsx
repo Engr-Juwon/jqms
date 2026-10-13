@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -51,7 +51,16 @@ export const BarCuttingRegistryPage: React.FC = () => {
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [levelFilter, setLevelFilter] = useState<string>("ALL");
+  const [levelFilter, setLevelFilter] = useState<string>(
+    activeProject?.currentLevelName || "ALL",
+  );
+  const prevLevelNameRef = useRef<string | undefined>(activeProject?.currentLevelName);
+  useEffect(() => {
+    if (activeProject?.currentLevelName !== prevLevelNameRef.current) {
+      prevLevelNameRef.current = activeProject?.currentLevelName;
+      setLevelFilter(activeProject?.currentLevelName || "ALL");
+    }
+  }, [activeProject?.currentLevelName]);
   const [selectedScheduleIds, setSelectedScheduleIds] = useState<string[]>([]);
 
   // Pagination State

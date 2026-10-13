@@ -53,8 +53,10 @@ export const CubeForm: React.FC = () => {
       `CDL-BS-CUBE-${String(Math.floor(Math.random() * 800 + 100)).padStart(4, "0")}`,
   );
   const [inscribedName, setInscribedName] = useState("S3");
-  const [levelId, setLevelId] = useState("");
-  const [levelName, setLevelName] = useState("0 - Foundation");
+  const [levelId, setLevelId] = useState(activeProject?.currentLevelId || "");
+  const [levelName, setLevelName] = useState(
+    activeProject?.currentLevelName || "0 - Foundation",
+  );
   const [elementId, setElementId] = useState("");
   const [elementName, setElementName] = useState("Pile Cap");
   const [zone, setZone] = useState("PILE CAPS 4, 5, 6, 7");

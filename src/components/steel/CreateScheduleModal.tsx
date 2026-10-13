@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useProjectStore } from "@/stores/useProjectStore";
 import {
   X,
   Plus,
@@ -45,14 +46,16 @@ export const CreateScheduleModal: React.FC<CreateScheduleModalProps> = ({
   existingCount,
   steelTests = [],
 }) => {
+  const { activeProject } = useProjectStore();
   const nextNum = `BCS-${new Date().getFullYear()}-${String(
     existingCount + 1,
   ).padStart(3, "0")}`;
 
+  const defaultLvl = activeProject?.currentLevelName || "Level 02 (+7.800m)";
   const [title, setTitle] = useState(
-    `Level 02 Columns & Core Walls - ${nextNum}`,
+    `${defaultLvl.split("(")[0].trim()} Columns & Core Walls - ${nextNum}`,
   );
-  const [levelName, setLevelName] = useState("Level 02 (+7.800m)");
+  const [levelName, setLevelName] = useState(defaultLvl);
   const [customLevel, setCustomLevel] = useState("");
   const [sourceBBSFileName, setSourceBBSFileName] = useState(
     "STR-BBS-DWG-002.pdf",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
@@ -31,7 +31,16 @@ export const BIM6DCarbonPage: React.FC = () => {
 
   const [elements, setElements] = useState<StructuralElement[]>([]);
   const [levels, setLevels] = useState<ProjectLevel[]>([]);
-  const [selectedLevelId, setSelectedLevelId] = useState<string>("ALL");
+  const [selectedLevelId, setSelectedLevelId] = useState<string>(
+    activeProject?.currentLevelId || "ALL",
+  );
+  const prevLevelIdRef = useRef<string | undefined>(activeProject?.currentLevelId);
+  useEffect(() => {
+    if (activeProject?.currentLevelId !== prevLevelIdRef.current) {
+      prevLevelIdRef.current = activeProject?.currentLevelId;
+      setSelectedLevelId(activeProject?.currentLevelId || "ALL");
+    }
+  }, [activeProject?.currentLevelId]);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {

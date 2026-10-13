@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -255,11 +255,24 @@ export const Concrete: React.FC = () => {
   const [projectLevels, setProjectLevels] = useState<ProjectLevel[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [selectedLevelFilter, setSelectedLevelFilter] = useState("ALL");
+  const [selectedLevelFilter, setSelectedLevelFilter] = useState(
+    activeProject?.currentLevelName || "ALL",
+  );
   const [testAgeFilter, setTestAgeFilter] = useState("ALL");
   const [viewMode, setViewMode] = useState<"RESULTS_TABLE" | "STANDARD_REGISTER">("RESULTS_TABLE");
   const [showPrintModal, setShowPrintModal] = useState(false);
-  const [modalPrintLevel, setModalPrintLevel] = useState("ALL");
+  const [modalPrintLevel, setModalPrintLevel] = useState(
+    activeProject?.currentLevelName || "ALL",
+  );
+
+  const prevLevelNameRef = useRef<string | undefined>(activeProject?.currentLevelName);
+  useEffect(() => {
+    if (activeProject?.currentLevelName !== prevLevelNameRef.current) {
+      prevLevelNameRef.current = activeProject?.currentLevelName;
+      setSelectedLevelFilter(activeProject?.currentLevelName || "ALL");
+      setModalPrintLevel(activeProject?.currentLevelName || "ALL");
+    }
+  }, [activeProject?.currentLevelName]);
   const [editingCube, setEditingCube] = useState<ConcreteCubeSample | null>(
     null,
   );

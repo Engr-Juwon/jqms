@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { useProjectStore } from '@/stores/useProjectStore';
 import { dbService } from '@/lib/db';
 import { ProjectLevel, StructuralElement } from '@/types';
 import { Layers, Box, Search, X, Check, Filter, ChevronDown } from 'lucide-react';
@@ -50,9 +51,12 @@ export const LevelElementSelect: React.FC<LevelElementSelectProps> = ({
   className = '',
   disabled = false,
 }) => {
+  const { activeProject } = useProjectStore();
   const [levels, setLevels] = useState<ProjectLevel[]>(passedLevels || []);
   const [elements, setElements] = useState<StructuralElement[]>(passedElements || []);
-  const [currentLevelId, setCurrentLevelId] = useState<string>('');
+  const [currentLevelId, setCurrentLevelId] = useState<string>(
+    propLevelId || activeProject?.currentLevelId || '',
+  );
   const [currentElementId, setCurrentElementId] = useState<string>('');
 
   // Mobile-friendly search & category filter state
@@ -126,9 +130,16 @@ export const LevelElementSelect: React.FC<LevelElementSelectProps> = ({
       const el = elements.find(e => e.id === elemTargetId);
       if (el?.levelId) {
         setCurrentLevelId(el.levelId);
+        return;
       }
     }
-  }, [propLevelId, propLevelName, value?.levelId, value?.levelName, propElementId, value?.elementId, levels, elements]);
+
+    if (!propLevelId && !propLevelName && !value?.levelId && !value?.levelName && !elemTargetId) {
+      if (!currentLevelId && activeProject?.currentLevelId) {
+        setCurrentLevelId(activeProject.currentLevelId);
+      }
+    }
+  }, [propLevelId, propLevelName, value?.levelId, value?.levelName, propElementId, value?.elementId, levels, elements, activeProject?.currentLevelId]);
 
   // Synchronize internal element state
   useEffect(() => {

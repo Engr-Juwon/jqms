@@ -170,7 +170,7 @@ export function getFormworkLayerStyle(fmwkArea: number): {
 }
 
 type OverlayLayer = "STATUS" | "FORMWORK" | "RISK";
-type ElementTypeFilter = "ALL" | "COLUMN" | "BEAM" | "SLAB" | "WALL";
+type ElementTypeFilter = "ALL" | "COLUMN" | "BEAM" | "SLAB" | "WALL" | "STAIR";
 
 interface GridPlanCanvasProps {
   gridlines?: Gridline[];
@@ -318,6 +318,9 @@ function getCompactElementName(name: string, type: string): string {
   ) {
     return clean.replace(/^(FOOTING|PAD|PILE|RAFT|FTG)[-_ ]?/i, "F-");
   }
+  if (upperType.includes("STAIR")) {
+    return clean.replace(/^(STAIRCASE|STAIR|STR)[-_ ]?/i, "ST-");
+  }
   return clean;
 }
 
@@ -367,7 +370,16 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
 
   const dragDistanceRef = useRef<number>(0);
 
-  const [selectedLevelId, setSelectedLevelId] = useState<string>("ALL");
+  const [selectedLevelId, setSelectedLevelId] = useState<string>(
+    activeProject?.currentLevelId || "ALL",
+  );
+  const prevLevelIdRef = useRef<string | undefined>(activeProject?.currentLevelId);
+  useEffect(() => {
+    if (activeProject?.currentLevelId !== prevLevelIdRef.current) {
+      prevLevelIdRef.current = activeProject?.currentLevelId;
+      setSelectedLevelId(activeProject?.currentLevelId || "ALL");
+    }
+  }, [activeProject?.currentLevelId]);
   const [selectedElementType, setSelectedElementType] =
     useState<ElementTypeFilter>("ALL");
   const [activeLayer, setActiveLayer] = useState<OverlayLayer>("STATUS");
@@ -443,6 +455,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
       if (selectedElementType === "BEAM") return type.includes("BEAM");
       if (selectedElementType === "SLAB") return type.includes("SLAB");
       if (selectedElementType === "WALL") return type.includes("WALL");
+      if (selectedElementType === "STAIR") return type.includes("STAIR");
       return true;
     },
     [selectedElementType],
@@ -942,6 +955,12 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                 className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
               >
                 Walls Only
+              </option>
+              <option
+                value="STAIR"
+                className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+              >
+                Stairs Only
               </option>
             </select>
           </div>
@@ -1671,6 +1690,358 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         {slabSub}
                       </text>
                     )}
+                  </g>
+                );
+              })}
+
+            {/* 1.5 Staircases Layer */}
+            {filteredElements
+              .filter((el) => {
+                const t = (el.elementType || "").toUpperCase();
+                return t.includes("STAIR");
+              })
+              .map((el) => {
+                const coords = parsedElementMap.get(el.id);
+                if (!coords) return null;
+                const isMatching = matchesType(el);
+
+                let fill = `${currentTheme.slabDefaultFill}`;
+                let stroke = "#10b981";
+                if (activeLayer === "STATUS") {
+                  const s =
+                    STATUS_COLOR_MAP[el.status || "PENDING"] ||
+                    STATUS_COLOR_MAP.PENDING;
+                  fill = `${s.fill}40`;
+                  stroke = s.stroke;
+                } else if (activeLayer === "RISK") {
+                  const r = evaluateQARisk(el, ncrs);
+                  fill = `${r.fill}40`;
+                  stroke = r.stroke;
+                } else if (activeLayer === "FORMWORK") {
+                  const fArea = getOrCalculateFormworkArea(el);
+                  const fw = getFormworkLayerStyle(fArea);
+                  fill = `${fw.fill}40`;
+                  stroke = fw.stroke;
+                }
+
+                const totalRisers =
+                  el.riserCount ||
+                  (el.flights?.reduce(
+                    (acc: number, f: any) =>
+                      acc + (Number(f.riserCount) || 0),
+                    0,
+                  ) || 12);
+                const flightW = (el.flightWidth || 1.2) * scaleFactor;
+                const flightWPx = Math.max(28, flightW);
+
+                if (coords.isSpan) {
+                  const spanLen =
+                    coords.spanLength > 0.05
+                      ? coords.spanLength
+                      : (el.length || el.flightLength || 3.0) * scaleFactor;
+                  const angleDeg = (coords.angleRad * 180) / Math.PI;
+                  const stepW = spanLen / Math.max(3, totalRisers);
+
+                  const stairName =
+                    labelDetailMode === "COMPACT"
+                      ? getCompactElementName(el.elementName, "STAIR")
+                      : el.elementName;
+                  const stairSub =
+                    labelDetailMode === "DETAILED"
+                      ? `${totalRisers} Risers · ${el.concreteGrade || "C30"}`
+                      : labelDetailMode === "STANDARD"
+                        ? `${totalRisers} Risers`
+                        : "";
+                  const stairLabel = stairSub
+                    ? `${stairName} (${stairSub})`
+                    : stairName;
+                  const {
+                    width: tagW,
+                    height: tagH,
+                    fontSize: tagFont,
+                  } = getPillDimensions(stairLabel, 10.5, 6, labelScale);
+
+                  return (
+                    <g
+                      key={`stair-${el.id}`}
+                      data-layer="stairs"
+                      className="cursor-pointer transition-transform hover:scale-105"
+                      onClick={(e) => handleElementClick(e, el)}
+                      onMouseEnter={() => setHoveredElement(el)}
+                      onMouseLeave={() => setHoveredElement(null)}
+                      opacity={isMatching ? 0.92 : 0.2}
+                    >
+                      <g
+                        transform={`translate(${coords.midX}, ${coords.midY}) rotate(${angleDeg})`}
+                      >
+                        <rect
+                          x={-spanLen / 2}
+                          y={-flightWPx / 2}
+                          width={spanLen}
+                          height={flightWPx}
+                          fill={fill}
+                          stroke={stroke}
+                          strokeWidth="2"
+                          rx="3"
+                        />
+                        {Array.from({
+                          length: Math.min(24, Math.max(2, totalRisers - 1)),
+                        }).map((_, i) => (
+                          <line
+                            key={`str-step-${i}`}
+                            x1={-spanLen / 2 + (i + 1) * stepW}
+                            y1={-flightWPx / 2}
+                            x2={-spanLen / 2 + (i + 1) * stepW}
+                            y2={flightWPx / 2}
+                            stroke={stroke}
+                            strokeWidth="1.2"
+                            strokeOpacity="0.8"
+                          />
+                        ))}
+                        <circle
+                          cx={-spanLen / 2 + 10}
+                          cy={0}
+                          r="3"
+                          fill="#38bdf8"
+                        />
+                        <line
+                          x1={-spanLen / 2 + 10}
+                          y1={0}
+                          x2={spanLen / 2 - 8}
+                          y2={0}
+                          stroke="#38bdf8"
+                          strokeWidth="1.6"
+                          strokeDasharray="4 3"
+                        />
+                        <polygon
+                          points={`${spanLen / 2 - 2},0 ${spanLen / 2 - 8},-3.5 ${spanLen / 2 - 8},3.5`}
+                          fill="#38bdf8"
+                        />
+                        <text
+                          x={0}
+                          y={-4}
+                          fill="#38bdf8"
+                          fontSize="9"
+                          fontWeight="bold"
+                          textAnchor="middle"
+                          fontFamily="monospace, sans-serif"
+                        >
+                          UP
+                        </text>
+                      </g>
+
+                      <rect
+                        x={coords.midX - tagW / 2}
+                        y={coords.midY + flightWPx / 2 + 3 * labelScale}
+                        width={tagW}
+                        height={tagH}
+                        rx={3 * labelScale}
+                        fill={currentTheme.plateBg}
+                        fillOpacity="0.95"
+                        stroke={stroke || currentTheme.plateBorder}
+                        strokeWidth={Math.max(0.8, 1 * labelScale)}
+                        filter="url(#label-shadow)"
+                        data-layer="labels"
+                      />
+                      <text
+                        x={coords.midX}
+                        y={
+                          coords.midY +
+                          flightWPx / 2 +
+                          3 * labelScale +
+                          tagH / 2 +
+                          tagFont * 0.35
+                        }
+                        textAnchor="middle"
+                        fill={currentTheme.plateText}
+                        fontSize={tagFont}
+                        fontWeight="bold"
+                        fontFamily="monospace, sans-serif"
+                        className="pointer-events-none"
+                        data-layer="labels"
+                      >
+                        {stairLabel}
+                      </text>
+                    </g>
+                  );
+                }
+
+                const isArea = coords.isArea;
+                const rx = isArea
+                  ? Math.min(coords.x1, coords.x2)
+                  : coords.x1 - 45;
+                const ry = isArea
+                  ? Math.min(coords.y1, coords.y2)
+                  : coords.y1 - flightWPx / 2;
+                const rw = isArea
+                  ? Math.max(Math.abs(coords.x2 - coords.x1), 70)
+                  : Math.max(80, (el.flightLength || 3.0) * scaleFactor);
+                const rh = isArea
+                  ? Math.max(Math.abs(coords.y2 - coords.y1), 40)
+                  : flightWPx;
+                const stepCount = Math.max(3, Math.min(20, totalRisers));
+                const isHorizontal = rw >= rh;
+                const stepSize = isHorizontal ? rw / stepCount : rh / stepCount;
+
+                const stairName =
+                  labelDetailMode === "COMPACT"
+                    ? getCompactElementName(el.elementName, "STAIR")
+                    : el.elementName;
+                const stairSub =
+                  labelDetailMode === "DETAILED"
+                    ? `${totalRisers} Risers · ${el.concreteGrade || "C30"}`
+                    : labelDetailMode === "STANDARD"
+                      ? `${totalRisers} Risers`
+                      : "";
+                const stairLabel = stairSub
+                  ? `${stairName} (${stairSub})`
+                  : stairName;
+                const {
+                  width: tagW,
+                  height: tagH,
+                  fontSize: tagFont,
+                } = getPillDimensions(stairLabel, 10.5, 6, labelScale);
+
+                return (
+                  <g
+                    key={`stair-${el.id}`}
+                    data-layer="stairs"
+                    className="cursor-pointer transition-transform hover:scale-105"
+                    onClick={(e) => handleElementClick(e, el)}
+                    onMouseEnter={() => setHoveredElement(el)}
+                    onMouseLeave={() => setHoveredElement(null)}
+                    opacity={isMatching ? 0.92 : 0.2}
+                  >
+                    <rect
+                      x={rx}
+                      y={ry}
+                      width={rw}
+                      height={rh}
+                      fill={fill}
+                      stroke={stroke}
+                      strokeWidth="2"
+                      rx="3"
+                    />
+                    {isHorizontal
+                      ? Array.from({ length: stepCount - 1 }).map((_, i) => (
+                          <line
+                            key={`str-t-${i}`}
+                            x1={rx + (i + 1) * stepSize}
+                            y1={ry}
+                            x2={rx + (i + 1) * stepSize}
+                            y2={ry + rh}
+                            stroke={stroke}
+                            strokeWidth="1.2"
+                            strokeOpacity="0.8"
+                          />
+                        ))
+                      : Array.from({ length: stepCount - 1 }).map((_, i) => (
+                          <line
+                            key={`str-t-${i}`}
+                            x1={rx}
+                            y1={ry + (i + 1) * stepSize}
+                            x2={rx + rw}
+                            y2={ry + (i + 1) * stepSize}
+                            stroke={stroke}
+                            strokeWidth="1.2"
+                            strokeOpacity="0.8"
+                          />
+                        ))}
+
+                    {isHorizontal ? (
+                      <>
+                        <circle
+                          cx={rx + 10}
+                          cy={ry + rh / 2}
+                          r="3"
+                          fill="#38bdf8"
+                        />
+                        <line
+                          x1={rx + 10}
+                          y1={ry + rh / 2}
+                          x2={rx + rw - 8}
+                          y2={ry + rh / 2}
+                          stroke="#38bdf8"
+                          strokeWidth="1.6"
+                          strokeDasharray="4 3"
+                        />
+                        <polygon
+                          points={`${rx + rw - 2},${ry + rh / 2} ${rx + rw - 8},${ry + rh / 2 - 3.5} ${rx + rw - 8},${ry + rh / 2 + 3.5}`}
+                          fill="#38bdf8"
+                        />
+                        <text
+                          x={rx + rw / 2}
+                          y={ry + rh / 2 - 4}
+                          fill="#38bdf8"
+                          fontSize="9"
+                          fontWeight="bold"
+                          textAnchor="middle"
+                          fontFamily="monospace, sans-serif"
+                        >
+                          UP
+                        </text>
+                      </>
+                    ) : (
+                      <>
+                        <circle
+                          cx={rx + rw / 2}
+                          cy={ry + rh - 10}
+                          r="3"
+                          fill="#38bdf8"
+                        />
+                        <line
+                          x1={rx + rw / 2}
+                          y1={ry + rh - 10}
+                          x2={rx + rw / 2}
+                          y2={ry + 8}
+                          stroke="#38bdf8"
+                          strokeWidth="1.6"
+                          strokeDasharray="4 3"
+                        />
+                        <polygon
+                          points={`${rx + rw / 2},${ry + 2} ${rx + rw / 2 - 3.5},${ry + 8} ${rx + rw / 2 + 3.5},${ry + 8}`}
+                          fill="#38bdf8"
+                        />
+                        <text
+                          x={rx + rw / 2 + 10}
+                          y={ry + rh / 2}
+                          fill="#38bdf8"
+                          fontSize="9"
+                          fontWeight="bold"
+                          textAnchor="start"
+                          fontFamily="monospace, sans-serif"
+                        >
+                          UP
+                        </text>
+                      </>
+                    )}
+
+                    <rect
+                      x={rx + rw / 2 - tagW / 2}
+                      y={ry + rh + 3 * labelScale}
+                      width={tagW}
+                      height={tagH}
+                      rx={3 * labelScale}
+                      fill={currentTheme.plateBg}
+                      fillOpacity="0.95"
+                      stroke={stroke || currentTheme.plateBorder}
+                      strokeWidth={Math.max(0.8, 1 * labelScale)}
+                      filter="url(#label-shadow)"
+                      data-layer="labels"
+                    />
+                    <text
+                      x={rx + rw / 2}
+                      y={ry + rh + 3 * labelScale + tagH / 2 + tagFont * 0.35}
+                      textAnchor="middle"
+                      fill={currentTheme.plateText}
+                      fontSize={tagFont}
+                      fontWeight="bold"
+                      fontFamily="monospace, sans-serif"
+                      className="pointer-events-none"
+                      data-layer="labels"
+                    >
+                      {stairLabel}
+                    </text>
                   </g>
                 );
               })}

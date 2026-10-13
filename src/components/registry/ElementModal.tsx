@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useRef,
 } from 'react';
+import { useProjectStore } from '@/stores/useProjectStore';
 import {
   X,
   Save,
@@ -158,11 +159,12 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   const { currentUser } = useAuthStore();
   const isQAQC = isQAQCUser(currentUser) || canCreateRecords(currentUser?.role) || !currentUser;
 
+  const { activeProject } = useProjectStore();
   // Form identity state
   const [elementName, setElementName] = useState('');
   const [elementType, setElementType] = useState<ElementType>('COLUMN');
   const [status, setStatus] = useState<ElementStatus>('PENDING');
-  const [levelId, setLevelId] = useState('');
+  const [levelId, setLevelId] = useState(activeProject?.currentLevelId || '');
   const [workPackageId, setWorkPackageId] = useState('');
   const [gridAxis, setGridAxis] = useState('B/2');
   const [concreteGrade, setConcreteGrade] = useState('C40/50');
@@ -259,6 +261,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   ]);
   const [landingThickness, setLandingThickness] = useState<number>(0.2);
   const [treadWidth, setTreadWidth] = useState<number>(0.28);
+  const [stairViewMode, setStairViewMode] = useState<'plan' | 'section'>('plan');
+  const [stairDirection, setStairDirection] = useState<'UP' | 'DOWN'>('UP');
 
   // Elevation Tracking
   const [elevationMode, setElevationMode] = useState<'auto' | 'manual'>('auto');
@@ -420,7 +424,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setElementType('COLUMN');
       setStatus('PENDING');
       if (levels.length > 0 && !levelId) {
-        setLevelId(levels[0].id);
+        setLevelId(activeProject?.currentLevelId || levels[0].id);
       }
       if (packages.length > 0 && !workPackageId) {
         setWorkPackageId(packages[0].id);
@@ -3150,6 +3154,349 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                         )}
                       </div>
                     ))}
+                  </div>
+                </div>
+
+                {/* ─── LIVE 2D CONCEPT STAIRCASE PREVIEW ─── */}
+                <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 shadow-md space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
+                      <Eye className="w-4 h-4 text-emerald-400" />
+                      <span>Live 2D Concept & Geometry Verification</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <div className="flex rounded-lg bg-slate-800 p-0.5 border border-slate-700">
+                        <button
+                          type="button"
+                          onClick={() => setStairViewMode('plan')}
+                          className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold transition ${
+                            stairViewMode === 'plan'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Plan View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStairViewMode('section')}
+                          className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold transition ${
+                            stairViewMode === 'section'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Section Profile
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setStairDirection((d) => (d === 'UP' ? 'DOWN' : 'UP'))}
+                        className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-emerald-400 text-[11px] font-bold transition border border-emerald-500/30 font-mono"
+                        title="Flip Climb Direction"
+                      >
+                        <RotateCw className="w-3 h-3" />
+                        <span>Climb: {stairDirection}</span>
+                      </button>
+
+                      {(() => {
+                        const totalRisers = flights.reduce((acc, f) => acc + (Number(f.riserCount) || 0), 0) || 12;
+                        return (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-mono border border-emerald-500/20">
+                            {flights.length} FLIGHT{flights.length > 1 ? 'S' : ''} · {totalRisers} RISERS
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="w-full h-56 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center relative overflow-hidden p-2">
+                    <svg className="w-full h-full" viewBox="0 0 460 210" preserveAspectRatio="xMidYMid meet">
+                      <defs>
+                        <pattern id="stair-grid-pattern" width="20" height="20" patternUnits="userSpaceOnUse">
+                          <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1e293b" strokeWidth="0.8" />
+                        </pattern>
+                        <pattern id="stair-landing-hatch" width="8" height="8" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+                          <line x1="0" y1="0" x2="0" y2="8" stroke="#6366f130" strokeWidth="1" />
+                        </pattern>
+                        <marker id="stair-arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                          <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8" />
+                        </marker>
+                      </defs>
+                      <rect width="460" height="210" fill="url(#stair-grid-pattern)" />
+
+                      {(() => {
+                        const effFlightW = flightWidth || 1.2;
+                        const effWaistT = waistThickness || 0.15;
+                        const effLandT = landingThickness || 0.2;
+                        const effTreadW = treadWidth || 0.28;
+
+                        const totalFlightGoing = flights.reduce((sum, f) => sum + (Number(f.length) || 0), 0) || 3.0;
+                        const totalLandingLen = landings.reduce((sum, l) => sum + (Number(l.length) || 0), 0) || (landings.length > 0 ? 1.2 : 0);
+                        const totalRunM = totalFlightGoing + totalLandingLen;
+                        const totalRisers = flights.reduce((sum, f) => sum + (Number(f.riserCount) || 0), 0) || 12;
+                        const storyHeightM = height || 3.0;
+                        const estRiserHeightMm = totalRisers > 0 ? (storyHeightM / totalRisers) * 1000 : 175;
+
+                        if (stairViewMode === 'plan') {
+                          const isDogLeg = flights.length >= 2;
+
+                          if (isDogLeg) {
+                            // Two-Flight Dogleg / Half-turn Plan View
+                            const fl1 = flights[0];
+                            const fl2 = flights[1];
+                            const fl1Len = Number(fl1?.length) || 2.8;
+                            const fl2Len = Number(fl2?.length) || 2.8;
+                            const landLen = Number(landings[0]?.length) || 1.2;
+                            const fl1Risers = Math.max(2, Number(fl1?.riserCount) || 8);
+                            const fl2Risers = Math.max(2, Number(fl2?.riserCount) || 8);
+
+                            const maxRun = Math.max(fl1Len, fl2Len) + landLen;
+                            const scaleX = 260 / Math.max(maxRun, 3.0);
+                            const fl1W_px = 54;
+                            const fl2W_px = 54;
+                            const wellGap_px = 12;
+                            const originX = 55;
+                            const fl1Y = 110;
+                            const fl2Y = fl1Y - wellGap_px - fl2W_px;
+
+                            const fl1Len_px = fl1Len * scaleX;
+                            const fl2Len_px = fl2Len * scaleX;
+                            const landLen_px = landLen * scaleX;
+                            const landingX = originX + Math.max(fl1Len_px, fl2Len_px);
+
+                            const stepW1 = fl1Len_px / fl1Risers;
+                            const stepW2 = fl2Len_px / fl2Risers;
+
+                            return (
+                              <g>
+                                {/* Flight 1 Outer Box */}
+                                <rect x={originX} y={fl1Y} width={fl1Len_px} height={fl1W_px} fill="#10b98120" stroke="#10b981" strokeWidth="2" rx="2" />
+                                {/* Flight 1 Tread Lines */}
+                                {Array.from({ length: fl1Risers - 1 }).map((_, i) => (
+                                  <line key={`f1-t-${i}`} x1={originX + (i + 1) * stepW1} y1={fl1Y} x2={originX + (i + 1) * stepW1} y2={fl1Y + fl1W_px} stroke="#10b98180" strokeWidth="1.2" />
+                                ))}
+
+                                {/* Intermediate Landing Box */}
+                                <rect
+                                  x={landingX}
+                                  y={fl2Y}
+                                  width={landLen_px}
+                                  height={fl1W_px + wellGap_px + fl2W_px}
+                                  fill="#6366f125"
+                                  stroke="#6366f1"
+                                  strokeWidth="2"
+                                  rx="2"
+                                />
+                                <rect
+                                  x={landingX}
+                                  y={fl2Y}
+                                  width={landLen_px}
+                                  height={fl1W_px + wellGap_px + fl2W_px}
+                                  fill="url(#stair-landing-hatch)"
+                                />
+
+                                {/* Flight 2 Outer Box (Returning leftward) */}
+                                <rect x={originX} y={fl2Y} width={fl2Len_px} height={fl2W_px} fill="#10b98120" stroke="#10b981" strokeWidth="2" rx="2" />
+                                {/* Flight 2 Tread Lines */}
+                                {Array.from({ length: fl2Risers - 1 }).map((_, i) => (
+                                  <line key={`f2-t-${i}`} x1={originX + (i + 1) * stepW2} y1={fl2Y} x2={originX + (i + 1) * stepW2} y2={fl2Y + fl2W_px} stroke="#10b98180" strokeWidth="1.2" />
+                                ))}
+
+                                {/* Stairwell Gap divider */}
+                                <line x1={originX} y1={fl1Y - wellGap_px / 2} x2={landingX} y2={fl1Y - wellGap_px / 2} stroke="#475569" strokeWidth="1" strokeDasharray="3 3" />
+
+                                {/* Walkline Arrow */}
+                                <circle cx={originX + 12} cy={fl1Y + fl1W_px / 2} r="4" fill="#38bdf8" />
+                                <path
+                                  d={`M ${originX + 12} ${fl1Y + fl1W_px / 2} L ${landingX + landLen_px / 2} ${fl1Y + fl1W_px / 2} Q ${landingX + landLen_px * 0.8} ${(fl1Y + fl2Y + fl2W_px) / 2} ${landingX + landLen_px / 2} ${fl2Y + fl2W_px / 2} L ${originX + 18} ${fl2Y + fl2W_px / 2}`}
+                                  fill="none"
+                                  stroke="#38bdf8"
+                                  strokeWidth="1.8"
+                                  strokeDasharray="4 3"
+                                  markerEnd="url(#stair-arrow)"
+                                />
+
+                                {/* Direction text */}
+                                <text x={originX + fl1Len_px / 2} y={fl1Y + fl1W_px / 2 - 8} fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                  {stairDirection === 'UP' ? 'UP →' : '← DOWN'} (Flight 1 · {fl1Risers} Risers)
+                                </text>
+                                <text x={originX + fl2Len_px / 2} y={fl2Y + fl2W_px / 2 + 14} fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                  {stairDirection === 'UP' ? '← UP' : 'DOWN →'} (Flight 2 · {fl2Risers} Risers)
+                                </text>
+                                <text x={landingX + landLen_px / 2} y={fl1Y - wellGap_px / 2 + 3} fill="#a5b4fc" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                  HALF LANDING
+                                </text>
+
+                                {/* Dimensions: Width */}
+                                <line x1={originX - 12} y1={fl1Y} x2={originX - 12} y2={fl1Y + fl1W_px} stroke="#fbbf24" strokeWidth="1.2" />
+                                <text x={originX - 16} y={fl1Y + fl1W_px / 2 + 3} fill="#fbbf24" fontSize="9" fontWeight="bold" textAnchor="end" fontFamily="monospace">
+                                  W₁ = {effFlightW.toFixed(2)}m
+                                </text>
+
+                                {/* Dimensions: Flight 1 Run */}
+                                <line x1={originX} y1={fl1Y + fl1W_px + 14} x2={originX + fl1Len_px} y2={fl1Y + fl1W_px + 14} stroke="#38bdf8" strokeWidth="1.2" />
+                                <text x={originX + fl1Len_px / 2} y={fl1Y + fl1W_px + 26} fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                  Run L₁ = {fl1Len.toFixed(2)}m
+                                </text>
+
+                                {/* Dimensions: Landing Run */}
+                                <line x1={landingX} y1={fl1Y + fl1W_px + 14} x2={landingX + landLen_px} y2={fl1Y + fl1W_px + 14} stroke="#a5b4fc" strokeWidth="1.2" />
+                                <text x={landingX + landLen_px / 2} y={fl1Y + fl1W_px + 26} fill="#a5b4fc" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                  L_land = {landLen.toFixed(2)}m
+                                </text>
+
+                                {/* Top Footprint Dimension */}
+                                <line x1={originX} y1={fl2Y - 14} x2={landingX + landLen_px} y2={fl2Y - 14} stroke="#a7f3d0" strokeWidth="1.2" />
+                                <circle cx={originX} cy={fl2Y - 14} r="2" fill="#a7f3d0" />
+                                <circle cx={landingX + landLen_px} cy={fl2Y - 14} r="2" fill="#a7f3d0" />
+                                <text x={(originX + landingX + landLen_px) / 2} y={fl2Y - 18} fill="#a7f3d0" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                  Total Stairwell Span = {(Math.max(fl1Len, fl2Len) + landLen).toFixed(2)}m
+                                </text>
+                              </g>
+                            );
+                          }
+
+                          // Single Straight Flight Plan View
+                          const fl = flights[0] || { length: '3.0', riserCount: '10' };
+                          const flLen = Number(fl.length) || 3.0;
+                          const landLen = landings.length > 0 ? (Number(landings[0].length) || 1.2) : 0;
+                          const risers = Math.max(2, Number(fl.riserCount) || 10);
+                          const totalSpanM = flLen + landLen;
+
+                          const scaleX = 320 / Math.max(totalSpanM, 2.5);
+                          const originX = 50;
+                          const originY = 55;
+                          const fH_px = 75;
+                          const flLen_px = flLen * scaleX;
+                          const landLen_px = landLen * scaleX;
+                          const stepW = flLen_px / risers;
+
+                          return (
+                            <g>
+                              {/* Flight Rect */}
+                              <rect x={originX} y={originY} width={flLen_px} height={fH_px} fill="#10b98120" stroke="#10b981" strokeWidth="2" rx="2" />
+                              {/* Treads */}
+                              {Array.from({ length: risers - 1 }).map((_, i) => (
+                                <line key={`st-t-${i}`} x1={originX + (i + 1) * stepW} y1={originY} x2={originX + (i + 1) * stepW} y2={originY + fH_px} stroke="#10b98180" strokeWidth="1.2" />
+                              ))}
+
+                              {/* Landing Platform (if present) */}
+                              {landLen > 0 && (
+                                <g>
+                                  <rect x={originX + flLen_px} y={originY} width={landLen_px} height={fH_px} fill="#6366f125" stroke="#6366f1" strokeWidth="2" rx="2" />
+                                  <rect x={originX + flLen_px} y={originY} width={landLen_px} height={fH_px} fill="url(#stair-landing-hatch)" />
+                                  <text x={originX + flLen_px + landLen_px / 2} y={originY + fH_px / 2 + 4} fill="#a5b4fc" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                    LANDING ({landLen.toFixed(2)}m)
+                                  </text>
+                                </g>
+                              )}
+
+                              {/* Walkline */}
+                              <circle cx={originX + 12} cy={originY + fH_px / 2} r="4" fill="#38bdf8" />
+                              <line
+                                x1={originX + 12}
+                                y1={originY + fH_px / 2}
+                                x2={originX + flLen_px + (landLen > 0 ? landLen_px * 0.7 : -8)}
+                                y2={originY + fH_px / 2}
+                                stroke="#38bdf8"
+                                strokeWidth="1.8"
+                                strokeDasharray="4 3"
+                                markerEnd="url(#stair-arrow)"
+                              />
+                              <text x={originX + flLen_px / 2} y={originY + fH_px / 2 - 8} fill="#38bdf8" fontSize="11" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                {stairDirection === 'UP' ? 'UP →' : '← DOWN'} ({risers} Risers · Tread G = {(effTreadW * 1000).toFixed(0)}mm)
+                              </text>
+
+                              {/* Dimensions: Flight Width */}
+                              <line x1={originX - 12} y1={originY} x2={originX - 12} y2={originY + fH_px} stroke="#fbbf24" strokeWidth="1.2" />
+                              <text x={originX - 16} y={originY + fH_px / 2 + 3} fill="#fbbf24" fontSize="9" fontWeight="bold" textAnchor="end" fontFamily="monospace">
+                                W = {effFlightW.toFixed(2)}m
+                              </text>
+
+                              {/* Dimensions: Span Run */}
+                              <line x1={originX} y1={originY + fH_px + 14} x2={originX + flLen_px} y2={originY + fH_px + 14} stroke="#38bdf8" strokeWidth="1.2" />
+                              <text x={originX + flLen_px / 2} y={originY + fH_px + 26} fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                Going Run = {flLen.toFixed(2)}m
+                              </text>
+
+                              {/* Dimensions: Total Span */}
+                              <line x1={originX} y1={originY - 14} x2={originX + totalSpanM * scaleX} y2={originY - 14} stroke="#a7f3d0" strokeWidth="1.2" />
+                              <circle cx={originX} cy={originY - 14} r="2" fill="#a7f3d0" />
+                              <circle cx={originX + totalSpanM * scaleX} cy={originY - 14} r="2" fill="#a7f3d0" />
+                              <text x={originX + (totalSpanM * scaleX) / 2} y={originY - 18} fill="#a7f3d0" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                Total Span L = {totalSpanM.toFixed(2)}m · Waist = {(effWaistT * 1000).toFixed(0)}mm
+                              </text>
+                            </g>
+                          );
+                        }
+
+                        // Section Elevation Profile View
+                        const risers = totalRisers;
+                        const numSteps = Math.min(14, risers);
+                        const stepW_px = 18;
+                        const stepH_px = 8;
+                        const waist_px = 16;
+                        const landW_px = 65;
+                        const landH_px = 18;
+                        const startX = 60;
+                        const startY = 160;
+
+                        let stepPath = `M ${startX - 30} ${startY} L ${startX} ${startY}`;
+                        for (let i = 0; i < numSteps; i++) {
+                          const rx = startX + i * stepW_px;
+                          const ry = startY - i * stepH_px;
+                          stepPath += ` L ${rx} ${ry - stepH_px} L ${rx + stepW_px} ${ry - stepH_px}`;
+                        }
+                        const topX = startX + numSteps * stepW_px;
+                        const topY = startY - numSteps * stepH_px;
+                        stepPath += ` L ${topX + landW_px} ${topY} L ${topX + landW_px} ${topY + landH_px} L ${topX} ${topY + landH_px}`;
+                        stepPath += ` L ${startX + waist_px} ${startY + waist_px} L ${startX - 30} ${startY + waist_px} Z`;
+
+                        return (
+                          <g>
+                            {/* Concrete Stair Profile */}
+                            <path d={stepPath} fill="#10b98125" stroke="#10b981" strokeWidth="2.5" />
+
+                            {/* Base FFL Level */}
+                            <line x1={20} y1={startY} x2={startX + 30} y2={startY} stroke="#64748b" strokeWidth="1.2" strokeDasharray="3 3" />
+                            <text x={25} y={startY - 6} fill="#94a3b8" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                              ▽ FFL 0.000m
+                            </text>
+
+                            {/* Top FFL Level */}
+                            <line x1={topX - 20} y1={topY} x2={topX + landW_px + 40} y2={topY} stroke="#64748b" strokeWidth="1.2" strokeDasharray="3 3" />
+                            <text x={topX + landW_px + 8} y={topY - 6} fill="#94a3b8" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                              △ FFL +{storyHeightM.toFixed(2)}m
+                            </text>
+
+                            {/* Annotation: Riser & Tread Zoom Indicator */}
+                            <rect x={startX + 3 * stepW_px} y={startY - 4 * stepH_px} width={stepW_px} height={stepH_px} fill="none" stroke="#38bdf8" strokeWidth="1.5" />
+                            <text x={startX + 3.5 * stepW_px} y={startY - 4 * stepH_px - 8} fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                              Tread: {(effTreadW * 1000).toFixed(0)}mm
+                            </text>
+                            <text x={startX + 4 * stepW_px + 8} y={startY - 3.5 * stepH_px + 3} fill="#fbbf24" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                              Riser: ~{estRiserHeightMm.toFixed(0)}mm
+                            </text>
+
+                            {/* Waist Thickness Annotation */}
+                            <line x1={startX + 40} y1={startY - 20} x2={startX + 40 + waist_px} y2={startY - 20 + waist_px} stroke="#ec4899" strokeWidth="1.5" />
+                            <text x={startX + 50 + waist_px} y={startY - 15 + waist_px} fill="#ec4899" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                              Waist t = {(effWaistT * 1000).toFixed(0)}mm
+                            </text>
+
+                            {/* Story Rise Dimension */}
+                            <line x1={topX + landW_px + 20} y1={topY} x2={topX + landW_px + 20} y2={startY} stroke="#38bdf8" strokeWidth="1.2" />
+                            <circle cx={topX + landW_px + 20} cy={topY} r="2" fill="#38bdf8" />
+                            <circle cx={topX + landW_px + 20} cy={startY} r="2" fill="#38bdf8" />
+                            <text x={topX + landW_px + 28} y={(topY + startY) / 2 + 4} fill="#38bdf8" fontSize="10" fontWeight="bold" fontFamily="monospace">
+                              Rise H = {storyHeightM.toFixed(2)}m ({risers} Risers)
+                            </text>
+                          </g>
+                        );
+                      })()}
+                    </svg>
                   </div>
                 </div>
               </div>

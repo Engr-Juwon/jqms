@@ -43,7 +43,20 @@ export const Photos: React.FC = () => {
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
-  const [levelFilter, setLevelFilter] = useState<string>("ALL");
+  const [levelFilter, setLevelFilter] = useState<string>(
+    activeProject?.currentLevelName || "ALL",
+  );
+  const prevLevelNameRef = useRef<string | undefined>(activeProject?.currentLevelName);
+  useEffect(() => {
+    if (activeProject?.currentLevelName !== prevLevelNameRef.current) {
+      prevLevelNameRef.current = activeProject?.currentLevelName;
+      setLevelFilter(activeProject?.currentLevelName || "ALL");
+      if (!uploadLevelId && activeProject?.currentLevelId) {
+        setUploadLevelId(activeProject.currentLevelId);
+        setUploadFloor(activeProject.currentLevelName || "");
+      }
+    }
+  }, [activeProject?.currentLevelName, activeProject?.currentLevelId]);
   const [tradeFilter, setTradeFilter] = useState<string>("ALL");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPhoto, setSelectedPhoto] = useState<SitePhoto | null>(null);
@@ -56,8 +69,8 @@ export const Photos: React.FC = () => {
   // Upload modal state
   const [uploadCategory, setUploadCategory] = useState<PhotoCategory>("PROGRESS");
   const [uploadCaption, setUploadCaption] = useState("");
-  const [uploadLevelId, setUploadLevelId] = useState("");
-  const [uploadFloor, setUploadFloor] = useState("");
+  const [uploadLevelId, setUploadLevelId] = useState(activeProject?.currentLevelId || "");
+  const [uploadFloor, setUploadFloor] = useState(activeProject?.currentLevelName || "");
   const [uploadElement, setUploadElement] = useState("");
   const [uploadTradeId, setUploadTradeId] = useState("");
   const [uploadTrade, setUploadTrade] = useState("");

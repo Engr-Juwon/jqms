@@ -87,8 +87,8 @@ export const SiteCommentsCreate: React.FC = () => {
     {
       id: `obs-${Date.now()}`,
       observationNumber: 1,
-      levelId: "lvl-gf",
-      levelName: "Ground Floor",
+      levelId: activeProject?.currentLevelId || "lvl-gf",
+      levelName: activeProject?.currentLevelName || "Ground Floor",
       gridLocation: "",
       structuralElement: "",
       tradeId: "trade-reb",
@@ -344,8 +344,8 @@ export const SiteCommentsCreate: React.FC = () => {
       {
         id: `obs-${Date.now()}`,
         observationNumber: prev.length + 1,
-        levelId: "lvl-gf",
-        levelName: "Ground Floor",
+        levelId: activeProject?.currentLevelId || "lvl-gf",
+        levelName: activeProject?.currentLevelName || "Ground Floor",
         gridLocation: "",
         structuralElement: "",
         tradeId: "trade-civ",

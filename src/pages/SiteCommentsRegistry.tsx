@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -55,7 +55,19 @@ export const SiteCommentsRegistry: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [severityFilter, setSeverityFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "OPEN" | "RECTIFIED">("ALL");
-  const [selectedLevelFilter, setSelectedLevelFilter] = useState<string>("ALL");
+  const [selectedLevelFilter, setSelectedLevelFilter] = useState<string>(
+    activeProject?.currentLevelName || activeProject?.currentLevelId || "ALL",
+  );
+  const prevLevelRef = useRef<string | undefined>(
+    activeProject?.currentLevelName || activeProject?.currentLevelId,
+  );
+  useEffect(() => {
+    const activeLevel = activeProject?.currentLevelName || activeProject?.currentLevelId;
+    if (activeLevel !== prevLevelRef.current) {
+      prevLevelRef.current = activeLevel;
+      setSelectedLevelFilter(activeLevel || "ALL");
+    }
+  }, [activeProject?.currentLevelName, activeProject?.currentLevelId]);
   const [selectedElementFilter, setSelectedElementFilter] = useState<string>("ALL");
   const [selectedPhoto, setSelectedPhoto] = useState<NormalizedPhoto | null>(
     null,

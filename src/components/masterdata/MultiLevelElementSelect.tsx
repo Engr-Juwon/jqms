@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useProjectStore } from '@/stores/useProjectStore';
 import { dbService } from '@/lib/db';
 import { ProjectLevel, StructuralElement } from '@/types';
 import { Layers, Box, Search, CheckSquare, Square, X, Check, Filter } from 'lucide-react';
@@ -39,9 +40,12 @@ export const MultiLevelElementSelect: React.FC<MultiLevelElementSelectProps> = (
   disabled = false,
   label = 'Structural Elements Subject to Issue',
 }) => {
+  const { activeProject } = useProjectStore();
   const [levels, setLevels] = useState<ProjectLevel[]>(passedLevels || []);
   const [elements, setElements] = useState<StructuralElement[]>(passedElements || []);
-  const [currentLevelId, setCurrentLevelId] = useState<string>(defaultLevelId);
+  const [currentLevelId, setCurrentLevelId] = useState<string>(
+    defaultLevelId || activeProject?.currentLevelId || '',
+  );
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedType, setSelectedType] = useState<string>('ALL');
 
@@ -73,12 +77,13 @@ export const MultiLevelElementSelect: React.FC<MultiLevelElementSelectProps> = (
     }
   }, [projectId, companyId, passedElements]);
 
-  // If defaultLevelId changes and we don't have a level selected, apply it
+  // If defaultLevelId or activeProject level changes and we don't have a level selected, apply it
   useEffect(() => {
-    if (defaultLevelId && !currentLevelId) {
-      setCurrentLevelId(defaultLevelId);
+    const target = defaultLevelId || activeProject?.currentLevelId || '';
+    if (target && !currentLevelId) {
+      setCurrentLevelId(target);
     }
-  }, [defaultLevelId]);
+  }, [defaultLevelId, activeProject?.currentLevelId]);
 
   // If selectedElements has elements from a specific level and currentLevelId is empty, auto-focus that level
   useEffect(() => {

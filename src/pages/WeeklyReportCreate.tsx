@@ -161,10 +161,13 @@ export const WeeklyReportCreate: React.FC = () => {
   );
 
   // Selected Level ID and Display Name state
-  const [selectedLevelId, setSelectedLevelId] = useState("ALL");
-  const [selectedLevelName, setSelectedLevelName] = useState(
-    "All Project Structural Levels Combined",
+  const [selectedLevelId, setSelectedLevelId] = useState(
+    activeProject?.currentLevelId || "ALL",
   );
+  const [selectedLevelName, setSelectedLevelName] = useState(
+    activeProject?.currentLevelName || "All Project Structural Levels Combined",
+  );
+  const prevLevelIdRef = useRef<string | undefined>(activeProject?.currentLevelId);
 
   const levelOptions = useMemo(() => {
     return [...projectLevels]
@@ -507,6 +510,13 @@ export const WeeklyReportCreate: React.FC = () => {
       }`.trim(),
     }));
   };
+
+  useEffect(() => {
+    if (activeProject?.currentLevelId && activeProject.currentLevelId !== prevLevelIdRef.current) {
+      prevLevelIdRef.current = activeProject.currentLevelId;
+      handleLevelChange(activeProject.currentLevelId);
+    }
+  }, [activeProject?.currentLevelId, levelOptions]);
 
   // Filter Structural Elements
   const filteredStructuralElements = useMemo(() => {

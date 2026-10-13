@@ -254,10 +254,8 @@ export const BIM3DViewerPage: React.FC = () => {
               const lvl = levels.find((l) => l.id === lvlId);
               setCurrentLevel(lvlId, lvl?.name || "");
             }}
-            onSelectElement={(el) => {
-              if (el) {
-                setViewerElement(el);
-              }
+            onSelectElement={(_el) => {
+              // Only floating inspection HUD inside 3D viewer is displayed, no modal popups
             }}
             projectId={currentProjId}
           />

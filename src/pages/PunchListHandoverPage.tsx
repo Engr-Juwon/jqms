@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useCompany } from "@/lib/companyHelper";
@@ -155,7 +155,20 @@ export const PunchListHandoverPage: React.FC = () => {
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBuilding, setSelectedBuilding] = useState<string>("ALL");
-  const [selectedLevel, setSelectedLevel] = useState<string>("ALL");
+  const [selectedLevel, setSelectedLevel] = useState<string>(
+    activeProject?.currentLevelName || "ALL",
+  );
+  const prevLevelNameRef = useRef<string | undefined>(activeProject?.currentLevelName);
+  useEffect(() => {
+    if (activeProject?.currentLevelName !== prevLevelNameRef.current) {
+      prevLevelNameRef.current = activeProject?.currentLevelName;
+      setSelectedLevel(activeProject?.currentLevelName || "ALL");
+      if (activeProject?.currentLevelName) {
+        setFormLevel(activeProject.currentLevelName);
+        setTocLevel(activeProject.currentLevelName);
+      }
+    }
+  }, [activeProject?.currentLevelName]);
   const [selectedUnit, setSelectedUnit] = useState<string>("ALL");
   const [selectedRoom, setSelectedRoom] = useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
@@ -874,6 +887,20 @@ export const PunchListHandoverPage: React.FC = () => {
                 {buildings.map((b) => (
                   <option key={b} value={b}>
                     {b}
+                  </option>
+                ))}
+              </select>
+
+              {/* Floor Level */}
+              <select
+                value={selectedLevel}
+                onChange={(e) => setSelectedLevel(e.target.value)}
+                className="px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none"
+              >
+                <option value="ALL">All Levels</option>
+                {levels.map((lvl) => (
+                  <option key={lvl} value={lvl}>
+                    {lvl}
                   </option>
                 ))}
               </select>

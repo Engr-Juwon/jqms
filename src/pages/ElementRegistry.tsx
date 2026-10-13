@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
@@ -106,7 +106,16 @@ export const ElementRegistry: React.FC = () => {
 
   // Filters
   const [search, setSearch] = useState("");
-  const [filterLevel, setFilterLevel] = useState("ALL");
+  const [filterLevel, setFilterLevel] = useState(
+    activeProject?.currentLevelId || "ALL",
+  );
+  const prevLevelIdRef = useRef<string | undefined>(activeProject?.currentLevelId);
+  useEffect(() => {
+    if (activeProject?.currentLevelId !== prevLevelIdRef.current) {
+      prevLevelIdRef.current = activeProject?.currentLevelId;
+      setFilterLevel(activeProject?.currentLevelId || "ALL");
+    }
+  }, [activeProject?.currentLevelId]);
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [filterPackage, setFilterPackage] = useState("ALL");
   const [filterType, setFilterType] = useState("ALL");

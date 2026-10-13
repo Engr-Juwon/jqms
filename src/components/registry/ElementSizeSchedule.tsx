@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { useProjectStore } from "@/stores/useProjectStore";
 import {
   Box,
   Ruler,
@@ -167,9 +168,21 @@ export const ElementSizeSchedule: React.FC<ElementSizeScheduleProps> = ({
   createdBy = "QA/QC Lead",
   className = "",
 }) => {
+  const { activeProject } = useProjectStore();
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<FilterType>("ALL");
-  const [selectedLevelIds, setSelectedLevelIds] = useState<string[]>([]);
+  const [selectedLevelIds, setSelectedLevelIds] = useState<string[]>(() =>
+    activeProject?.currentLevelId ? [activeProject.currentLevelId] : [],
+  );
+  const prevLevelIdRef = useRef<string | undefined>(activeProject?.currentLevelId);
+  useEffect(() => {
+    if (activeProject?.currentLevelId !== prevLevelIdRef.current) {
+      prevLevelIdRef.current = activeProject?.currentLevelId;
+      setSelectedLevelIds(
+        activeProject?.currentLevelId ? [activeProject.currentLevelId] : [],
+      );
+    }
+  }, [activeProject?.currentLevelId]);
   const [isLevelDropdownOpen, setIsLevelDropdownOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   

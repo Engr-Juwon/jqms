@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -128,7 +128,16 @@ export const MaterialTakeoff: React.FC = () => {
   const [showPrintDropdown, setShowPrintDropdown] = useState<boolean>(false);
 
   // Calculator Parameters
-  const [selectedLevelId, setSelectedLevelId] = useState<string>("ALL");
+  const [selectedLevelId, setSelectedLevelId] = useState<string>(
+    activeProject?.currentLevelId || "ALL",
+  );
+  const prevLevelIdRef = useRef<string | undefined>(activeProject?.currentLevelId);
+  useEffect(() => {
+    if (activeProject?.currentLevelId !== prevLevelIdRef.current) {
+      prevLevelIdRef.current = activeProject?.currentLevelId;
+      setSelectedLevelId(activeProject?.currentLevelId || "ALL");
+    }
+  }, [activeProject?.currentLevelId]);
   const [mixRatio, setMixRatio] = useState<string>("1:1.5:2.5");
   const [admixtureType, setAdmixtureType] = useState<string>(
     "Polycarboxylate Superplasticizer (PCE)",

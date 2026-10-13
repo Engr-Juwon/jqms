@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Copy, X, Layers, Building2, Check, Sparkles, AlertCircle } from "lucide-react";
 import { dbService } from "@/lib/db";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -24,7 +24,14 @@ export const BulkElementGenerator: React.FC<BulkElementGeneratorProps> = ({
   const { currentUser, company } = useAuthStore();
   const { activeProject } = useProjectStore();
 
-  const [levelId, setLevelId] = useState(levels[0]?.id || "");
+  const [levelId, setLevelId] = useState(
+    activeProject?.currentLevelId || levels[0]?.id || "",
+  );
+  useEffect(() => {
+    if (activeProject?.currentLevelId) {
+      setLevelId(activeProject.currentLevelId);
+    }
+  }, [activeProject?.currentLevelId]);
   const [elementType, setElementType] = useState<ElementType>("COLUMN");
   const [prefix, setPrefix] = useState("C-");
   const [startIndex, setStartIndex] = useState(1);

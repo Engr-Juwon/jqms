@@ -126,6 +126,14 @@ function createTextSprite(
  * - Single Flight: stepped risers, horizontal treads, top landing platform, and sloped waist slab soffit.
  * - Two Flights (Dogleg / Return): Flight 1, intermediate landing platform, and parallel Flight 2.
  */
+/**
+ * Constructs an authentic, watertight 3D structural concrete staircase geometry
+ * according to its exact structural configuration:
+ * - STRAIGHT: Single flight with stepped risers, inclined waist slab, and top floor connecting landing.
+ * - DOGLEG_HALF_TURN: Flight 1 climbs to mid-landing, turns 180° around central void gap, Flight 2 returns in reverse to upper floor.
+ * - OPEN_WELL: Dogleg with wide central lightwell void gap and expanded intermediate landing.
+ * - QUARTER_TURN_L: Flight 1 climbs to corner quarter-landing, turns 90° (L-shape), Flight 2 climbs to upper floor.
+ */
 function createStaircaseGeometry(
   stairW: number,
   stairRise: number,
@@ -139,22 +147,96 @@ function createStaircaseGeometry(
   turnDir: string = "LEFT",
   stairwellVoidGap: number = 0.15,
 ): THREE.BufferGeometry {
+  const normConfig = (stairConfig || "DOGLEG_HALF_TURN").toUpperCase();
+  const isLeft = turnDir !== "RIGHT";
+
+  // Helper to build a clean 2D stepped flight extruded into 3D
+  const buildFlightMesh = (run: number, rise: number, risers: number, width: number) => {
+    const s = new THREE.Shape();
+    const nRisers = Math.max(1, risers);
+    const stepT = run / nRisers;
+    const stepR = rise / nRisers;
+
+    s.moveTo(0, 0);
+    for (let i = 0; i < nRisers; i++) {
+      s.lineTo(i * stepT, (i + 1) * stepR);
+      s.lineTo((i + 1) * stepT, (i + 1) * stepR);
+    }
+    // Drop down at top landing joint
+    s.lineTo(run, rise - landT);
+    // Waist soffit sloping back to base
+    s.lineTo(0, -waistT);
+    s.closePath();
+
+    return new THREE.ExtrudeGeometry(s, { depth: width, bevelEnabled: false });
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // 1. QUARTER-TURN (L-SHAPED) STAIRCASE (Flight 1 -> 90° Turn Landing -> Flight 2)
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (normConfig.includes("QUARTER") || normConfig.includes("TURN_L") || normConfig.includes("L_SHAPED")) {
+    const fl1 = flights && flights[0];
+    const fl2 = flights && flights[1];
+    const fl1Risers = Math.max(1, Number(fl1?.riserCount) || Math.round(riserCount / 2) || 8);
+    const fl2Risers = Math.max(1, Number(fl2?.riserCount) || Math.round(riserCount / 2) || 8);
+    const totalRisers = fl1Risers + fl2Risers;
+
+    const fl1Rise = stairRise * (fl1Risers / totalRisers);
+    const fl2Rise = stairRise * (fl2Risers / totalRisers);
+
+    const fl1Run = Number(fl1?.length) || Math.max(1.2, totalRun * 0.45);
+    const fl2Run = Number(fl2?.length) || Math.max(1.2, totalRun * 0.45);
+    const cornerSize = Math.max(stairW, Number(landings?.[0]?.length) || 1.2);
+
+    // Flight 1 along X axis
+    const g1 = buildFlightMesh(fl1Run, fl1Rise, fl1Risers, stairW);
+    g1.translate(0, 0, -stairW / 2);
+
+    // Corner Landing Slab (square platform at intermediate height fl1Rise)
+    const gLand = new THREE.BoxGeometry(cornerSize, landT, cornerSize);
+    const landZ = isLeft ? cornerSize / 2 - stairW / 2 : -(cornerSize / 2 - stairW / 2);
+    gLand.translate(fl1Run + cornerSize / 2, fl1Rise - landT / 2, landZ);
+
+    // Flight 2 turns 90° along Z axis
+    const g2 = buildFlightMesh(fl2Run, fl2Rise, fl2Risers, stairW);
+    if (isLeft) {
+      g2.rotateY(-Math.PI / 2);
+      g2.translate(fl1Run + stairW / 2, fl1Rise, cornerSize / 2);
+    } else {
+      g2.rotateY(Math.PI / 2);
+      g2.translate(fl1Run + stairW / 2, fl1Rise, -cornerSize / 2);
+    }
+
+    try {
+      const merged = BufferGeometryUtils.mergeGeometries([g1, gLand, g2]);
+      if (merged) {
+        merged.computeVertexNormals();
+        merged.center();
+        return merged;
+      }
+    } catch {
+      // fallback
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // 2. DOGLEG RETURN & OPEN-WELL STAIRCASE (180° Half-turn with Mid-Landing)
+  // ═══════════════════════════════════════════════════════════════════════════════
   const isDogleg =
-    stairConfig === "DOGLEG_HALF_TURN" ||
-    stairConfig === "OPEN_WELL" ||
+    normConfig.includes("DOGLEG") ||
+    normConfig.includes("HALF_TURN") ||
+    normConfig.includes("OPEN_WELL") ||
     (Array.isArray(flights) && flights.length >= 2);
 
   if (isDogleg) {
     const fl1 = flights && flights[0];
     const fl2 = flights && flights[1];
-    // Exact riser counts per flight - NO arbitrary caps or rounding!
     const fl1Risers = Math.max(1, Number(fl1?.riserCount) || Math.round(riserCount / 2) || 8);
     const fl2Risers = Math.max(1, Number(fl2?.riserCount) || Math.round(riserCount / 2) || 8);
-    const totalRisersCount = fl1Risers + fl2Risers;
+    const totalRisers = fl1Risers + fl2Risers;
 
-    // Fractional rise strictly proportional to the exact risers count
-    const fl1Rise = stairRise * (fl1Risers / totalRisersCount);
-    const fl2Rise = stairRise * (fl2Risers / totalRisersCount);
+    const fl1Rise = stairRise * (fl1Risers / totalRisers);
+    const fl2Rise = stairRise * (fl2Risers / totalRisers);
 
     const fl1Run = Number(fl1?.length) || Math.max(1.2, totalRun * 0.45);
     const fl2Run = Number(fl2?.length) || Math.max(1.2, totalRun * 0.45);
@@ -167,71 +249,42 @@ function createStaircaseGeometry(
         ? Number(landings[1].length)
         : Math.max(0.6, Math.min(1.2, landRun));
 
-    const wellGap = Math.max(0.05, stairwellVoidGap || 0.15);
-    const isLeft = turnDir === "LEFT";
-    // For LEFT turn: Flight 1 is on right (-Z), Flight 2 returns on left (+Z)
-    // For RIGHT turn: Flight 1 is on left (+Z), Flight 2 returns on right (-Z)
+    // Open well has an expanded lightwell void (minimum 0.35m or configured gap)
+    const wellGap = normConfig.includes("OPEN_WELL")
+      ? Math.max(0.35, stairwellVoidGap || 0.4)
+      : Math.max(0.08, stairwellVoidGap || 0.15);
+
+    // Lateral positioning based on Turn Direction (Left vs Right)
     const fl1Z = isLeft ? -(stairW + wellGap / 2) : wellGap / 2;
     const fl2Z = isLeft ? wellGap / 2 : -(stairW + wellGap / 2);
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Flight 1 Solid Profile (climbing from elevation 0 to fl1Rise)
-    // ─────────────────────────────────────────────────────────────────────────────
-    const s1 = new THREE.Shape();
-    const stepT1 = fl1Run / fl1Risers;
-    const stepR1 = fl1Rise / fl1Risers;
-
-    s1.moveTo(0, 0);
-    // Draw exact risers and treads
-    for (let i = 0; i < fl1Risers; i++) {
-      const rx = i * stepT1;
-      const ry = (i + 1) * stepR1;
-      s1.lineTo(rx, ry);
-      s1.lineTo((i + 1) * stepT1, ry);
-    }
-    // Drop down at landing interface
-    s1.lineTo(fl1Run, fl1Rise - landT);
-    // Bottom waist soffit line sloping down to origin bottom
-    s1.lineTo(0, -waistT);
-    s1.closePath();
-
-    const g1 = new THREE.ExtrudeGeometry(s1, { depth: stairW, bevelEnabled: false });
+    // Flight 1: 0 to fl1Rise
+    const g1 = buildFlightMesh(fl1Run, fl1Rise, fl1Risers, stairW);
     g1.translate(0, 0, fl1Z);
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Mid Landing Platform Slab (spans across both flights + well void gap)
-    // ─────────────────────────────────────────────────────────────────────────────
+    // Mid Landing Platform Slab: spans across Flight 1 + Well Gap + Flight 2
     const totalLandingW = 2 * stairW + wellGap;
     const gLand = new THREE.BoxGeometry(landRun, landT, totalLandingW);
-    // Position at exact intermediate elevation fl1Rise
-    gLand.translate(fl1Run + landRun / 2, fl1Rise - landT / 2, -(wellGap / 2) + totalLandingW / 2 - stairW);
+    gLand.translate(fl1Run + landRun / 2, fl1Rise - landT / 2, 0);
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Flight 2 Solid Profile (climbing from fl1Rise up to stairRise, returning in -X direction)
-    // ─────────────────────────────────────────────────────────────────────────────
+    // Flight 2: starts at mid-landing fl1Rise, climbs to topElev, returning along reverse -X direction
     const s2 = new THREE.Shape();
     const stepT2 = fl2Run / fl2Risers;
     const stepR2 = fl2Rise / fl2Risers;
-
     s2.moveTo(0, 0);
     for (let i = 0; i < fl2Risers; i++) {
-      const rx = i * stepT2;
-      const ry = (i + 1) * stepR2;
-      s2.lineTo(rx, ry);
-      s2.lineTo((i + 1) * stepT2, ry);
+      s2.lineTo(i * stepT2, (i + 1) * stepR2);
+      s2.lineTo((i + 1) * stepT2, (i + 1) * stepR2);
     }
     // Top connection landing extension into the upper floor slab
     s2.lineTo(fl2Run + topLandRun, fl2Rise);
     s2.lineTo(fl2Run + topLandRun, fl2Rise - landT);
     s2.lineTo(fl2Run, fl2Rise - landT);
-    // Waist soffit sloping back to mid landing connection
     s2.lineTo(0, -waistT);
     s2.closePath();
 
     const g2 = new THREE.ExtrudeGeometry(s2, { depth: stairW, bevelEnabled: false });
-    // Rotate 180 degrees so Flight 2 climbs backward toward the starter end
     g2.rotateY(Math.PI);
-    // Translate starting from the mid landing edge fl1Run, at intermediate rise fl1Rise
     g2.translate(fl1Run, fl1Rise, fl2Z + stairW);
 
     try {
@@ -242,13 +295,13 @@ function createStaircaseGeometry(
         return merged;
       }
     } catch {
-      // Fall through on merge exception
+      // fallback
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Single Straight Flight with exact risers and top connecting landing
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // 3. SINGLE STRAIGHT FLIGHT STAIRCASE (Linear run with top floor landing)
+  // ═══════════════════════════════════════════════════════════════════════════════
   const risers = Math.max(1, riserCount || (flights && Number(flights[0]?.riserCount)) || 14);
   const landLen =
     landings && landings.length > 0 && landings[0]?.length
@@ -261,15 +314,12 @@ function createStaircaseGeometry(
   const s = new THREE.Shape();
   s.moveTo(0, 0);
   for (let i = 0; i < risers; i++) {
-    const rx = i * stepT;
-    const ry = (i + 1) * stepR;
-    s.lineTo(rx, ry);
-    s.lineTo((i + 1) * stepT, ry);
+    s.lineTo(i * stepT, (i + 1) * stepR);
+    s.lineTo((i + 1) * stepT, (i + 1) * stepR);
   }
-  // Top landing platform connecting to upper floor
+  // Top landing platform connecting flush into the upper floor slab
   s.lineTo(flightRun + landLen, stairRise);
   s.lineTo(flightRun + landLen, stairRise - landT);
-  // Sloped waist soffit
   s.lineTo(flightRun, stairRise - landT);
   s.lineTo(0, -waistT);
   s.closePath();

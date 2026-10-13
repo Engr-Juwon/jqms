@@ -2052,14 +2052,12 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                   : Math.max(80, (el.flightLength || 3.0) * scaleFactor);
                 const rh = isArea
                   ? Math.max(Math.abs(coords.y2 - coords.y1), 40)
-                  : flightWPx;
+                  : (hasTwoFlights ? flightWPx * 2 + stairwellGapPx : flightWPx);
                 const isHorizontal = rw >= rh;
                 const landingSpan = isHorizontal
-                  ? Math.max(16, rw * 0.22)
-                  : Math.max(16, rh * 0.22);
+                  ? Math.max(20, rw * 0.24)
+                  : Math.max(20, rh * 0.24);
                 const runSpan = isHorizontal ? rw - landingSpan : rh - landingSpan;
-                const exactStepCount = Math.max(1, totalRisers);
-                const stepSize = isHorizontal ? runSpan / exactStepCount : runSpan / exactStepCount;
 
                 const stairName =
                   labelDetailMode === "COMPACT"
@@ -2090,144 +2088,321 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     onMouseLeave={() => setHoveredElement(null)}
                     opacity={isMatching ? 0.92 : 0.2}
                   >
-                    {/* Main Flight Boundary */}
-                    <rect
-                      x={rx}
-                      y={ry}
-                      width={isHorizontal ? runSpan : rw}
-                      height={isHorizontal ? rh : runSpan}
-                      fill={fill}
-                      stroke={stroke}
-                      strokeWidth="2"
-                      rx="3"
-                    />
-
-                    {/* Landing Platform Boundary */}
-                    <rect
-                      x={isHorizontal ? rx + runSpan : rx}
-                      y={isHorizontal ? ry : ry + runSpan}
-                      width={isHorizontal ? landingSpan : rw}
-                      height={isHorizontal ? rh : landingSpan}
-                      fill={fill}
-                      fillOpacity="0.8"
-                      stroke={stroke}
-                      strokeWidth="2"
-                      strokeDasharray="4 2"
-                      rx="2"
-                    />
-                    <text
-                      x={
-                        isHorizontal
-                          ? rx + runSpan + landingSpan / 2
-                          : rx + rw / 2
-                      }
-                      y={
-                        isHorizontal
-                          ? ry + rh / 2 + 3
-                          : ry + runSpan + landingSpan / 2 + 3
-                      }
-                      fill={stroke}
-                      fontSize="8"
-                      fontWeight="bold"
-                      textAnchor="middle"
-                      fontFamily="monospace, sans-serif"
-                    >
-                      LANDING
-                    </text>
-
-                    {/* Draw each exact tread line according to total risers */}
-                    {isHorizontal
-                      ? Array.from({ length: exactStepCount - 1 }).map((_, i) => (
-                          <line
-                            key={`str-t-${i}`}
-                            x1={rx + (i + 1) * stepSize}
-                            y1={ry}
-                            x2={rx + (i + 1) * stepSize}
-                            y2={ry + rh}
+                    {hasTwoFlights ? (
+                      /* ─── 2-FLIGHT DOGLEG / OPEN WELL PLAN ─── */
+                      isHorizontal ? (
+                        <g>
+                          {/* Flight 1 Outer Box */}
+                          <rect
+                            x={rx}
+                            y={isLeftTurn ? ry + rh / 2 + stairwellGapPx / 2 : ry}
+                            width={runSpan}
+                            height={rh / 2 - stairwellGapPx / 2}
+                            fill={fill}
                             stroke={stroke}
-                            strokeWidth="1.2"
-                            strokeOpacity="0.8"
+                            strokeWidth="2"
+                            rx="2"
                           />
-                        ))
-                      : Array.from({ length: exactStepCount - 1 }).map((_, i) => (
-                          <line
-                            key={`str-t-${i}`}
-                            x1={rx}
-                            y1={ry + (i + 1) * stepSize}
-                            x2={rx + rw}
-                            y2={ry + (i + 1) * stepSize}
-                            stroke={stroke}
-                            strokeWidth="1.2"
-                            strokeOpacity="0.8"
-                          />
-                        ))}
+                          {/* Flight 1 Exact Riser Lines */}
+                          {Array.from({ length: fl1Risers - 1 }).map((_, i) => (
+                            <line
+                              key={`f1-t-area-${i}`}
+                              x1={rx + (i + 1) * (runSpan / fl1Risers)}
+                              y1={isLeftTurn ? ry + rh / 2 + stairwellGapPx / 2 : ry}
+                              x2={rx + (i + 1) * (runSpan / fl1Risers)}
+                              y2={isLeftTurn ? ry + rh : ry + rh / 2 - stairwellGapPx / 2}
+                              stroke={stroke}
+                              strokeWidth="1.2"
+                              strokeOpacity="0.8"
+                            />
+                          ))}
 
-                    {isHorizontal ? (
-                      <>
-                        <circle
-                          cx={rx + 10}
-                          cy={ry + rh / 2}
-                          r="3"
-                          fill="#38bdf8"
+                          {/* Flight 2 Outer Box */}
+                          <rect
+                            x={rx}
+                            y={isLeftTurn ? ry : ry + rh / 2 + stairwellGapPx / 2}
+                            width={runSpan}
+                            height={rh / 2 - stairwellGapPx / 2}
+                            fill={fill}
+                            stroke={stroke}
+                            strokeWidth="2"
+                            rx="2"
+                          />
+                          {/* Flight 2 Exact Riser Lines */}
+                          {Array.from({ length: fl2Risers - 1 }).map((_, i) => (
+                            <line
+                              key={`f2-t-area-${i}`}
+                              x1={rx + (i + 1) * (runSpan / fl2Risers)}
+                              y1={isLeftTurn ? ry : ry + rh / 2 + stairwellGapPx / 2}
+                              x2={rx + (i + 1) * (runSpan / fl2Risers)}
+                              y2={isLeftTurn ? ry + rh / 2 - stairwellGapPx / 2 : ry + rh}
+                              stroke={stroke}
+                              strokeWidth="1.2"
+                              strokeOpacity="0.8"
+                            />
+                          ))}
+
+                          {/* Mid Landing Platform Slab */}
+                          <rect
+                            x={rx + runSpan}
+                            y={ry}
+                            width={landingSpan}
+                            height={rh}
+                            fill={fill}
+                            fillOpacity="0.8"
+                            stroke={stroke}
+                            strokeWidth="2"
+                            strokeDasharray="4 2"
+                            rx="2"
+                          />
+                          <text
+                            x={rx + runSpan + landingSpan / 2}
+                            y={ry + rh / 2 + 3}
+                            fill={stroke}
+                            fontSize="8"
+                            fontWeight="bold"
+                            textAnchor="middle"
+                            fontFamily="monospace, sans-serif"
+                          >
+                            MID LANDING
+                          </text>
+
+                          {/* Walkline Arrow (Curving 180° around void gap) */}
+                          <circle
+                            cx={rx + 8}
+                            cy={isLeftTurn ? ry + rh * 0.75 : ry + rh * 0.25}
+                            r="3"
+                            fill="#38bdf8"
+                          />
+                          <path
+                            d={`M ${rx + 8} ${isLeftTurn ? ry + rh * 0.75 : ry + rh * 0.25} L ${rx + runSpan + landingSpan * 0.5} ${isLeftTurn ? ry + rh * 0.75 : ry + rh * 0.25} Q ${rx + runSpan + landingSpan * 0.85} ${ry + rh / 2} ${rx + runSpan + landingSpan * 0.5} ${isLeftTurn ? ry + rh * 0.25 : ry + rh * 0.75} L ${rx + 16} ${isLeftTurn ? ry + rh * 0.25 : ry + rh * 0.75}`}
+                            fill="none"
+                            stroke="#38bdf8"
+                            strokeWidth="1.6"
+                            strokeDasharray="4 3"
+                          />
+                          <polygon
+                            points={`${rx + 10},${isLeftTurn ? ry + rh * 0.25 : ry + rh * 0.75} ${rx + 16},${(isLeftTurn ? ry + rh * 0.25 : ry + rh * 0.75) - 3.5} ${rx + 16},${(isLeftTurn ? ry + rh * 0.25 : ry + rh * 0.75) + 3.5}`}
+                            fill="#38bdf8"
+                          />
+                          <text
+                            x={rx + runSpan / 2}
+                            y={isLeftTurn ? ry + rh * 0.75 - 4 : ry + rh * 0.25 - 4}
+                            fill="#38bdf8"
+                            fontSize="9"
+                            fontWeight="bold"
+                            textAnchor="middle"
+                            fontFamily="monospace, sans-serif"
+                          >
+                            UP ({fl1Risers}R)
+                          </text>
+                          <text
+                            x={rx + runSpan / 2}
+                            y={isLeftTurn ? ry + rh * 0.25 + 12 : ry + rh * 0.75 + 12}
+                            fill="#38bdf8"
+                            fontSize="9"
+                            fontWeight="bold"
+                            textAnchor="middle"
+                            fontFamily="monospace, sans-serif"
+                          >
+                            UP ({fl2Risers}R)
+                          </text>
+                        </g>
+                      ) : (
+                        <g>
+                          {/* Vertical Dogleg Flights */}
+                          <rect
+                            x={isLeftTurn ? rx + rw / 2 + stairwellGapPx / 2 : rx}
+                            y={ry}
+                            width={rw / 2 - stairwellGapPx / 2}
+                            height={runSpan}
+                            fill={fill}
+                            stroke={stroke}
+                            strokeWidth="2"
+                            rx="2"
+                          />
+                          {Array.from({ length: fl1Risers - 1 }).map((_, i) => (
+                            <line
+                              key={`f1-vt-area-${i}`}
+                              x1={isLeftTurn ? rx + rw / 2 + stairwellGapPx / 2 : rx}
+                              y1={ry + (i + 1) * (runSpan / fl1Risers)}
+                              x2={isLeftTurn ? rx + rw : rx + rw / 2 - stairwellGapPx / 2}
+                              y2={ry + (i + 1) * (runSpan / fl1Risers)}
+                              stroke={stroke}
+                              strokeWidth="1.2"
+                              strokeOpacity="0.8"
+                            />
+                          ))}
+
+                          <rect
+                            x={isLeftTurn ? rx : rx + rw / 2 + stairwellGapPx / 2}
+                            y={ry}
+                            width={rw / 2 - stairwellGapPx / 2}
+                            height={runSpan}
+                            fill={fill}
+                            stroke={stroke}
+                            strokeWidth="2"
+                            rx="2"
+                          />
+                          {Array.from({ length: fl2Risers - 1 }).map((_, i) => (
+                            <line
+                              key={`f2-vt-area-${i}`}
+                              x1={isLeftTurn ? rx : rx + rw / 2 + stairwellGapPx / 2}
+                              y1={ry + (i + 1) * (runSpan / fl2Risers)}
+                              x2={isLeftTurn ? rx + rw / 2 - stairwellGapPx / 2 : rx + rw}
+                              y2={ry + (i + 1) * (runSpan / fl2Risers)}
+                              stroke={stroke}
+                              strokeWidth="1.2"
+                              strokeOpacity="0.8"
+                            />
+                          ))}
+
+                          <rect
+                            x={rx}
+                            y={ry + runSpan}
+                            width={rw}
+                            height={landingSpan}
+                            fill={fill}
+                            fillOpacity="0.8"
+                            stroke={stroke}
+                            strokeWidth="2"
+                            strokeDasharray="4 2"
+                            rx="2"
+                          />
+                          <text
+                            x={rx + rw / 2}
+                            y={ry + runSpan + landingSpan / 2 + 3}
+                            fill={stroke}
+                            fontSize="8"
+                            fontWeight="bold"
+                            textAnchor="middle"
+                            fontFamily="monospace, sans-serif"
+                          >
+                            MID LANDING
+                          </text>
+                        </g>
+                      )
+                    ) : (
+                      /* ─── SINGLE STRAIGHT FLIGHT PLAN ─── */
+                      <g>
+                        <rect
+                          x={rx}
+                          y={ry}
+                          width={isHorizontal ? runSpan : rw}
+                          height={isHorizontal ? rh : runSpan}
+                          fill={fill}
+                          stroke={stroke}
+                          strokeWidth="2"
+                          rx="3"
                         />
-                        <line
-                          x1={rx + 10}
-                          y1={ry + rh / 2}
-                          x2={rx + rw - 8}
-                          y2={ry + rh / 2}
-                          stroke="#38bdf8"
-                          strokeWidth="1.6"
-                          strokeDasharray="4 3"
-                        />
-                        <polygon
-                          points={`${rx + rw - 2},${ry + rh / 2} ${rx + rw - 8},${ry + rh / 2 - 3.5} ${rx + rw - 8},${ry + rh / 2 + 3.5}`}
-                          fill="#38bdf8"
+                        <rect
+                          x={isHorizontal ? rx + runSpan : rx}
+                          y={isHorizontal ? ry : ry + runSpan}
+                          width={isHorizontal ? landingSpan : rw}
+                          height={isHorizontal ? rh : landingSpan}
+                          fill={fill}
+                          fillOpacity="0.8"
+                          stroke={stroke}
+                          strokeWidth="2"
+                          strokeDasharray="4 2"
+                          rx="2"
                         />
                         <text
-                          x={rx + runSpan / 2}
-                          y={ry + rh / 2 - 4}
-                          fill="#38bdf8"
-                          fontSize="9"
+                          x={isHorizontal ? rx + runSpan + landingSpan / 2 : rx + rw / 2}
+                          y={isHorizontal ? ry + rh / 2 + 3 : ry + runSpan + landingSpan / 2 + 3}
+                          fill={stroke}
+                          fontSize="8"
                           fontWeight="bold"
                           textAnchor="middle"
                           fontFamily="monospace, sans-serif"
                         >
-                          UP ({exactStepCount}R)
+                          LANDING
                         </text>
-                      </>
-                    ) : (
-                      <>
-                        <circle
-                          cx={rx + rw / 2}
-                          cy={ry + runSpan - 10}
-                          r="3"
-                          fill="#38bdf8"
-                        />
-                        <line
-                          x1={rx + rw / 2}
-                          y1={ry + runSpan - 10}
-                          x2={rx + rw / 2}
-                          y2={ry + 8}
-                          stroke="#38bdf8"
-                          strokeWidth="1.6"
-                          strokeDasharray="4 3"
-                        />
-                        <polygon
-                          points={`${rx + rw / 2},${ry + 2} ${rx + rw / 2 - 3.5},${ry + 8} ${rx + rw / 2 + 3.5},${ry + 8}`}
-                          fill="#38bdf8"
-                        />
-                        <text
-                          x={rx + rw / 2 + 10}
-                          y={ry + runSpan / 2}
-                          fill="#38bdf8"
-                          fontSize="9"
-                          fontWeight="bold"
-                          textAnchor="start"
-                          fontFamily="monospace, sans-serif"
-                        >
-                          UP
-                        </text>
-                      </>
+
+                        {/* Exact Treads for single flight */}
+                        {isHorizontal
+                          ? Array.from({ length: totalRisers - 1 }).map((_, i) => (
+                              <line
+                                key={`str-t-${i}`}
+                                x1={rx + (i + 1) * (runSpan / totalRisers)}
+                                y1={ry}
+                                x2={rx + (i + 1) * (runSpan / totalRisers)}
+                                y2={ry + rh}
+                                stroke={stroke}
+                                strokeWidth="1.2"
+                                strokeOpacity="0.8"
+                              />
+                            ))
+                          : Array.from({ length: totalRisers - 1 }).map((_, i) => (
+                              <line
+                                key={`str-t-${i}`}
+                                x1={rx}
+                                y1={ry + (i + 1) * (runSpan / totalRisers)}
+                                x2={rx + rw}
+                                y2={ry + (i + 1) * (runSpan / totalRisers)}
+                                stroke={stroke}
+                                strokeWidth="1.2"
+                                strokeOpacity="0.8"
+                              />
+                            ))}
+
+                        {isHorizontal ? (
+                          <>
+                            <circle cx={rx + 10} cy={ry + rh / 2} r="3" fill="#38bdf8" />
+                            <line
+                              x1={rx + 10}
+                              y1={ry + rh / 2}
+                              x2={rx + rw - 8}
+                              y2={ry + rh / 2}
+                              stroke="#38bdf8"
+                              strokeWidth="1.6"
+                              strokeDasharray="4 3"
+                            />
+                            <polygon
+                              points={`${rx + rw - 2},${ry + rh / 2} ${rx + rw - 8},${ry + rh / 2 - 3.5} ${rx + rw - 8},${ry + rh / 2 + 3.5}`}
+                              fill="#38bdf8"
+                            />
+                            <text
+                              x={rx + runSpan / 2}
+                              y={ry + rh / 2 - 4}
+                              fill="#38bdf8"
+                              fontSize="9"
+                              fontWeight="bold"
+                              textAnchor="middle"
+                              fontFamily="monospace, sans-serif"
+                            >
+                              UP ({totalRisers} Risers)
+                            </text>
+                          </>
+                        ) : (
+                          <>
+                            <circle cx={rx + rw / 2} cy={ry + runSpan - 10} r="3" fill="#38bdf8" />
+                            <line
+                              x1={rx + rw / 2}
+                              y1={ry + runSpan - 10}
+                              x2={rx + rw / 2}
+                              y2={ry + 8}
+                              stroke="#38bdf8"
+                              strokeWidth="1.6"
+                              strokeDasharray="4 3"
+                            />
+                            <polygon
+                              points={`${rx + rw / 2},${ry + 2} ${rx + rw / 2 - 3.5},${ry + 8} ${rx + rw / 2 + 3.5},${ry + 8}`}
+                              fill="#38bdf8"
+                            />
+                            <text
+                              x={rx + rw / 2 + 10}
+                              y={ry + runSpan / 2}
+                              fill="#38bdf8"
+                              fontSize="9"
+                              fontWeight="bold"
+                              textAnchor="start"
+                            >
+                              UP ({totalRisers} Risers)
+                            </text>
+                          </>
+                        )}
+                      </g>
                     )}
 
                     <rect

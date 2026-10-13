@@ -2,14 +2,19 @@ import { StructuralElement } from "@/types";
 
 /**
  * Normalizes a dimensional value.
- * If the input is in millimeters (> 50 for typical structural dimensions), converts to meters.
+ * In reinforced concrete construction:
+ * - Cross-sections in millimeters are typically integers >= 100 (e.g. 150, 175, 200, 225, 250, 300, 450, 600, 750, 1200, 2500 mm).
+ * - Decimal numbers (e.g. 98.24m radius, 24.799m span, 1.872m cantilever depth, 0.175m thickness) or values under 100 are ALWAYS in METERS.
+ * - Large radii (e.g. R=98.24m) or bay spans (L=24.8m) must never be divided by 1000.
  */
 export function normalizeDimension(val?: number | string | null): number {
   if (val === null || val === undefined) return 0;
   const num = typeof val === "number" ? val : parseFloat(String(val));
   if (isNaN(num) || num <= 0) return 0;
-  // If dimension is greater than 50, it is specified in millimeters (e.g. 2960mm = 2.96m, 175mm = 0.175m)
-  return num > 50 ? num / 1000 : num;
+  if (num >= 100 && (Number.isInteger(num) || num >= 500)) {
+    return num / 1000;
+  }
+  return num;
 }
 
 export interface CurvedGeometryResult {
@@ -49,7 +54,7 @@ export function calculateCurvedGeometry(params: {
   let thetaRad = 0;
   let formulaDesc = "";
 
-  if (mode === "chord_rise" && cIn > 0 && hIn > 0) {
+  if ((mode === "chord_rise" || (rIn <= 0 && cIn > 0 && hIn > 0)) && cIn > 0 && hIn > 0) {
     // R = h/2 + C²/(8h)
     h = hIn;
     C = cIn;
@@ -186,7 +191,7 @@ export function getOrCalculateElementArea(el: Partial<StructuralElement>): numbe
       const geom = calculateCurvedGeometry({
         radius: R || 2.96,
         arcDepth: h || 2.394,
-        chordLength: C,
+        chordLength: C || baseL,
         arcAngle: angle,
         inputMode: el.curvedInputMode || "radius_rise",
       });

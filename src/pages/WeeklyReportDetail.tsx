@@ -40,6 +40,7 @@ import {
   XCircle,
   Truck,
   Mail,
+  Palette,
 } from "lucide-react";
 import { WeeklyReportExecutiveMatrix } from "@/components/reporting/WeeklyReportExecutiveMatrix";
 import { WeeklyReportSlideDeckModal } from "@/components/reporting/WeeklyReportSlideDeckModal";
@@ -57,6 +58,11 @@ import { generateWeeklyPresentationPDF, generateNewWeeklyPresentationPDF } from 
 import { generateWeeklyReportPDF } from "@/lib/pdfGenerators";
 import { toast } from "react-hot-toast";
 import { MaterialDelivery, SiteInstruction, WeeklyReport } from "@/types";
+import {
+  WEEKLY_REPORT_TEMPLATES,
+  WeeklyReportTemplateId,
+  getWeeklyReportTemplate,
+} from "@/types/weeklyReportTemplates";
 import { uploadMultiple, getThumbnail } from "@/lib/cloudinary";
 import { syncPhotoToSiteGallery } from "@/lib/photoSync";
 import { MepClearanceRow } from "@/services/pdf/weeklyReportGenerator";
@@ -177,6 +183,8 @@ export const WeeklyReportDetail: React.FC = () => {
 
   // Print & Export Modal States
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] =
+    useState<WeeklyReportTemplateId>("classic-executive");
   const [printOrientation, setPrintOrientation] = useState<
     "portrait" | "landscape"
   >("portrait");
@@ -372,6 +380,9 @@ export const WeeklyReportDetail: React.FC = () => {
 
         setIncludeNcrsAndComments(data.includeNcrsAndComments !== false);
         setIncludeSiteInstructions(data.includeSiteInstructions !== false);
+        if (data.templateId && data.templateId in WEEKLY_REPORT_TEMPLATES) {
+          setSelectedTemplate(data.templateId as WeeklyReportTemplateId);
+        }
         setPrintIncludeNcrs(
           (data as any).includeNcrs !== undefined
             ? (data as any).includeNcrs
@@ -4775,9 +4786,9 @@ export const WeeklyReportDetail: React.FC = () => {
         {/* ========================================== */}
         {isPrintModalOpen && (
           <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-xl max-h-[92vh] rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col">
               {/* Modal Header */}
-              <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/60">
+              <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/60 shrink-0">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2 bg-orange-100 text-orange-600 rounded-xl">
                     <Printer size={18} />
@@ -4801,11 +4812,78 @@ export const WeeklyReportDetail: React.FC = () => {
               </div>
 
               {/* Modal Content */}
-              <div className="p-6 space-y-6">
+              <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(92vh-140px)]">
+                {/* Template / Design Selector */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Palette size={13} className="text-orange-500" />
+                      <span>1. Document Design & Theme</span>
+                    </label>
+                    <span className="text-[10px] text-orange-600 dark:text-orange-400 font-bold uppercase tracking-wider">
+                      {WEEKLY_REPORT_TEMPLATES[selectedTemplate]?.name}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {Object.values(WEEKLY_REPORT_TEMPLATES).map((tmpl) => {
+                      const isSelected = selectedTemplate === tmpl.id;
+                      return (
+                        <button
+                          key={tmpl.id}
+                          type="button"
+                          onClick={() => setSelectedTemplate(tmpl.id)}
+                          className={`p-3 rounded-2xl border-2 text-left transition-all relative overflow-hidden group ${
+                            isSelected
+                              ? "border-orange-500 bg-orange-50/40 dark:bg-orange-950/30 text-slate-900 dark:text-white shadow-sm ring-2 ring-orange-500/20"
+                              : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300"
+                          }`}
+                        >
+                          {/* Color bar preview */}
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="w-3.5 h-3.5 rounded-full shadow-xs"
+                                style={{ backgroundColor: tmpl.accentColor }}
+                              />
+                              <span
+                                className="w-2.5 h-2.5 rounded-full opacity-60"
+                                style={{ backgroundColor: tmpl.primaryHeaderBg }}
+                              />
+                            </div>
+                            {isSelected ? (
+                              <CheckCircle2 size={16} className="text-orange-600 dark:text-orange-400" />
+                            ) : (
+                              <span
+                                className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded"
+                                style={{
+                                  backgroundColor: tmpl.accentLight,
+                                  color: tmpl.accentDark,
+                                }}
+                              >
+                                {tmpl.id.split("-")[0]}
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="font-bold text-xs leading-snug">{tmpl.name}</p>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                            {tmpl.tagline}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 italic px-1 pt-0.5">
+                    {WEEKLY_REPORT_TEMPLATES[selectedTemplate]?.description}
+                  </p>
+                </div>
+
                 {/* Orientation selector */}
                 <div className="space-y-2">
                   <label className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                    1. Print Orientation
+                    2. Print Orientation
                   </label>
                   <div className="grid grid-cols-2 gap-3">
                     <button
@@ -4860,7 +4938,7 @@ export const WeeklyReportDetail: React.FC = () => {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                      2. Quality Surveillance Scope
+                      3. Quality Surveillance Scope
                     </label>
                     <span className="text-[10px] text-slate-400 font-medium">
                       Choose preset or customize below
@@ -4974,51 +5052,60 @@ export const WeeklyReportDetail: React.FC = () => {
               </div>
 
               {/* Modal Footer */}
-              <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 flex items-center justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setIsPrintModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 transition-colors"
-                >
-                  Cancel
-                </button>
-                {printOrientation === "landscape" && (
+              <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 flex items-center justify-between gap-2.5">
+                <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <span>Selected Template:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">
+                    {WEEKLY_REPORT_TEMPLATES[selectedTemplate]?.name}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2.5 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setIsPrintModalOpen(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  {printOrientation === "landscape" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleGenerate();
+                        setIsPrintModalOpen(false);
+                      }}
+                      className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition"
+                      title="Generate high-resolution landscape presentation PDF deck"
+                    >
+                      <FileText size={14} className="text-orange-400" />
+                      <span>Download Slide Deck (PDF)</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
-                      handleGenerate();
+                      generateWeeklyReportPDF(
+                        { ...report, templateId: selectedTemplate },
+                        activeProject || {},
+                        company || {},
+                        {
+                          orientation: printOrientation,
+                          templateId: selectedTemplate,
+                          includeNcrsAndComments:
+                            printIncludeNcrs && printIncludeComments,
+                          includeNcrs: printIncludeNcrs,
+                          includeSiteComments: printIncludeComments,
+                          includeSiteInstructions: printIncludeSIs,
+                        },
+                      );
                       setIsPrintModalOpen(false);
                     }}
-                    className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition"
-                    title="Generate high-resolution landscape presentation PDF deck"
+                    className="bg-orange-600 hover:bg-orange-500 text-white px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition"
                   >
-                    <FileText size={14} className="text-orange-400" />
-                    <span>Download Slide Deck (PDF)</span>
+                    <Printer size={14} />
+                    <span>Open Print Window</span>
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    generateWeeklyReportPDF(
-                      report,
-                      activeProject || {},
-                      company || {},
-                      {
-                        orientation: printOrientation,
-                        includeNcrsAndComments:
-                          printIncludeNcrs && printIncludeComments,
-                        includeNcrs: printIncludeNcrs,
-                        includeSiteComments: printIncludeComments,
-                        includeSiteInstructions: printIncludeSIs,
-                      },
-                    );
-                    setIsPrintModalOpen(false);
-                  }}
-                  className="bg-orange-600 hover:bg-orange-500 text-white px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition"
-                >
-                  <Printer size={14} />
-                  <span>Open Print Window</span>
-                </button>
+                </div>
               </div>
             </div>
           </div>

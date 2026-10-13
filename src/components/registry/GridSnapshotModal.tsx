@@ -37,6 +37,7 @@ import {
   Compass,
   LayoutGrid,
   Tag,
+  Ghost,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import {
@@ -102,6 +103,8 @@ export interface GridSnapshotConfig {
   showSlabs: boolean;
   showFootings: boolean;
   showWalls: boolean;
+  ghostDisabledElements: boolean;
+  ghostOpacity: number;
   showTitleBlock: boolean;
   titleBlockPosition: TitleBlockPos;
   projectTitle: string;
@@ -258,6 +261,8 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
       showSlabs: saved.showSlabs ?? true,
       showFootings: saved.showFootings ?? true,
       showWalls: saved.showWalls ?? true,
+      ghostDisabledElements: saved.ghostDisabledElements ?? false,
+      ghostOpacity: saved.ghostOpacity ?? 0.18,
       showTitleBlock: saved.showTitleBlock ?? true,
       titleBlockPosition: saved.titleBlockPosition || "TOP_LEFT",
       projectTitle: saved.projectTitle || projectName,
@@ -392,7 +397,39 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
       svgClone.setAttribute("height", exportHeight.toString());
       svgClone.setAttribute("viewBox", `0 0 ${exportWidth} ${exportHeight}`);
 
-      // Manipulate Layers
+      // Manipulate Layers (Handle Disabling & Ghosting)
+      const handleLayerVisibility = (layerKey: string, isVisible: boolean) => {
+        const nodes = svgClone.querySelectorAll(`[data-layer="${layerKey}"]`);
+        if (isVisible) return;
+
+        if (!config.ghostDisabledElements) {
+          // Normal mode: completely remove disabled elements
+          nodes.forEach((el) => el.remove());
+        } else {
+          // Ghost mode: keep them faintly visible beneath enabled elements
+          const ghostOpacityVal = config.ghostOpacity ?? 0.18;
+          nodes.forEach((el) => {
+            const element = el as SVGElement;
+            // Lower opacity to faint ghost level
+            element.setAttribute("opacity", ghostOpacityVal.toString());
+            // Style as dashed blueprint wireframe
+            element.setAttribute("stroke-dasharray", "4 3");
+            element.setAttribute("pointer-events", "none");
+
+            // Strip high-contrast text labels inside disabled element layers so they don't clutter
+            element.querySelectorAll('[data-layer="labels"]').forEach((lbl) => lbl.remove());
+            element.querySelectorAll("text").forEach((txt) => {
+              (txt as SVGElement).setAttribute("opacity", (ghostOpacityVal * 0.8).toString());
+            });
+
+            // Ensure ghosted elements are placed underneath other elements by prepending to parent
+            if (element.parentNode) {
+              element.parentNode.insertBefore(element, element.parentNode.firstChild);
+            }
+          });
+        }
+      };
+
       if (!config.showGridlines) {
         svgClone
           .querySelectorAll('[data-layer="gridlines"]')
@@ -403,36 +440,18 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
           .querySelectorAll('[data-layer="dimensions"]')
           .forEach((el) => el.remove());
       }
-      if (!config.showColumns) {
-        svgClone
-          .querySelectorAll('[data-layer="columns"]')
-          .forEach((el) => el.remove());
-      }
-      if (!config.showBeams) {
-        svgClone
-          .querySelectorAll('[data-layer="beams"]')
-          .forEach((el) => el.remove());
-      }
-      if (!config.showSlabs) {
-        svgClone
-          .querySelectorAll('[data-layer="slabs"]')
-          .forEach((el) => el.remove());
-      }
-      if (!config.showFootings) {
-        svgClone
-          .querySelectorAll('[data-layer="footings"]')
-          .forEach((el) => el.remove());
-      }
-      if (!config.showWalls) {
-        svgClone
-          .querySelectorAll('[data-layer="walls"]')
-          .forEach((el) => el.remove());
-      }
       if (!config.showElementLabels) {
         svgClone
           .querySelectorAll('[data-layer="labels"]')
           .forEach((el) => el.remove());
       }
+
+      // Structural element layers
+      handleLayerVisibility("columns", config.showColumns);
+      handleLayerVisibility("beams", config.showBeams);
+      handleLayerVisibility("slabs", config.showSlabs);
+      handleLayerVisibility("footings", config.showFootings);
+      handleLayerVisibility("walls", config.showWalls);
 
       // Framing, Content Rotation & Scope
       const angle = config.contentRotation || 0;
@@ -1922,6 +1941,65 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                           </button>
                         );
                       })}
+                    </div>
+
+                    {/* Faint Ghost Underlay for Disabled Elements */}
+                    <div className="mt-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Ghost className={`w-4 h-4 ${config.ghostDisabledElements ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 dark:text-white block">
+                              Show Disabled Elements Underneath
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                              Render inactive layers faintly beneath enabled elements as blueprint reference
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfig((c) => ({
+                              ...c,
+                              ghostDisabledElements: !c.ghostDisabledElements,
+                            }))
+                          }
+                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            config.ghostDisabledElements
+                              ? 'bg-indigo-600 dark:bg-indigo-500'
+                              : 'bg-slate-300 dark:bg-slate-700'
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                              config.ghostDisabledElements ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      {config.ghostDisabledElements && (
+                        <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between gap-3 animate-in fade-in duration-200">
+                          <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                            Faint Opacity ({Math.round((config.ghostOpacity ?? 0.18) * 100)}%)
+                          </span>
+                          <input
+                            type="range"
+                            min="0.05"
+                            max="0.45"
+                            step="0.02"
+                            value={config.ghostOpacity ?? 0.18}
+                            onChange={(e) =>
+                              setConfig((c) => ({
+                                ...c,
+                                ghostOpacity: parseFloat(e.target.value),
+                              }))
+                            }
+                            className="w-36 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-600 dark:accent-indigo-400"
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
 

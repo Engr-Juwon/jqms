@@ -30,29 +30,61 @@ export const GridPlanPage: React.FC = () => {
   const isQAQC = isQAQCUser(currentUser);
   const isLvl2 = hasMinRole(currentUser?.role, 2);
 
-  const loadData = async () => {
-    if (!currentProjId) return;
-    setLoading(true);
-    try {
-      const [elList, lvlList, gridList, ncrList] = await Promise.all([
-        dbService.getElements(currentProjId, currentCompId),
-        dbService.getLevels(currentProjId, currentCompId),
-        dbService.getGridlines(currentProjId, currentCompId),
-        dbService.getNCRs(currentProjId, currentCompId),
-      ]);
-      setElements(elList);
-      setLevels(lvlList);
-      setGridlines(gridList);
-      setNcrs(ncrList);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadData();
+    if (!currentProjId) return;
+
+    let isMounted = true;
+
+    // Load initial static layout data (levels, gridlines)
+    const loadStaticData = async () => {
+      try {
+        const [lvlList, gridList] = await Promise.all([
+          dbService.getLevels(currentProjId, currentCompId),
+          dbService.getGridlines(currentProjId, currentCompId),
+        ]);
+        if (isMounted) {
+          setLevels(lvlList);
+          setGridlines(gridList);
+        }
+      } catch (err) {
+        console.error('Failed to load levels or gridlines:', err);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadStaticData();
+
+    // Subscribe in real-time to StructuralElements
+    const unsubElements = dbService.subscribeElements(
+      currentProjId,
+      (liveElements) => {
+        if (isMounted) {
+          setElements(liveElements);
+          setLoading(false);
+        }
+      },
+      currentCompId
+    );
+
+    // Subscribe in real-time to NCRs
+    const unsubNCRs = dbService.subscribeNCRs(
+      currentProjId,
+      (liveNCRs) => {
+        if (isMounted) {
+          setNcrs(liveNCRs);
+        }
+      },
+      currentCompId
+    );
+
+    return () => {
+      isMounted = false;
+      unsubElements();
+      unsubNCRs();
+    };
   }, [currentProjId, currentCompId]);
 
   const handleSaveElement = async (payload: Partial<StructuralElement>, editingId: string | null) => {
@@ -61,21 +93,44 @@ export const GridPlanPage: React.FC = () => {
       return;
     }
     if (!currentProjId) return;
+
     try {
-      if (editingId) {
-        const existing = elements.find((e) => e.id === editingId);
-        await dbService.saveElement({
-          ...existing,
-          ...payload,
-          id: editingId,
-          projectId: currentProjId,
-          companyId: currentCompId,
-          updatedAt: new Date().toISOString(),
-        } as StructuralElement);
-      }
+      const now = new Date().toISOString();
+      const targetId = editingId || `elem-${Date.now()}`;
+      const existing = editingId ? elements.find((e) => e.id === editingId) : undefined;
+
+      const elementToSave: StructuralElement = {
+        id: targetId,
+        projectId: currentProjId,
+        companyId: currentCompId,
+        elementName: payload.elementName || payload.name || existing?.elementName || existing?.name || 'New Element',
+        name: payload.name || payload.elementName || existing?.name || existing?.elementName || 'New Element',
+        elementType: payload.elementType || existing?.elementType || 'SLAB',
+        levelId: payload.levelId || existing?.levelId || (levels[0]?.id ?? ''),
+        grid: payload.grid || existing?.grid || '',
+        status: payload.status || existing?.status || 'PLANNED',
+        calculatedVolume: payload.calculatedVolume ?? existing?.calculatedVolume ?? 0,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+        ...existing,
+        ...payload,
+      } as StructuralElement;
+
+      // Immediate optimistic local update so the 2D canvas responds with 0 latency
+      setElements((prev) => {
+        if (editingId) {
+          return prev.map((el) => (el.id === editingId ? elementToSave : el));
+        } else {
+          return [...prev, elementToSave];
+        }
+      });
+
       setShowModal(false);
       setEditingElement(null);
-      loadData();
+
+      // Persist to database (triggers onSnapshot for all clients and syncs server state)
+      await dbService.saveElement(elementToSave);
+      toast.success(editingId ? 'Element updated successfully' : 'Element created successfully');
     } catch (e) {
       console.error(e);
       toast.error('Failed to save element.');

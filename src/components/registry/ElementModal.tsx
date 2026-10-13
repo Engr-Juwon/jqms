@@ -30,7 +30,11 @@ import {
   Disc,
   Shapes,
   Maximize2,
+  Eye,
+  RotateCw,
+  ArrowUpDown,
   Info,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { SmartField } from './SmartField';
 import {
@@ -199,6 +203,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   const [customPerimeter, setCustomPerimeter] = useState<number>(0);
   const [cantileverMidDepth, setCantileverMidDepth] = useState<string>('');
   const [isArcDeduction, setIsArcDeduction] = useState(false);
+  const [cantileverDirection, setCantileverDirection] = useState<'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT'>('TOP');
+  const [isMirrored, setIsMirrored] = useState(false);
 
   // Auto-derivation handlers for Curved Cantilever & Arcs
   const autoDeriveArcFromRadiusAndSpan = () => {
@@ -346,6 +352,14 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setCustomArea(editingElement.area || (editingElement as any).customArea || 0);
       setCustomPerimeter((editingElement as any).customPerimeter || 0);
       setIsArcDeduction(!!editingElement.isArcDeduction);
+      setIsMirrored(!!(editingElement as any).isMirrored);
+      const rawDir = (editingElement.cantileverDirection || '').toUpperCase();
+      setCantileverDirection(
+        rawDir === 'BOTTOM' || rawDir === 'SOUTH' ? 'BOTTOM'
+        : rawDir === 'LEFT' || rawDir === 'WEST' ? 'LEFT'
+        : rawDir === 'RIGHT' || rawDir === 'EAST' ? 'RIGHT'
+        : 'TOP'
+      );
 
       // Beam monolithic & curved
       setBeamShape(editingElement.beamShape || (editingElement.radius ? 'curved' : 'straight'));
@@ -427,6 +441,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setArcAngle(157.9);
       setCantileverDepth(1.95);
       setIsArcDeduction(false);
+      setIsMirrored(false);
+      setCantileverDirection('TOP');
       setCurvedInputMode('radius_rise');
       setIsInclined(false);
       setLength(0.6);
@@ -642,9 +658,16 @@ export const ElementModal: React.FC<ElementModalProps> = ({
           const geom = calculateCurvedGeometry({
             radius,
             arcDepth,
-            chordLength,
+            chordLength: chordLength || L,
             arcAngle,
-            inputMode: curvedInputMode,
+            inputMode:
+              radius > 0 && arcDepth > 0
+                ? 'radius_rise'
+                : radius > 0 && L > 0
+                ? 'radius_chord'
+                : arcDepth > 0 && L > 0
+                ? 'chord_rise'
+                : curvedInputMode,
           });
           curvedGeom = geom;
           elementArea = isArcDeduction
@@ -951,6 +974,16 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       cantileverDepth:
         elementType === 'SLAB' && (slabShape === 'curved_cantilever' || slabShape === 'trapezoidal_cantilever')
           ? Number(cantileverDepth)
+          : undefined,
+      cantileverDirection:
+        elementType === 'SLAB' && (slabShape === 'curved_cantilever' || slabShape === 'trapezoidal_cantilever')
+          ? cantileverDirection
+          : undefined,
+      isFlipped:
+        elementType === 'SLAB' && cantileverDirection === 'BOTTOM',
+      isMirrored:
+        elementType === 'SLAB' && (slabShape === 'curved_cantilever' || slabShape === 'trapezoidal_cantilever')
+          ? isMirrored
           : undefined,
       taperEndDepth:
         elementType === 'SLAB' && slabShape === 'trapezoidal_cantilever'
@@ -1923,7 +1956,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                 {/* 3. CURVED CANTILEVER / BALCONY WITH ARC */}
                 {slabShape === 'curved_cantilever' && (
                   <div className="p-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-emerald-300 dark:border-emerald-500/40 space-y-4 shadow-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
                       <div>
                         <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
                           Curved Cantilever Bay Profile
@@ -1932,15 +1965,95 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                           Calculates cantilever slab panels with curved edge projections or inward recess cutouts
                         </p>
                       </div>
-                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={isArcDeduction}
-                          onChange={(e) => setIsArcDeduction(e.target.checked)}
-                          className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-500 focus:ring-emerald-500 h-4 w-4"
-                        />
-                        <span>Deduct Arc (Inward Recess / Cutout)</span>
-                      </label>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Facing Direction Controls */}
+                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                          <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 px-1.5 uppercase">Facing:</span>
+                          <button
+                            type="button"
+                            onClick={() => setCantileverDirection('TOP')}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                              cantileverDirection === 'TOP'
+                                ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                            title="Cantilever projects North / Upwards"
+                          >
+                            ↑ North / Top
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCantileverDirection('BOTTOM')}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                              cantileverDirection === 'BOTTOM'
+                                ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                            title="Cantilever projects South / Downwards"
+                          >
+                            ↓ South / Bottom
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCantileverDirection('LEFT')}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                              cantileverDirection === 'LEFT'
+                                ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                            title="Cantilever projects West / Left"
+                          >
+                            ← West
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCantileverDirection('RIGHT')}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                              cantileverDirection === 'RIGHT'
+                                ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                            title="Cantilever projects East / Right"
+                          >
+                            → East
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCantileverDirection((prev) =>
+                                prev === 'TOP' ? 'BOTTOM' : prev === 'BOTTOM' ? 'TOP' : prev === 'LEFT' ? 'RIGHT' : 'LEFT'
+                              )
+                            }
+                            className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-200 dark:bg-slate-700 hover:bg-emerald-500 hover:text-slate-950 text-slate-700 dark:text-slate-200 transition flex items-center gap-1"
+                            title="Flip Facing Direction 180°"
+                          >
+                            <RotateCw className="w-3 h-3" /> Flip ⇅
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsMirrored((m) => !m)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 border ${
+                              isMirrored
+                                ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                                : 'bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white text-slate-700 dark:text-slate-200 border-transparent'
+                            }`}
+                            title="Mirror Left ⇄ Right (Invert curvature / arc corner side)"
+                          >
+                            <ArrowLeftRight className="w-3 h-3" /> Mirror ⇄
+                          </button>
+                        </div>
+
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={isArcDeduction}
+                            onChange={(e) => setIsArcDeduction(e.target.checked)}
+                            className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-500 focus:ring-emerald-500 h-4 w-4"
+                          />
+                          <span>Deduct Arc (Inward Recess / Cutout)</span>
+                        </label>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -2052,13 +2165,91 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                 {/* 4. TAPERED / TRAPEZOIDAL CANTILEVER SLAB */}
                 {slabShape === 'trapezoidal_cantilever' && (
                   <div className="p-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-emerald-300 dark:border-emerald-500/40 space-y-4 shadow-sm">
-                    <div>
-                      <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                        <Shapes className="w-4 h-4" /> Tapered / Trapezoidal Cantilever Slab
-                      </span>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                        For slabs with straight or linearly tapered cantilever edges (e.g. from C7 to C8 to C1)
-                      </p>
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+                      <div>
+                        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Shapes className="w-4 h-4" /> Tapered / Trapezoidal Cantilever Slab
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Linearly tapered cantilever edge with corner fillet arc (e.g. C7 — C8 — C1)
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                        <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 px-1.5 uppercase">Facing:</span>
+                        <button
+                          type="button"
+                          onClick={() => setCantileverDirection('BOTTOM')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                            cantileverDirection === 'BOTTOM'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                          title="Cantilever projects South / Downwards (as in CAD)"
+                        >
+                          ↓ South / Bottom
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCantileverDirection('TOP')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                            cantileverDirection === 'TOP'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                          title="Cantilever projects North / Upwards"
+                        >
+                          ↑ North / Top
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCantileverDirection('LEFT')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                            cantileverDirection === 'LEFT'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                          title="Cantilever projects West / Left"
+                        >
+                          ← West
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCantileverDirection('RIGHT')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                            cantileverDirection === 'RIGHT'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                          title="Cantilever projects East / Right"
+                        >
+                          → East
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCantileverDirection((prev) =>
+                              prev === 'BOTTOM' ? 'TOP' : prev === 'TOP' ? 'BOTTOM' : prev === 'LEFT' ? 'RIGHT' : 'LEFT'
+                            )
+                          }
+                          className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-200 dark:bg-slate-700 hover:bg-emerald-500 hover:text-slate-950 text-slate-700 dark:text-slate-200 transition flex items-center gap-1"
+                          title="Flip Facing Direction 180°"
+                        >
+                          <RotateCw className="w-3 h-3" /> Flip ⇅
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsMirrored((m) => !m)}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 border ${
+                            isMirrored
+                              ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                              : 'bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white text-slate-700 dark:text-slate-200 border-transparent'
+                          }`}
+                          title="Mirror Left ⇄ Right (Invert W1 start depth and corner fillet arc side)"
+                        >
+                          <ArrowLeftRight className="w-3 h-3" /> Mirror ⇄
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -2230,6 +2421,406 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                     />
                   </div>
                 )}
+
+                {/* ─── LIVE 2D CONCEPT SHAPE PREVIEW ─── */}
+                <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 shadow-md space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
+                      <Eye className="w-4 h-4 text-emerald-400" />
+                      <span>Live 2D Concept & Geometry Verification</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {(slabShape === 'curved_cantilever' || slabShape === 'trapezoidal_cantilever') && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCantileverDirection((prev) =>
+                                prev === 'TOP' ? 'BOTTOM' : prev === 'BOTTOM' ? 'TOP' : prev === 'LEFT' ? 'RIGHT' : 'LEFT'
+                              )
+                            }
+                            className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-emerald-400 text-[11px] font-bold transition border border-emerald-500/30"
+                            title="Flip Facing Direction 180°"
+                          >
+                            <RotateCw className="w-3 h-3" />
+                            <span>Flip ({cantileverDirection})</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsMirrored((m) => !m)}
+                            className={`flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold transition border ${
+                              isMirrored
+                                ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                                : 'bg-slate-800 hover:bg-indigo-600 hover:text-white text-indigo-400 border-indigo-500/30'
+                            }`}
+                            title="Mirror Horizontally (Invert taper/arc side)"
+                          >
+                            <ArrowLeftRight className="w-3 h-3" />
+                            <span>Mirror {isMirrored ? '⇄ (Mirrored)' : '⇄'}</span>
+                          </button>
+                        </>
+                      )}
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-mono border border-emerald-500/20">
+                        {slabShape.replace(/_/g, ' ').toUpperCase()}{slabShape === 'curved_cantilever' ? ` · ${cantileverDirection}` : ''}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="w-full h-48 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center relative overflow-hidden p-2">
+                    {/* Architectural grid background pattern */}
+                    <svg className="w-full h-full" viewBox="0 0 400 180" preserveAspectRatio="xMidYMid meet">
+                      <defs>
+                        <pattern id="modal-grid-pattern" width="20" height="20" patternUnits="userSpaceOnUse">
+                          <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1e293b" strokeWidth="0.8" />
+                        </pattern>
+                      </defs>
+                      <rect width="400" height="180" fill="url(#modal-grid-pattern)" />
+
+                      {(() => {
+                        const effL = length || 9.21;
+                        const effCant = cantileverDepth || 1.95;
+                        const effR = radius || 2.96;
+                        const effH = arcDepth || 2.394;
+
+                        if (slabShape === 'curved_cantilever') {
+                          const isHorizontal = cantileverDirection === 'TOP' || cantileverDirection === 'BOTTOM';
+                          const baseW = isHorizontal ? 280 : 70;
+                          const baseH = isHorizontal ? 70 : 120;
+                          const bx = isHorizontal ? 60 : 165;
+                          const by = isHorizontal ? 40 : 30;
+
+                          const riseNorm = Math.min(0.85, (effH / (effCant || 1.872)) * 0.7);
+                          const dipPx = Math.max(16, Math.min(52, (isHorizontal ? baseH : baseW) * riseNorm));
+
+                          let pathD = '';
+                          let beamLine: { x1: number; y1: number; x2: number; y2: number; textX: number; textY: number; textAnchor: 'middle' | 'start' | 'end' } = { x1: 0, y1: 0, x2: 0, y2: 0, textX: 0, textY: 0, textAnchor: 'middle' };
+                          let dimL = { x1: 0, y1: 0, x2: 0, y2: 0, textX: 0, textY: 0 };
+                          let dimW: { x1: number; y1: number; x2: number; y2: number; textX: number; textY: number; textAnchor: 'middle' | 'start' | 'end' } = { x1: 0, y1: 0, x2: 0, y2: 0, textX: 0, textY: 0, textAnchor: 'end' };
+                          let dipLine = { x1: 0, y1: 0, x2: 0, y2: 0, textX: 0, textY: 0 };
+
+                          if (cantileverDirection === 'TOP') {
+                            pathD = isArcDeduction
+                              ? `M ${bx} ${by + baseH} L ${bx} ${by} Q ${bx + baseW / 2} ${by + dipPx} ${bx + baseW} ${by} L ${bx + baseW} ${by + baseH} Z`
+                              : `M ${bx} ${by + baseH} L ${bx} ${by} Q ${bx + baseW / 2} ${by - dipPx} ${bx + baseW} ${by} L ${bx + baseW} ${by + baseH} Z`;
+                            beamLine = { x1: bx, y1: by + baseH, x2: bx + baseW, y2: by + baseH, textX: bx + baseW / 2, textY: by + baseH + 16, textAnchor: 'middle' };
+                            dimL = { x1: bx, y1: by - 12, x2: bx + baseW, y2: by - 12, textX: bx + baseW / 2, textY: by - 16 };
+                            dimW = { x1: bx - 12, y1: by, x2: bx - 12, y2: by + baseH, textX: bx - 16, textY: by + baseH / 2 + 3, textAnchor: 'end' };
+                            dipLine = { x1: bx + baseW / 2, y1: by, x2: bx + baseW / 2, y2: by + dipPx, textX: bx + baseW / 2 + 6, textY: by + dipPx / 2 + 4 };
+                          } else if (cantileverDirection === 'BOTTOM') {
+                            pathD = isArcDeduction
+                              ? `M ${bx} ${by} L ${bx + baseW} ${by} L ${bx + baseW} ${by + baseH} Q ${bx + baseW / 2} ${by + baseH - dipPx} ${bx} ${by + baseH} Z`
+                              : `M ${bx} ${by} L ${bx + baseW} ${by} L ${bx + baseW} ${by + baseH} Q ${bx + baseW / 2} ${by + baseH + dipPx} ${bx} ${by + baseH} Z`;
+                            beamLine = { x1: bx, y1: by, x2: bx + baseW, y2: by, textX: bx + baseW / 2, textY: by - 8, textAnchor: 'middle' };
+                            dimL = { x1: bx, y1: by + baseH + 18, x2: bx + baseW, y2: by + baseH + 18, textX: bx + baseW / 2, textY: by + baseH + 30 };
+                            dimW = { x1: bx - 12, y1: by, x2: bx - 12, y2: by + baseH, textX: bx - 16, textY: by + baseH / 2 + 3, textAnchor: 'end' };
+                            dipLine = { x1: bx + baseW / 2, y1: by + baseH, x2: bx + baseW / 2, y2: by + baseH - dipPx, textX: bx + baseW / 2 + 6, textY: by + baseH - dipPx / 2 + 4 };
+                          } else if (cantileverDirection === 'LEFT') {
+                            pathD = isArcDeduction
+                              ? `M ${bx + baseW} ${by} L ${bx} ${by} Q ${bx + dipPx} ${by + baseH / 2} ${bx} ${by + baseH} L ${bx + baseW} ${by + baseH} Z`
+                              : `M ${bx + baseW} ${by} L ${bx} ${by} Q ${bx - dipPx} ${by + baseH / 2} ${bx} ${by + baseH} L ${bx + baseW} ${by + baseH} Z`;
+                            beamLine = { x1: bx + baseW, y1: by, x2: bx + baseW, y2: by + baseH, textX: bx + baseW + 8, textY: by + baseH / 2, textAnchor: 'start' };
+                            dimL = { x1: bx + baseW + 22, y1: by, x2: bx + baseW + 22, y2: by + baseH, textX: bx + baseW + 36, textY: by + baseH / 2 };
+                            dimW = { x1: bx, y1: by - 12, x2: bx + baseW, y2: by - 12, textX: bx + baseW / 2, textY: by - 16, textAnchor: 'middle' };
+                            dipLine = { x1: bx, y1: by + baseH / 2, x2: bx + dipPx, y2: by + baseH / 2, textX: bx + dipPx / 2, textY: by + baseH / 2 - 6 };
+                          } else {
+                            // RIGHT
+                            pathD = isArcDeduction
+                              ? `M ${bx} ${by} L ${bx + baseW} ${by} Q ${bx + baseW - dipPx} ${by + baseH / 2} ${bx + baseW} ${by + baseH} L ${bx} ${by + baseH} Z`
+                              : `M ${bx} ${by} L ${bx + baseW} ${by} Q ${bx + baseW + dipPx} ${by + baseH / 2} ${bx + baseW} ${by + baseH} L ${bx} ${by + baseH} Z`;
+                            beamLine = { x1: bx, y1: by, x2: bx, y2: by + baseH, textX: bx - 8, textY: by + baseH / 2, textAnchor: 'end' };
+                            dimL = { x1: bx - 22, y1: by, x2: bx - 22, y2: by + baseH, textX: bx - 34, textY: by + baseH / 2 };
+                            dimW = { x1: bx, y1: by - 12, x2: bx + baseW, y2: by - 12, textX: bx + baseW / 2, textY: by - 16, textAnchor: 'middle' };
+                            dipLine = { x1: bx + baseW, y1: by + baseH / 2, x2: bx + baseW - dipPx, y2: by + baseH / 2, textX: bx + baseW - dipPx / 2, textY: by + baseH / 2 - 6 };
+                          }
+
+                          return (
+                            <g>
+                              {/* Main Slab Profile */}
+                              <path
+                                d={pathD}
+                                fill="#10b98125"
+                                stroke="#10b981"
+                                strokeWidth="2.5"
+                              />
+                              {/* Supporting Beam Line */}
+                              <line x1={beamLine.x1} y1={beamLine.y1} x2={beamLine.x2} y2={beamLine.y2} stroke="#38bdf8" strokeWidth="2.5" />
+                              <text x={beamLine.textX} y={beamLine.textY} fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor={beamLine.textAnchor} fontFamily="monospace">
+                                Supporting Beam Line (1BM66/67)
+                              </text>
+
+                              {/* Dimension: Span L */}
+                              <line x1={dimL.x1} y1={dimL.y1} x2={dimL.x2} y2={dimL.y2} stroke="#38bdf8" strokeWidth="1.2" />
+                              <circle cx={dimL.x1} cy={dimL.y1} r="2" fill="#38bdf8" />
+                              <circle cx={dimL.x2} cy={dimL.y2} r="2" fill="#38bdf8" />
+                              <text x={dimL.textX} y={dimL.textY} fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                L = {effL.toFixed(2)}m
+                              </text>
+
+                              {/* Dimension: Depth W_cant */}
+                              <line x1={dimW.x1} y1={dimW.y1} x2={dimW.x2} y2={dimW.y2} stroke="#fbbf24" strokeWidth="1.2" />
+                              <text x={dimW.textX} y={dimW.textY} fill="#fbbf24" fontSize="9" fontWeight="bold" textAnchor={dimW.textAnchor} fontFamily="monospace">
+                                W = {effCant.toFixed(2)}m
+                              </text>
+
+                              {/* Arc Deduction / Projection Details */}
+                              {isArcDeduction ? (
+                                <g>
+                                  <line x1={dipLine.x1} y1={dipLine.y1} x2={dipLine.x2} y2={dipLine.y2} stroke="#f87171" strokeWidth="1.2" strokeDasharray="2 2" />
+                                  <text x={dipLine.textX} y={dipLine.textY} fill="#fca5a5" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                                    h = {effH.toFixed(2)}m (Scoop)
+                                  </text>
+                                  <text x={isHorizontal ? bx + baseW / 2 : bx + baseW / 2} y={cantileverDirection === 'TOP' ? by + dipPx + 14 : cantileverDirection === 'BOTTOM' ? by + baseH - dipPx - 8 : by + baseH + 16} fill="#f87171" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                    Inward Curved Recess · R = {effR.toFixed(2)}m
+                                  </text>
+                                  <text x={isHorizontal ? bx + baseW / 2 : bx + baseW / 2} y={cantileverDirection === 'TOP' ? by + baseH - 8 : cantileverDirection === 'BOTTOM' ? by + 16 : by - 6} fill="#34d399" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                    Midpoint Cantilever Depth W_mid = {Math.max(0, effCant - effH).toFixed(2)}m
+                                  </text>
+                                </g>
+                              ) : (
+                                <g>
+                                  <line x1={dipLine.x1} y1={dipLine.y1} x2={dipLine.x2} y2={dipLine.y2} stroke="#a7f3d0" strokeWidth="1.2" strokeDasharray="2 2" />
+                                  <text x={dipLine.textX} y={dipLine.textY} fill="#a7f3d0" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                                    h = {effH.toFixed(2)}m
+                                  </text>
+                                  <text x={bx + baseW / 2} y={cantileverDirection === 'TOP' ? by - dipPx - 4 : by + baseH + dipPx + 14} fill="#6ee7b7" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                    Arc R = {effR.toFixed(2)}m
+                                  </text>
+                                </g>
+                              )}
+                            </g>
+                          );
+                        }
+
+                        if (slabShape === 'circular_segment') {
+                          const cx = 200;
+                          const cy = 40;
+                          const w = 240;
+                          const hArc = Math.min(90, Math.max(30, (effH / (effL || 1)) * 140));
+
+                          return (
+                            <g>
+                              <path
+                                d={`M ${cx - w / 2} ${cy + hArc} Q ${cx} ${cy - 10} ${cx + w / 2} ${cy + hArc} Z`}
+                                fill="#10b98125"
+                                stroke="#10b981"
+                                strokeWidth="2.5"
+                              />
+                              <line x1={cx - w / 2} y1={cy + hArc + 12} x2={cx + w / 2} y2={cy + hArc + 12} stroke="#38bdf8" strokeWidth="1.2" />
+                              <text x={cx} y={cy + hArc + 24} fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                Chord C = {effL.toFixed(2)}m
+                              </text>
+                              <text x={cx} y={cy + hArc / 2} fill="#a7f3d0" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                Rise h = {effH.toFixed(2)}m · R = {effR.toFixed(2)}m
+                              </text>
+                            </g>
+                          );
+                        }
+
+                        if (slabShape === 'semi_circular') {
+                          return (
+                            <g>
+                              <path
+                                d="M 90 140 A 110 90 0 0 1 310 140 Z"
+                                fill="#10b98125"
+                                stroke="#10b981"
+                                strokeWidth="2.5"
+                              />
+                              <text x="200" y="115" fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                Semi-Circle R = {(radius || (effL / 2)).toFixed(2)}m
+                              </text>
+                            </g>
+                          );
+                        }
+
+                        if (slabShape === 'circular') {
+                          return (
+                            <g>
+                              <circle
+                                cx="200"
+                                cy="90"
+                                r="65"
+                                fill="#10b98125"
+                                stroke="#10b981"
+                                strokeWidth="2.5"
+                              />
+                              <text x="200" y="93" fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                Full Circle Ø = {(effR * 2).toFixed(2)}m
+                              </text>
+                            </g>
+                          );
+                        }
+
+                        if (slabShape === 'trapezoidal_cantilever') {
+                          const w1 = cantileverDepth || 1.95;
+                          const w2 = taperEndDepth || 0;
+                          const rFillet = radius || 1.5;
+                          const isBottom = cantileverDirection === 'BOTTOM';
+                          const isTop = cantileverDirection === 'TOP';
+                          const isHorizontal = isBottom || isTop;
+
+                          const baseW = isHorizontal ? 280 : 75;
+                          const baseH = isHorizontal ? 85 : 130;
+                          const bx = isHorizontal ? 60 : 160;
+                          const by = isHorizontal ? 45 : 25;
+
+                          // Scaled depths
+                          const maxW = Math.max(w1, w2, 0.1);
+                          const h1Px = Math.max(25, Math.min(baseH, (w1 / maxW) * baseH));
+                          const h2Px = w2 > 0 ? Math.max(10, Math.min(baseH, (w2 / maxW) * baseH)) : 0;
+                          const filletPx = Math.min(baseW * 0.35, Math.max(18, (rFillet / (effL || 10)) * baseW * 1.5));
+
+                          let pathD = '';
+                          let beamY = by;
+                          let beamX1 = bx;
+                          let beamX2 = bx + baseW;
+
+                          if (isBottom) {
+                            beamY = by;
+                            if (isMirrored) {
+                              // Mirrored: Fillet is on LEFT (bx + filletPx), W1 (1950mm) is on RIGHT (bx + baseW)
+                              const cornerFilletStart = bx + filletPx;
+                              const bottomSlantedY = by + Math.max(18, h1Px * 0.45);
+                              pathD = `M ${bx} ${by} L ${bx + baseW} ${by} L ${bx + baseW} ${by + h1Px} L ${cornerFilletStart} ${bottomSlantedY} Q ${bx} ${bottomSlantedY} ${bx} ${by + h2Px} Z`;
+                            } else {
+                              // Standard: W1 (1950mm) on LEFT, fillet arc on RIGHT near C1
+                              const cornerFilletStart = bx + baseW - filletPx;
+                              const bottomSlantedY = by + Math.max(18, h1Px * 0.45);
+                              pathD = `M ${bx} ${by} L ${bx + baseW} ${by} L ${bx + baseW} ${by + h2Px} Q ${bx + baseW} ${bottomSlantedY} ${cornerFilletStart} ${bottomSlantedY} L ${bx} ${by + h1Px} Z`;
+                            }
+                          } else if (isTop) {
+                            beamY = by + baseH;
+                            if (isMirrored) {
+                              const cornerFilletStart = bx + filletPx;
+                              const topSlantedY = by + baseH - Math.max(18, h1Px * 0.45);
+                              pathD = `M ${bx} ${by + baseH} L ${bx + baseW} ${by + baseH} L ${bx + baseW} ${by + baseH - h1Px} L ${cornerFilletStart} ${topSlantedY} Q ${bx} ${topSlantedY} ${bx} ${by + baseH - h2Px} Z`;
+                            } else {
+                              const cornerFilletStart = bx + baseW - filletPx;
+                              const topSlantedY = by + baseH - Math.max(18, h1Px * 0.45);
+                              pathD = `M ${bx} ${by + baseH} L ${bx + baseW} ${by + baseH} L ${bx + baseW} ${by + baseH - h2Px} Q ${bx + baseW} ${topSlantedY} ${cornerFilletStart} ${topSlantedY} L ${bx} ${by + baseH - h1Px} Z`;
+                            }
+                          } else if (cantileverDirection === 'LEFT') {
+                            if (isMirrored) {
+                              pathD = `M ${bx + baseW} ${by} L ${bx + baseW} ${by + baseH} Q ${bx + baseW * 0.5} ${by + baseH - filletPx} ${bx} ${by} Z`;
+                            } else {
+                              pathD = `M ${bx + baseW} ${by} L ${bx + baseW} ${by + baseH} L ${bx} ${by + baseH} Q ${bx + filletPx} ${by + baseH * 0.5} ${bx + baseW * 0.3} ${by} Z`;
+                            }
+                          } else {
+                            // RIGHT
+                            if (isMirrored) {
+                              pathD = `M ${bx} ${by} L ${bx} ${by + baseH} Q ${bx + baseW * 0.5} ${by + baseH - filletPx} ${bx + baseW} ${by} Z`;
+                            } else {
+                              pathD = `M ${bx} ${by} L ${bx} ${by + baseH} L ${bx + baseW} ${by + baseH} Q ${bx + baseW - filletPx} ${by + baseH * 0.5} ${bx + baseW * 0.7} ${by} Z`;
+                            }
+                          }
+
+                          return (
+                            <g>
+                              {/* Main Slab Profile */}
+                              <path
+                                d={pathD}
+                                fill="#10b98125"
+                                stroke="#10b981"
+                                strokeWidth="2.5"
+                              />
+
+                              {/* Supporting Beam Line 1BM78/79 or 1BM80/81 */}
+                              {isHorizontal ? (
+                                <g>
+                                  <line x1={beamX1} y1={beamY} x2={beamX2} y2={beamY} stroke="#38bdf8" strokeWidth="2.5" />
+                                  {/* Column Pads along the beam */}
+                                  <rect x={bx - 6} y={beamY - 6} width="12" height="12" fill="#38bdf8" rx="2" />
+                                  <text x={bx} y={isBottom ? beamY - 10 : beamY + 18} fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                    {isMirrored ? 'C1' : 'C7'}
+                                  </text>
+
+                                  <rect x={bx + baseW * 0.55 - 5} y={beamY - 5} width="10" height="10" fill="#38bdf8" rx="2" />
+                                  <text x={bx + baseW * 0.55} y={isBottom ? beamY - 10 : beamY + 18} fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                    C8
+                                  </text>
+
+                                  <rect x={bx + baseW - 6} y={beamY - 6} width="12" height="12" fill="#38bdf8" rx="2" />
+                                  <text x={bx + baseW} y={isBottom ? beamY - 10 : beamY + 18} fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                    {isMirrored ? 'C7' : 'C1'}
+                                  </text>
+
+                                  <text x={bx + baseW * 0.28} y={isBottom ? beamY - 10 : beamY + 18} fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                    {isMirrored ? '1BM80/81 (300×750mm)' : '1BM78/79 (300×750mm)'}
+                                  </text>
+                                </g>
+                              ) : null}
+
+                              {/* Dimension: Span L */}
+                              <line x1={bx} y1={isBottom ? by - 22 : by + baseH + 22} x2={bx + baseW} y2={isBottom ? by - 22 : by + baseH + 22} stroke="#38bdf8" strokeWidth="1.2" />
+                              <circle cx={bx} cy={isBottom ? by - 22 : by + baseH + 22} r="2" fill="#38bdf8" />
+                              <circle cx={bx + baseW} cy={isBottom ? by - 22 : by + baseH + 22} r="2" fill="#38bdf8" />
+                              <text x={bx + baseW / 2} y={isBottom ? by - 26 : by + baseH + 34} fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                Span L = {effL.toFixed(2)}m
+                              </text>
+
+                              {/* Dimension: Cantilever Depth W1 */}
+                              {isMirrored ? (
+                                <>
+                                  <line x1={bx + baseW + 14} y1={by} x2={bx + baseW + 14} y2={by + h1Px} stroke="#ec4899" strokeWidth="1.4" />
+                                  <circle cx={bx + baseW + 14} cy={by} r="2" fill="#ec4899" />
+                                  <circle cx={bx + baseW + 14} cy={by + h1Px} r="2" fill="#ec4899" />
+                                  <text x={bx + baseW + 18} y={by + h1Px / 2 + 3} fill="#ec4899" fontSize="9" fontWeight="bold" textAnchor="start" fontFamily="monospace">
+                                    W₁ = {w1.toFixed(3)}m (1950mm)
+                                  </text>
+                                </>
+                              ) : (
+                                <>
+                                  <line x1={bx - 14} y1={by} x2={bx - 14} y2={by + h1Px} stroke="#ec4899" strokeWidth="1.4" />
+                                  <circle cx={bx - 14} cy={by} r="2" fill="#ec4899" />
+                                  <circle cx={bx - 14} cy={by + h1Px} r="2" fill="#ec4899" />
+                                  <text x={bx - 18} y={by + h1Px / 2 + 3} fill="#ec4899" fontSize="9" fontWeight="bold" textAnchor="end" fontFamily="monospace">
+                                    W₁ = {w1.toFixed(3)}m (1950mm)
+                                  </text>
+                                </>
+                              )}
+
+                              {/* Corner Fillet Arc annotation */}
+                              <text
+                                x={isMirrored ? bx + filletPx / 2 : bx + baseW - filletPx / 2}
+                                y={isBottom ? by + Math.max(22, h1Px * 0.5) + 16 : by + baseH - 12}
+                                fill="#a7f3d0"
+                                fontSize="8.5"
+                                fontWeight="bold"
+                                textAnchor="middle"
+                                fontFamily="monospace"
+                              >
+                                Corner Fillet Arc R = {rFillet.toFixed(2)}m
+                              </text>
+                            </g>
+                          );
+                        }
+
+                        // Default Rectangular
+                        return (
+                          <g>
+                            <rect
+                              x="80"
+                              y="45"
+                              width="240"
+                              height="85"
+                              fill="#10b98125"
+                              stroke="#10b981"
+                              strokeWidth="2.5"
+                            />
+                            <text x="200" y="35" fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                              L = {effL.toFixed(2)}m
+                            </text>
+                            <text x="60" y="92" fill="#fbbf24" fontSize="9" fontWeight="bold" textAnchor="end" fontFamily="monospace">
+                              W = {(cantileverDepth || 6.0).toFixed(2)}m
+                            </text>
+                            <text x="200" y="92" fill="#a7f3d0" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                              Rectangular Panel ({((effL) * (cantileverDepth || 6.0)).toFixed(1)} m²)
+                            </text>
+                          </g>
+                        );
+                      })()}
+                    </svg>
+                  </div>
+                </div>
               </div>
             )}
 

@@ -2410,8 +2410,14 @@ export function generateElementSchedulePDF(
 // 8. WEEKLY QA/QC QUALITY REPORT (DUAL ORIENTATION & MODULAR AUDIT)
 // =========================================================================
 
+import {
+  WeeklyReportTemplateId,
+  getWeeklyReportTemplate,
+} from "@/types/weeklyReportTemplates";
+
 export interface WeeklyReportPrintOptions {
   orientation?: "portrait" | "landscape";
+  templateId?: WeeklyReportTemplateId | string;
   includeNcrsAndComments?: boolean; // fallback
   includeNcrs?: boolean; // granular toggle
   includeSiteComments?: boolean; // granular toggle
@@ -2635,6 +2641,13 @@ export function generateWeeklyReportPDF(
         ? Number(report.metrics.inspectionPassRate)
         : 100;
 
+  // Theme Template Resolution
+  const selectedTemplateId =
+    options?.templateId ||
+    report.templateId ||
+    "classic-executive";
+  const theme = getWeeklyReportTemplate(selectedTemplateId);
+
   // Header Brand Renderer
   const renderHeaderBrand = () => `
     <div style="display: flex; align-items: center; gap: 6px;">
@@ -2643,9 +2656,9 @@ export function generateWeeklyReportPDF(
           ? `<img src="${companyLogo}" style="max-height: 22px; max-width: 80px; object-fit: contain;" alt="Logo" />`
           : `
           <div style="display: flex; gap: 2px; align-items: flex-end; height: 16px;">
-            <span style="width: 3.5px; height: 9px; background: #c28b5e; border-radius: 1px;"></span>
-            <span style="width: 3.5px; height: 16px; background: #c28b5e; border-radius: 1px;"></span>
-            <span style="width: 3.5px; height: 12px; background: #c28b5e; border-radius: 1px;"></span>
+            <span style="width: 3.5px; height: 9px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+            <span style="width: 3.5px; height: 16px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+            <span style="width: 3.5px; height: 12px; background: ${theme.accentColor}; border-radius: 1px;"></span>
           </div>
           <span style="font-size: 8.5px; font-weight: 900; color: #0f172a; letter-spacing: 0.8px; text-transform: uppercase;">COLLECTION</span>
         `
@@ -2662,26 +2675,26 @@ export function generateWeeklyReportPDF(
           <div style="font-size: 8.5px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 6px; letter-spacing: 0.2px;">
             <span>${reportDate}</span>
             <span style="color: #cbd5e1;">|</span>
-            <span style="color: #64748b;">QA/QC SURVEILLANCE</span>
+            <span style="color: ${theme.accentColor}; font-weight: 800;">QA/QC SURVEILLANCE</span>
             <span style="color: #cbd5e1;">|</span>
             <span style="font-weight: 800; color: #0f172a; text-transform: uppercase;">${pageTitle}</span>
           </div>
         </div>
         <div style="font-size: 8.5px; font-weight: 800; color: #64748b; letter-spacing: 0.5px; text-transform: uppercase;">
-          <span style="color: #0f172a;">${projectName.toUpperCase()}</span> &nbsp;|&nbsp; <span style="color: #94a3b8;">CONFIDENTIAL</span>
+          <span style="color: #0f172a;">${projectName.toUpperCase()}</span> &nbsp;|&nbsp; <span style="color: ${theme.accentColor}; font-weight: 800;">${theme.name.toUpperCase()}</span> &nbsp;|&nbsp; <span style="color: #94a3b8;">CONFIDENTIAL</span>
         </div>
       </div>
-      <div class="pdf-header-rule"></div>
+      <div class="pdf-header-rule" style="background: ${theme.ruleColor}; height: 2px;"></div>
     </div>
   `;
 
   // Standard Footer for Slides 2 to 30
   const renderFooter = (slideNumber: number) => `
-    <div class="pdf-footer">
+    <div class="pdf-footer" style="border-top: 1px solid ${theme.cardBorder};">
       <div style="font-size: 7.5px; color: #94a3b8; font-weight: 600;">
-        Compiled By: <strong style="color: #475569;">${compilerName} (${compilerRole})</strong> &nbsp;|&nbsp; ISO 9001:2015 Quality Management System
+        Compiled By: <strong style="color: #475569;">${compilerName} (${compilerRole})</strong> &nbsp;|&nbsp; ISO 9001:2015 Quality Management System &nbsp;|&nbsp; <span style="color: ${theme.accentColor}; font-weight: 700;">Theme: ${theme.name}</span>
       </div>
-      <div class="pdf-slide-badge">
+      <div class="pdf-slide-badge" style="background: ${theme.badgeBg}; color: ${theme.badgeTextColor}; border: 1px solid ${theme.badgeBorder}; border-radius: ${theme.cardRadius};">
         SLIDE ${String(slideNumber).padStart(2, "0")}
       </div>
     </div>
@@ -2691,12 +2704,12 @@ export function generateWeeklyReportPDF(
   const slidesHtml: string[] = [];
 
   // =========================================================================
-  // SLIDE 1: COVER SLIDE (Hero Split Screen Layout)
+  // SLIDE 1: COVER SLIDE (Theme Adaptive Hero Layout)
   // =========================================================================
   slidesHtml.push(`
     <div class="pdf-sheet" style="padding: 0; display: flex; flex-direction: row; height: 210mm; overflow: hidden; position: relative;">
       <!-- Left Hero Column (~46% width) -->
-      <div style="width: 46%; padding: 24mm 14mm 16mm 16mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; position: relative; border-right: 3px solid #d49a5b;">
+      <div style="width: 46%; padding: 24mm 14mm 16mm 16mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; position: relative; border-right: 3px solid ${theme.accentColor};">
         <div>
           <!-- Company Brand Header -->
           <div style="margin-bottom: 22px;">
@@ -2706,9 +2719,9 @@ export function generateWeeklyReportPDF(
                   ? `<img src="${companyLogo}" style="max-height: 120px; max-width: 190px; object-fit: contain;" alt="${companyName}" />`
                   : `
                 <div style="display: flex; gap: 3px; align-items: flex-end; height: 26px;">
-                  <span style="width: 5px; height: 14px; background: #c28b5e; border-radius: 1px;"></span>
-                  <span style="width: 5px; height: 24px; background: #c28b5e; border-radius: 1px;"></span>
-                  <span style="width: 5px; height: 18px; background: #c28b5e; border-radius: 1px;"></span>
+                  <span style="width: 5px; height: 14px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+                  <span style="width: 5px; height: 24px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+                  <span style="width: 5px; height: 18px; background: ${theme.accentColor}; border-radius: 1px;"></span>
                 </div>
               `
               }
@@ -2723,7 +2736,7 @@ export function generateWeeklyReportPDF(
             <div style="font-size: 34px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; text-transform: uppercase; line-height: 1.05;">
               ${projectName.toUpperCase()}
             </div>
-            <div style="width: 100%; height: 2px; background: #c28b5e; margin-top: 14px;"></div>
+            <div style="width: 100%; height: 2px; background: ${theme.accentColor}; margin-top: 14px;"></div>
           </div>
 
           <!-- Report Title -->
@@ -2732,19 +2745,25 @@ export function generateWeeklyReportPDF(
           </div>
 
           <!-- Surveillance Level Tag -->
-          <div style="display: inline-block; background: #f1f5f9; color: #475569; font-size: 10px; font-weight: 800; padding: 5px 12px; border-radius: 4px; text-transform: uppercase; margin-bottom: 12px;">
+          <div style="display: inline-block; background: ${theme.accentLight}; color: ${theme.accentDark}; font-size: 10px; font-weight: 800; padding: 5px 12px; border-radius: ${theme.cardRadius}; border: 1px solid ${theme.cardBorder}; text-transform: uppercase; margin-bottom: 12px;">
             SURVEILLANCE: ${selectedLevel}
           </div>
           <div></div>
 
           <!-- Date Range Pill -->
-          <div style="display: inline-block; background: #FFFFFF; border: 1px solid #c28b5e; color: #c28b5e; font-size: 10.5px; font-weight: 800; padding: 6px 22px; border-radius: 9999px; letter-spacing: 0.5px; text-transform: uppercase;">
+          <div style="display: inline-block; background: #FFFFFF; border: 1.5px solid ${theme.accentColor}; color: ${theme.accentDark}; font-size: 10.5px; font-weight: 800; padding: 6px 22px; border-radius: 9999px; letter-spacing: 0.5px; text-transform: uppercase;">
             ${startDateStr} &nbsp;TO&nbsp; ${endDateStr}
+          </div>
+
+          <div style="margin-top: 10px;">
+            <span style="display: inline-block; font-size: 8px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.8px;">
+              Theme: ${theme.name} • ${theme.tagline}
+            </span>
           </div>
         </div>
 
         <!-- Compiler Card (Bottom Left) -->
-        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #c28b5e; border-radius: 6px; padding: 12px 16px; margin-top: auto;">
+        <div style="background: #ffffff; border: 1px solid ${theme.cardBorder}; border-left: 4px solid ${theme.accentColor}; border-radius: ${theme.cardRadius}; padding: 12px 16px; margin-top: auto;">
           <div style="font-size: 7.5px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
             AUTHORIZED COMPILER &amp; QA/QC OFFICER
           </div>
@@ -4020,25 +4039,26 @@ export function generateWeeklyReportPDF(
 
     .pdf-header-rule {
       width: 100%;
-      height: 1.5px;
-      background: #0f172a;
+      height: 2px;
+      background: ${theme.ruleColor};
     }
 
     .pdf-footer {
       padding-top: 5px;
-      border-top: 1px solid #e2e8f0;
+      border-top: 1px solid ${theme.cardBorder};
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
 
     .pdf-slide-badge {
-      background: #0f172a;
-      color: #ffffff;
+      background: ${theme.badgeBg};
+      color: ${theme.badgeTextColor};
       font-size: 7.5px;
       font-weight: 800;
       padding: 2.5px 10px;
-      border-radius: 4px;
+      border-radius: ${theme.cardRadius};
+      border: 1px solid ${theme.badgeBorder};
       letter-spacing: 0.5px;
     }
 
@@ -4046,36 +4066,37 @@ export function generateWeeklyReportPDF(
       width: 100%;
       border-collapse: collapse;
       font-size: 7.5px;
+      font-family: ${theme.fontFamily} !important;
     }
 
     .data-table th {
-      background: #0f172a !important;
-      color: #ffffff !important;
+      background: ${theme.tableHeaderBg} !important;
+      color: ${theme.tableHeaderTextColor} !important;
       font-weight: 800;
       font-size: 7.5px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       padding: 6px 8px;
-      border: 1px solid #0f172a;
+      border: 1px solid ${theme.tableHeaderBg};
       text-align: left;
     }
 
     .data-table td {
       padding: 4.5px 8px;
       border: 1px solid #f1f5f9;
-      border-bottom: 1px solid #e2e8f0;
+      border-bottom: 1px solid ${theme.tableBorderColor};
       vertical-align: middle;
     }
 
     .data-table tr:nth-child(even) td {
-      background: #f8fafc;
+      background: ${theme.tableZebraBg};
     }
 
     .badge-approved {
-      background: #ecfdf5 !important;
-      color: #059669 !important;
-      border: 1px solid #a7f3d0;
-      border-radius: 4px;
+      background: ${theme.badgeApprovedBg} !important;
+      color: ${theme.badgeApprovedColor} !important;
+      border: 1px solid ${theme.badgeApprovedBorder};
+      border-radius: ${theme.cardRadius};
       padding: 1.5px 7px;
       font-weight: 800;
       font-size: 7px;
@@ -4084,10 +4105,10 @@ export function generateWeeklyReportPDF(
     }
 
     .badge-rejected {
-      background: #fef2f2 !important;
-      color: #dc2626 !important;
-      border: 1px solid #fecaca;
-      border-radius: 4px;
+      background: ${theme.badgeRejectedBg} !important;
+      color: ${theme.badgeRejectedColor} !important;
+      border: 1px solid ${theme.badgeRejectedBorder};
+      border-radius: ${theme.cardRadius};
       padding: 1.5px 7px;
       font-weight: 800;
       font-size: 7px;
@@ -4096,10 +4117,10 @@ export function generateWeeklyReportPDF(
     }
 
     .badge-pending {
-      background: #f8fafc !important;
-      color: #64748b !important;
-      border: 1px solid #e2e8f0;
-      border-radius: 4px;
+      background: ${theme.badgePendingBg} !important;
+      color: ${theme.badgePendingColor} !important;
+      border: 1px solid ${theme.badgePendingBorder};
+      border-radius: ${theme.cardRadius};
       padding: 1.5px 7px;
       font-weight: 800;
       font-size: 7px;

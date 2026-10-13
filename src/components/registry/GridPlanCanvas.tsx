@@ -384,7 +384,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
     useState<LabelDetailMode>("STANDARD");
   const [textSize, setTextSize] = useState<TextSizeOption>("LARGE");
   const [autoScaleLabels, setAutoScaleLabels] = useState<boolean>(true);
-  const [canvasTheme, setCanvasTheme] = useState<CanvasTheme>("dark");
+  const [canvasTheme, setCanvasTheme] = useState<CanvasTheme>("light");
   const currentTheme = CANVAS_THEMES[canvasTheme];
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [showSnapshotModal, setShowSnapshotModal] = useState<boolean>(false);
@@ -1454,23 +1454,177 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                   ? Math.round(38 * labelScale)
                   : Math.round(22 * labelScale);
 
+                // Accurate 2D Geometry Generation based on slabShape
+                const shape = el.slabShape || "rectangular";
+                const isCurvedCantilever = shape === "curved_cantilever";
+                const isCircularSegment = shape === "circular_segment";
+                const isSemiCircular = shape === "semi_circular";
+                const isCircular = shape === "circular";
+                const isTrapezoid = shape === "trapezoidal_cantilever";
+
+                // Projection / Rise conversion to screen pixels
+                const radiusM = el.radius || 0;
+                let riseM = el.arcDepth || 0;
+                if (riseM <= 0 && radiusM > 0) {
+                  const spanM = rw / scaleFactor;
+                  if (spanM / 2 < radiusM) {
+                    riseM = radiusM - Math.sqrt(radiusM * radiusM - (spanM / 2) * (spanM / 2));
+                  }
+                }
+                const risePx = riseM > 0 ? riseM * scaleFactor : Math.min(rh * 0.85, Math.max(12, rw * 0.15));
+                const radiusPx = radiusM > 0 ? radiusM * scaleFactor : Math.max(rw, rh);
+
+                let slabPathD = "";
+                let isCustomPath = false;
+
+                if (isCurvedCantilever) {
+                  // Cantilever with curved edge projection or deduction
+                  // Base rectangle is [rx, ry, rw, rh].
+                  const pX1 = rx;
+                  const pY1 = ry;
+                  const pX2 = rx + rw;
+                  const pY2 = ry;
+                  const pX3 = rx + rw;
+                  const pY3 = ry + rh;
+                  const pX4 = rx;
+                  const pY4 = ry + rh;
+
+                  const dir = ((el.cantileverDirection || 'TOP') as string).toUpperCase();
+                  const dipPx = Math.min((dir === 'LEFT' || dir === 'RIGHT' ? rw : rh) * 0.85, Math.max(12, risePx));
+                  const bulgePx = Math.min((dir === 'LEFT' || dir === 'RIGHT' ? rw : rh) * 0.85, Math.max(12, risePx));
+
+                  if (dir === 'TOP' || dir === 'NORTH') {
+                    // Curve is on TOP edge (projects upwards, scoops down towards beam)
+                    slabPathD = el.isArcDeduction
+                      ? `M ${pX4} ${pY4} L ${pX3} ${pY3} L ${pX2} ${pY2} Q ${pX1 + rw / 2} ${pY1 + dipPx} ${pX1} ${pY1} Z`
+                      : `M ${pX4} ${pY4} L ${pX3} ${pY3} L ${pX2} ${pY2} Q ${pX1 + rw / 2} ${pY1 - bulgePx} ${pX1} ${pY1} Z`;
+                  } else if (dir === 'LEFT' || dir === 'WEST') {
+                    // Curve is on LEFT edge (projects leftwards, scoops right towards beam)
+                    slabPathD = el.isArcDeduction
+                      ? `M ${pX2} ${pY1} L ${pX3} ${pY3} L ${pX4} ${pY4} Q ${pX1 + dipPx} ${pY1 + rh / 2} ${pX1} ${pY1} Z`
+                      : `M ${pX2} ${pY1} L ${pX3} ${pY3} L ${pX4} ${pY4} Q ${pX1 - bulgePx} ${pY1 + rh / 2} ${pX1} ${pY1} Z`;
+                  } else if (dir === 'RIGHT' || dir === 'EAST') {
+                    // Curve is on RIGHT edge (projects rightwards, scoops left towards beam)
+                    slabPathD = el.isArcDeduction
+                      ? `M ${pX1} ${pY4} L ${pX1} ${pY1} L ${pX2} ${pY2} Q ${pX2 - dipPx} ${pY1 + rh / 2} ${pX3} ${pY3} Z`
+                      : `M ${pX1} ${pY4} L ${pX1} ${pY1} L ${pX2} ${pY2} Q ${pX2 + bulgePx} ${pY1 + rh / 2} ${pX3} ${pY3} Z`;
+                  } else {
+                    // BOTTOM / SOUTH (Default fallback: curve is on bottom edge)
+                    slabPathD = el.isArcDeduction
+                      ? `M ${pX1} ${pY1} L ${pX2} ${pY1} L ${pX3} ${pY3} Q ${pX1 + rw / 2} ${pY3 - dipPx} ${pX4} ${pY4} Z`
+                      : `M ${pX1} ${pY1} L ${pX2} ${pY1} L ${pX3} ${pY3} Q ${pX1 + rw / 2} ${pY3 + bulgePx} ${pX4} ${pY4} Z`;
+                  }
+                  isCustomPath = true;
+                } else if (isCircularSegment) {
+                  // Pure circular arc segment (chord + arc)
+                  const rSweep = Math.max(radiusPx, rw / 2);
+                  slabPathD = `M ${rx} ${ry + rh} L ${rx + rw} ${ry + rh} A ${rSweep} ${rSweep} 0 0 1 ${rx} ${ry + rh} Z`;
+                  isCustomPath = true;
+                } else if (isSemiCircular) {
+                  // Semicircular slab
+                  const halfR = rw / 2;
+                  slabPathD = `M ${rx} ${ry + rh} A ${halfR} ${rh} 0 0 1 ${rx + rw} ${ry + rh} Z`;
+                  isCustomPath = true;
+                } else if (isTrapezoid) {
+                  // Tapered / Trapezoidal cantilever with corner fillet arc
+                  const w1 = el.cantileverDepth || el.width || 1.95;
+                  const w2 = (el as any).taperEndDepth ?? 0;
+                  const rFillet = el.radius || 1.5;
+                  const dir = ((el.cantileverDirection || 'BOTTOM') as string).toUpperCase();
+                  const isMirr = !!(el as any).isMirrored;
+
+                  const filletPx = Math.min(rw * 0.4, Math.max(12, rFillet * scaleFactor * 0.5));
+                  const h2Px = w2 > 0 ? (w2 / (w1 || 1)) * rh : 0;
+
+                  if (dir === 'TOP' || dir === 'NORTH') {
+                    // Beam at bottom (ry + rh), projects upwards
+                    if (isMirr) {
+                      const cornerFilletStart = rx + filletPx;
+                      const topSlantedY = ry + rh - Math.max(12, rh * 0.5);
+                      slabPathD = `M ${rx} ${ry + rh} L ${rx + rw} ${ry + rh} L ${rx + rw} ${ry} L ${cornerFilletStart} ${topSlantedY} Q ${rx} ${topSlantedY} ${rx} ${ry + rh - h2Px} Z`;
+                    } else {
+                      const cornerFilletStart = rx + rw - filletPx;
+                      const topSlantedY = ry + rh - Math.max(12, rh * 0.5);
+                      slabPathD = `M ${rx} ${ry + rh} L ${rx + rw} ${ry + rh} L ${rx + rw} ${ry + rh - h2Px} Q ${rx + rw} ${topSlantedY} ${cornerFilletStart} ${topSlantedY} L ${rx} ${ry} Z`;
+                    }
+                  } else if (dir === 'LEFT' || dir === 'WEST') {
+                    if (isMirr) {
+                      slabPathD = `M ${rx + rw} ${ry} L ${rx + rw} ${ry + rh} Q ${rx + rw * 0.5} ${ry + rh - filletPx} ${rx} ${ry} Z`;
+                    } else {
+                      slabPathD = `M ${rx + rw} ${ry} L ${rx + rw} ${ry + rh} L ${rx} ${ry + rh} Q ${rx + filletPx} ${ry + rh * 0.5} ${rx + rw * 0.3} ${ry} Z`;
+                    }
+                  } else if (dir === 'RIGHT' || dir === 'EAST') {
+                    if (isMirr) {
+                      slabPathD = `M ${rx} ${ry} L ${rx} ${ry + rh} Q ${rx + rw * 0.5} ${ry + rh - filletPx} ${rx + rw} ${ry} Z`;
+                    } else {
+                      slabPathD = `M ${rx} ${ry} L ${rx} ${ry + rh} L ${rx + rw} ${ry + rh} Q ${rx + rw - filletPx} ${ry + rh * 0.5} ${rx + rw * 0.7} ${ry} Z`;
+                    }
+                  } else {
+                    // BOTTOM / SOUTH (Default for CAD drawings like 1BM78/79 vs 1BM80/81)
+                    // Beam at top (ry), projects downwards to ry + rh
+                    if (isMirr) {
+                      // Mirrored (1BM80/81): Corner fillet on LEFT (rx + filletPx), W1 (1950mm) on RIGHT (rx + rw)
+                      const cornerFilletStart = rx + filletPx;
+                      const bottomSlantedY = ry + Math.max(12, rh * 0.5);
+                      slabPathD = `M ${rx} ${ry} L ${rx + rw} ${ry} L ${rx + rw} ${ry + rh} L ${cornerFilletStart} ${bottomSlantedY} Q ${rx} ${bottomSlantedY} ${rx} ${ry + h2Px} Z`;
+                    } else {
+                      // Standard (1BM78/79): W1 (1950mm) on LEFT (rx), corner fillet on RIGHT (rx + rw - filletPx)
+                      const cornerFilletStart = rx + rw - filletPx;
+                      const bottomSlantedY = ry + Math.max(12, rh * 0.5);
+                      slabPathD = `M ${rx} ${ry} L ${rx + rw} ${ry} L ${rx + rw} ${ry + h2Px} Q ${rx + rw} ${bottomSlantedY} ${cornerFilletStart} ${bottomSlantedY} L ${rx} ${ry + rh} Z`;
+                    }
+                  }
+                  isCustomPath = true;
+                }
+
                 return (
                   <g key={`slab-${el.id}`} data-layer="slabs">
-                    <rect
-                      x={rx}
-                      y={ry}
-                      width={rw}
-                      height={rh}
-                      fill={fill}
-                      stroke={stroke}
-                      strokeWidth="2"
-                      strokeDasharray="6 4"
-                      opacity={isMatching ? 0.9 : 0.2}
-                      className="cursor-pointer transition-opacity hover:opacity-100"
-                      onClick={(e) => handleElementClick(e, el)}
-                      onMouseEnter={() => setHoveredElement(el)}
-                      onMouseLeave={() => setHoveredElement(null)}
-                    />
+                    {isCircular ? (
+                      <ellipse
+                        cx={slabCx}
+                        cy={slabCy}
+                        rx={rw / 2}
+                        ry={rh / 2}
+                        fill={fill}
+                        stroke={stroke}
+                        strokeWidth="2"
+                        strokeDasharray="6 4"
+                        opacity={isMatching ? 0.9 : 0.2}
+                        className="cursor-pointer transition-opacity hover:opacity-100"
+                        onClick={(e) => handleElementClick(e, el)}
+                        onMouseEnter={() => setHoveredElement(el)}
+                        onMouseLeave={() => setHoveredElement(null)}
+                      />
+                    ) : isCustomPath ? (
+                      <path
+                        d={slabPathD}
+                        fill={fill}
+                        stroke={stroke}
+                        strokeWidth="2"
+                        strokeDasharray="6 4"
+                        opacity={isMatching ? 0.9 : 0.2}
+                        className="cursor-pointer transition-opacity hover:opacity-100"
+                        onClick={(e) => handleElementClick(e, el)}
+                        onMouseEnter={() => setHoveredElement(el)}
+                        onMouseLeave={() => setHoveredElement(null)}
+                      />
+                    ) : (
+                      <rect
+                        x={rx}
+                        y={ry}
+                        width={rw}
+                        height={rh}
+                        fill={fill}
+                        stroke={stroke}
+                        strokeWidth="2"
+                        strokeDasharray="6 4"
+                        opacity={isMatching ? 0.9 : 0.2}
+                        className="cursor-pointer transition-opacity hover:opacity-100"
+                        onClick={(e) => handleElementClick(e, el)}
+                        onMouseEnter={() => setHoveredElement(el)}
+                        onMouseLeave={() => setHoveredElement(null)}
+                      />
+                    )}
                     {/* High-Contrast Plate */}
                     <rect
                       x={slabCx - cardW / 2}

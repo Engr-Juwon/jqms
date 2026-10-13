@@ -445,6 +445,9 @@ export interface StructuralElement {
   curvedInputMode?: "radius_rise" | "chord_rise" | "radius_angle" | "radius_chord";
   isArcDeduction?: boolean; // for curved cantilever / recess
   cantileverDepth?: number; // in meters
+  cantileverDirection?: "TOP" | "BOTTOM" | "LEFT" | "RIGHT" | "NORTH" | "SOUTH" | "EAST" | "WEST";
+  isFlipped?: boolean; // Flip projection orientation
+  isMirrored?: boolean; // Mirror horizontally (flip start/end taper or arc curvature side)
   taperEndDepth?: number; // in meters (for tapered / trapezoidal cantilever)
   customArea?: number; // in m2 (for irregular polyline / spline area)
   customPerimeter?: number; // in meters (for irregular polyline formwork)
@@ -2421,6 +2424,7 @@ export interface WeeklyReport {
   photoGalleryUrls?: string[];
   projectId: string;
   projectName?: string;
+  templateId?: string;
   overallQualityCompliance?: number | string;
   remediationSummaryText?: string;
   cubeTests?: ConcreteCubeSample[] | any[];

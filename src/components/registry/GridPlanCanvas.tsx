@@ -1734,13 +1734,36 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                 const flightW = (el.flightWidth || 1.2) * scaleFactor;
                 const flightWPx = Math.max(28, flightW);
 
+                // Elevation callout text (▽ Base -> △ Top)
+                const baseElev = el.elevation ?? el.bottomElevation ?? 0;
+                const topElev = el.topElevation ?? (baseElev + (el.height || 3.0));
+                const elevTag = `▽${baseElev.toFixed(2)}m → △+${topElev.toFixed(2)}m`;
+
+                const hasTwoFlights =
+                  el.stairConfiguration === "DOGLEG_HALF_TURN" ||
+                  el.stairConfiguration === "OPEN_WELL" ||
+                  (Array.isArray(el.flights) && el.flights.length >= 2);
+
+                const fl1Risers = hasTwoFlights
+                  ? Math.max(1, Number(el.flights?.[0]?.riserCount) || Math.round(totalRisers / 2))
+                  : totalRisers;
+                const fl2Risers = hasTwoFlights
+                  ? Math.max(1, Number(el.flights?.[1]?.riserCount) || (totalRisers - fl1Risers))
+                  : 0;
+
+                const isLeftTurn = (el.turnDirection || "LEFT") === "LEFT";
+                const stairwellGapPx = Math.max(6, Math.min(24, (Number(el.stairwellGap) || 0.15) * scaleFactor));
+
                 if (coords.isSpan) {
                   const spanLen =
                     coords.spanLength > 0.05
                       ? coords.spanLength
                       : (el.length || el.flightLength || 3.0) * scaleFactor;
                   const angleDeg = (coords.angleRad * 180) / Math.PI;
-                  const stepW = spanLen / Math.max(3, totalRisers);
+
+                  // Architecture: landing platform takes ~22% of total length at the top or dogleg end
+                  const landingLen = Math.max(18, Math.min(flightWPx * 0.9, spanLen * 0.22));
+                  const runLen = Math.max(10, spanLen - landingLen);
 
                   const stairName =
                     labelDetailMode === "COMPACT"
@@ -1748,7 +1771,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       : el.elementName;
                   const stairSub =
                     labelDetailMode === "DETAILED"
-                      ? `${totalRisers} Risers · ${el.concreteGrade || "C30"}`
+                      ? `${totalRisers}R · ${elevTag}`
                       : labelDetailMode === "STANDARD"
                         ? `${totalRisers} Risers`
                         : "";
@@ -1760,6 +1783,10 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     height: tagH,
                     fontSize: tagFont,
                   } = getPillDimensions(stairLabel, 10.5, 6, labelScale);
+
+                  const halfW = flightWPx / 2;
+                  const stepW1 = runLen / fl1Risers;
+                  const stepW2 = fl2Risers > 0 ? runLen / fl2Risers : 0;
 
                   return (
                     <g
@@ -1774,65 +1801,212 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       <g
                         transform={`translate(${coords.midX}, ${coords.midY}) rotate(${angleDeg})`}
                       >
-                        <rect
-                          x={-spanLen / 2}
-                          y={-flightWPx / 2}
-                          width={spanLen}
-                          height={flightWPx}
-                          fill={fill}
-                          stroke={stroke}
-                          strokeWidth="2"
-                          rx="3"
-                        />
-                        {Array.from({
-                          length: Math.min(24, Math.max(2, totalRisers - 1)),
-                        }).map((_, i) => (
-                          <line
-                            key={`str-step-${i}`}
-                            x1={-spanLen / 2 + (i + 1) * stepW}
-                            y1={-flightWPx / 2}
-                            x2={-spanLen / 2 + (i + 1) * stepW}
-                            y2={flightWPx / 2}
-                            stroke={stroke}
-                            strokeWidth="1.2"
-                            strokeOpacity="0.8"
-                          />
-                        ))}
-                        <circle
-                          cx={-spanLen / 2 + 10}
-                          cy={0}
-                          r="3"
-                          fill="#38bdf8"
-                        />
-                        <line
-                          x1={-spanLen / 2 + 10}
-                          y1={0}
-                          x2={spanLen / 2 - 8}
-                          y2={0}
-                          stroke="#38bdf8"
-                          strokeWidth="1.6"
-                          strokeDasharray="4 3"
-                        />
-                        <polygon
-                          points={`${spanLen / 2 - 2},0 ${spanLen / 2 - 8},-3.5 ${spanLen / 2 - 8},3.5`}
-                          fill="#38bdf8"
-                        />
-                        <text
-                          x={0}
-                          y={-4}
-                          fill="#38bdf8"
-                          fontSize="9"
-                          fontWeight="bold"
-                          textAnchor="middle"
-                          fontFamily="monospace, sans-serif"
-                        >
-                          UP
-                        </text>
+                        {hasTwoFlights ? (
+                          <>
+                            {/* Flight 1 Outer Box */}
+                            <rect
+                              x={-spanLen / 2}
+                              y={isLeftTurn ? stairwellGapPx / 2 : -flightWPx - stairwellGapPx / 2}
+                              width={runLen}
+                              height={flightWPx}
+                              fill={fill}
+                              stroke={stroke}
+                              strokeWidth="2"
+                              rx="2"
+                            />
+                            {/* Flight 1 Exact Riser Lines */}
+                            {Array.from({ length: fl1Risers - 1 }).map((_, i) => (
+                              <line
+                                key={`f1-t-${i}`}
+                                x1={-spanLen / 2 + (i + 1) * stepW1}
+                                y1={isLeftTurn ? stairwellGapPx / 2 : -flightWPx - stairwellGapPx / 2}
+                                x2={-spanLen / 2 + (i + 1) * stepW1}
+                                y2={isLeftTurn ? stairwellGapPx / 2 + flightWPx : -stairwellGapPx / 2}
+                                stroke={stroke}
+                                strokeWidth="1.2"
+                                strokeOpacity="0.8"
+                              />
+                            ))}
+
+                            {/* Flight 2 Outer Box (Parallel returning flight) */}
+                            <rect
+                              x={-spanLen / 2}
+                              y={isLeftTurn ? -flightWPx - stairwellGapPx / 2 : stairwellGapPx / 2}
+                              width={runLen}
+                              height={flightWPx}
+                              fill={fill}
+                              stroke={stroke}
+                              strokeWidth="2"
+                              rx="2"
+                            />
+                            {/* Flight 2 Exact Riser Lines */}
+                            {Array.from({ length: fl2Risers - 1 }).map((_, i) => (
+                              <line
+                                key={`f2-t-${i}`}
+                                x1={-spanLen / 2 + (i + 1) * stepW2}
+                                y1={isLeftTurn ? -flightWPx - stairwellGapPx / 2 : stairwellGapPx / 2}
+                                x2={-spanLen / 2 + (i + 1) * stepW2}
+                                y2={isLeftTurn ? -stairwellGapPx / 2 : stairwellGapPx / 2 + flightWPx}
+                                stroke={stroke}
+                                strokeWidth="1.2"
+                                strokeOpacity="0.8"
+                              />
+                            ))}
+
+                            {/* Mid Landing Platform Slab spanning both flights */}
+                            <rect
+                              x={-spanLen / 2 + runLen}
+                              y={-flightWPx - stairwellGapPx / 2}
+                              width={landingLen}
+                              height={flightWPx * 2 + stairwellGapPx}
+                              fill={fill}
+                              fillOpacity="0.8"
+                              stroke={stroke}
+                              strokeWidth="2"
+                              strokeDasharray="4 2"
+                              rx="2"
+                            />
+                            <text
+                              x={-spanLen / 2 + runLen + landingLen / 2}
+                              y={3}
+                              fill={stroke}
+                              fontSize="8"
+                              fontWeight="bold"
+                              textAnchor="middle"
+                              fontFamily="monospace, sans-serif"
+                            >
+                              MID LANDING
+                            </text>
+
+                            {/* Walkline Arrow curving 180° around the lightwell */}
+                            <circle
+                              cx={-spanLen / 2 + 8}
+                              cy={isLeftTurn ? stairwellGapPx / 2 + halfW : -halfW - stairwellGapPx / 2}
+                              r="3"
+                              fill="#38bdf8"
+                            />
+                            <path
+                              d={`M ${-spanLen / 2 + 8} ${isLeftTurn ? stairwellGapPx / 2 + halfW : -halfW - stairwellGapPx / 2} L ${-spanLen / 2 + runLen + landingLen * 0.5} ${isLeftTurn ? stairwellGapPx / 2 + halfW : -halfW - stairwellGapPx / 2} Q ${-spanLen / 2 + runLen + landingLen * 0.85} 0 ${-spanLen / 2 + runLen + landingLen * 0.5} ${isLeftTurn ? -halfW - stairwellGapPx / 2 : stairwellGapPx / 2 + halfW} L ${-spanLen / 2 + 16} ${isLeftTurn ? -halfW - stairwellGapPx / 2 : stairwellGapPx / 2 + halfW}`}
+                              fill="none"
+                              stroke="#38bdf8"
+                              strokeWidth="1.6"
+                              strokeDasharray="4 3"
+                            />
+                            <polygon
+                              points={`${-spanLen / 2 + 10},${isLeftTurn ? -halfW - stairwellGapPx / 2 : stairwellGapPx / 2 + halfW} ${-spanLen / 2 + 16},${(isLeftTurn ? -halfW - stairwellGapPx / 2 : stairwellGapPx / 2 + halfW) - 3.5} ${-spanLen / 2 + 16},${(isLeftTurn ? -halfW - stairwellGapPx / 2 : stairwellGapPx / 2 + halfW) + 3.5}`}
+                              fill="#38bdf8"
+                            />
+                            <text
+                              x={-spanLen / 2 + runLen / 2}
+                              y={isLeftTurn ? stairwellGapPx / 2 + halfW - 4 : -halfW - stairwellGapPx / 2 - 4}
+                              fill="#38bdf8"
+                              fontSize="9"
+                              fontWeight="bold"
+                              textAnchor="middle"
+                              fontFamily="monospace, sans-serif"
+                            >
+                              UP ({fl1Risers}R)
+                            </text>
+                            <text
+                              x={-spanLen / 2 + runLen / 2}
+                              y={isLeftTurn ? -halfW - stairwellGapPx / 2 + 12 : stairwellGapPx / 2 + halfW + 12}
+                              fill="#38bdf8"
+                              fontSize="9"
+                              fontWeight="bold"
+                              textAnchor="middle"
+                              fontFamily="monospace, sans-serif"
+                            >
+                              UP ({fl2Risers}R)
+                            </text>
+                          </>
+                        ) : (
+                          <>
+                            {/* Single Straight Flight */}
+                            <rect
+                              x={-spanLen / 2}
+                              y={-flightWPx / 2}
+                              width={runLen}
+                              height={flightWPx}
+                              fill={fill}
+                              stroke={stroke}
+                              strokeWidth="2"
+                              rx="2"
+                            />
+                            <rect
+                              x={-spanLen / 2 + runLen}
+                              y={-flightWPx / 2}
+                              width={landingLen}
+                              height={flightWPx}
+                              fill={fill}
+                              fillOpacity="0.8"
+                              stroke={stroke}
+                              strokeWidth="2"
+                              strokeDasharray="4 2"
+                              rx="2"
+                            />
+                            <text
+                              x={-spanLen / 2 + runLen + landingLen / 2}
+                              y={2}
+                              fill={stroke}
+                              fontSize="8"
+                              fontWeight="bold"
+                              textAnchor="middle"
+                              fontFamily="monospace, sans-serif"
+                            >
+                              LANDING
+                            </text>
+
+                            {/* Exact Tread Lines for every single riser */}
+                            {Array.from({ length: totalRisers - 1 }).map((_, i) => (
+                              <line
+                                key={`str-step-${i}`}
+                                x1={-spanLen / 2 + (i + 1) * stepW1}
+                                y1={-flightWPx / 2}
+                                x2={-spanLen / 2 + (i + 1) * stepW1}
+                                y2={flightWPx / 2}
+                                stroke={stroke}
+                                strokeWidth="1.2"
+                                strokeOpacity="0.8"
+                              />
+                            ))}
+
+                            <circle
+                              cx={-spanLen / 2 + 8}
+                              cy={0}
+                              r="3"
+                              fill="#38bdf8"
+                            />
+                            <line
+                              x1={-spanLen / 2 + 8}
+                              y1={0}
+                              x2={spanLen / 2 - 8}
+                              y2={0}
+                              stroke="#38bdf8"
+                              strokeWidth="1.6"
+                              strokeDasharray="4 3"
+                            />
+                            <polygon
+                              points={`${spanLen / 2 - 2},0 ${spanLen / 2 - 8},-3.5 ${spanLen / 2 - 8},3.5`}
+                              fill="#38bdf8"
+                            />
+                            <text
+                              x={-spanLen / 2 + runLen / 2}
+                              y={-4}
+                              fill="#38bdf8"
+                              fontSize="9"
+                              fontWeight="bold"
+                              textAnchor="middle"
+                              fontFamily="monospace, sans-serif"
+                            >
+                              UP ({totalRisers} Risers)
+                            </text>
+                          </>
+                        )}
                       </g>
 
                       <rect
                         x={coords.midX - tagW / 2}
-                        y={coords.midY + flightWPx / 2 + 3 * labelScale}
+                        y={coords.midY + (hasTwoFlights ? flightWPx + stairwellGapPx / 2 : flightWPx / 2) + 3 * labelScale}
                         width={tagW}
                         height={tagH}
                         rx={3 * labelScale}
@@ -1847,7 +2021,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         x={coords.midX}
                         y={
                           coords.midY +
-                          flightWPx / 2 +
+                          (hasTwoFlights ? flightWPx + stairwellGapPx / 2 : flightWPx / 2) +
                           3 * labelScale +
                           tagH / 2 +
                           tagFont * 0.35
@@ -1879,9 +2053,13 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                 const rh = isArea
                   ? Math.max(Math.abs(coords.y2 - coords.y1), 40)
                   : flightWPx;
-                const stepCount = Math.max(3, Math.min(20, totalRisers));
                 const isHorizontal = rw >= rh;
-                const stepSize = isHorizontal ? rw / stepCount : rh / stepCount;
+                const landingSpan = isHorizontal
+                  ? Math.max(16, rw * 0.22)
+                  : Math.max(16, rh * 0.22);
+                const runSpan = isHorizontal ? rw - landingSpan : rh - landingSpan;
+                const exactStepCount = Math.max(1, totalRisers);
+                const stepSize = isHorizontal ? runSpan / exactStepCount : runSpan / exactStepCount;
 
                 const stairName =
                   labelDetailMode === "COMPACT"
@@ -1889,7 +2067,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     : el.elementName;
                 const stairSub =
                   labelDetailMode === "DETAILED"
-                    ? `${totalRisers} Risers · ${el.concreteGrade || "C30"}`
+                    ? `${totalRisers}R · ${elevTag}`
                     : labelDetailMode === "STANDARD"
                       ? `${totalRisers} Risers`
                       : "";
@@ -1912,18 +2090,54 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     onMouseLeave={() => setHoveredElement(null)}
                     opacity={isMatching ? 0.92 : 0.2}
                   >
+                    {/* Main Flight Boundary */}
                     <rect
                       x={rx}
                       y={ry}
-                      width={rw}
-                      height={rh}
+                      width={isHorizontal ? runSpan : rw}
+                      height={isHorizontal ? rh : runSpan}
                       fill={fill}
                       stroke={stroke}
                       strokeWidth="2"
                       rx="3"
                     />
+
+                    {/* Landing Platform Boundary */}
+                    <rect
+                      x={isHorizontal ? rx + runSpan : rx}
+                      y={isHorizontal ? ry : ry + runSpan}
+                      width={isHorizontal ? landingSpan : rw}
+                      height={isHorizontal ? rh : landingSpan}
+                      fill={fill}
+                      fillOpacity="0.8"
+                      stroke={stroke}
+                      strokeWidth="2"
+                      strokeDasharray="4 2"
+                      rx="2"
+                    />
+                    <text
+                      x={
+                        isHorizontal
+                          ? rx + runSpan + landingSpan / 2
+                          : rx + rw / 2
+                      }
+                      y={
+                        isHorizontal
+                          ? ry + rh / 2 + 3
+                          : ry + runSpan + landingSpan / 2 + 3
+                      }
+                      fill={stroke}
+                      fontSize="8"
+                      fontWeight="bold"
+                      textAnchor="middle"
+                      fontFamily="monospace, sans-serif"
+                    >
+                      LANDING
+                    </text>
+
+                    {/* Draw each exact tread line according to total risers */}
                     {isHorizontal
-                      ? Array.from({ length: stepCount - 1 }).map((_, i) => (
+                      ? Array.from({ length: exactStepCount - 1 }).map((_, i) => (
                           <line
                             key={`str-t-${i}`}
                             x1={rx + (i + 1) * stepSize}
@@ -1935,7 +2149,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             strokeOpacity="0.8"
                           />
                         ))
-                      : Array.from({ length: stepCount - 1 }).map((_, i) => (
+                      : Array.from({ length: exactStepCount - 1 }).map((_, i) => (
                           <line
                             key={`str-t-${i}`}
                             x1={rx}
@@ -1970,7 +2184,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           fill="#38bdf8"
                         />
                         <text
-                          x={rx + rw / 2}
+                          x={rx + runSpan / 2}
                           y={ry + rh / 2 - 4}
                           fill="#38bdf8"
                           fontSize="9"
@@ -1978,20 +2192,20 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           textAnchor="middle"
                           fontFamily="monospace, sans-serif"
                         >
-                          UP
+                          UP ({exactStepCount}R)
                         </text>
                       </>
                     ) : (
                       <>
                         <circle
                           cx={rx + rw / 2}
-                          cy={ry + rh - 10}
+                          cy={ry + runSpan - 10}
                           r="3"
                           fill="#38bdf8"
                         />
                         <line
                           x1={rx + rw / 2}
-                          y1={ry + rh - 10}
+                          y1={ry + runSpan - 10}
                           x2={rx + rw / 2}
                           y2={ry + 8}
                           stroke="#38bdf8"
@@ -2004,7 +2218,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         />
                         <text
                           x={rx + rw / 2 + 10}
-                          y={ry + rh / 2}
+                          y={ry + runSpan / 2}
                           fill="#38bdf8"
                           fontSize="9"
                           fontWeight="bold"

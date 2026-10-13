@@ -35,6 +35,8 @@ import {
   X,
   Plus,
   Trash2,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useProjectStore } from "@/stores/useProjectStore";
@@ -133,90 +135,138 @@ function createStaircaseGeometry(
   riserCount: number,
   flights?: any[],
   landings?: any[],
+  stairConfig: string = "DOGLEG_HALF_TURN",
+  turnDir: string = "LEFT",
+  stairwellVoidGap: number = 0.15,
 ): THREE.BufferGeometry {
-  const hasMultipleFlights = Array.isArray(flights) && flights.length >= 2;
+  const isDogleg =
+    stairConfig === "DOGLEG_HALF_TURN" ||
+    stairConfig === "OPEN_WELL" ||
+    (Array.isArray(flights) && flights.length >= 2);
 
-  if (hasMultipleFlights) {
-    const fl1 = flights[0];
-    const fl2 = flights[1];
-    const fl1Risers = Math.max(2, Number(fl1?.riserCount) || Math.round(riserCount / 2));
-    const fl2Risers = Math.max(2, Number(fl2?.riserCount) || Math.round(riserCount / 2));
+  if (isDogleg) {
+    const fl1 = flights && flights[0];
+    const fl2 = flights && flights[1];
+    // Exact riser counts per flight - NO arbitrary caps or rounding!
+    const fl1Risers = Math.max(1, Number(fl1?.riserCount) || Math.round(riserCount / 2) || 8);
+    const fl2Risers = Math.max(1, Number(fl2?.riserCount) || Math.round(riserCount / 2) || 8);
+    const totalRisersCount = fl1Risers + fl2Risers;
+
+    // Fractional rise strictly proportional to the exact risers count
+    const fl1Rise = stairRise * (fl1Risers / totalRisersCount);
+    const fl2Rise = stairRise * (fl2Risers / totalRisersCount);
+
     const fl1Run = Number(fl1?.length) || Math.max(1.2, totalRun * 0.45);
     const fl2Run = Number(fl2?.length) || Math.max(1.2, totalRun * 0.45);
     const landRun =
       landings && landings[0]?.length
         ? Number(landings[0].length)
         : Math.max(1.0, totalRun * 0.25);
+    const topLandRun =
+      landings && landings.length > 1 && landings[1]?.length
+        ? Number(landings[1].length)
+        : Math.max(0.6, Math.min(1.2, landRun));
 
-    const halfRise = stairRise / 2;
-    const wellGap = 0.12; // 120mm stairwell lightwell gap
+    const wellGap = Math.max(0.05, stairwellVoidGap || 0.15);
+    const isLeft = turnDir === "LEFT";
+    // For LEFT turn: Flight 1 is on right (-Z), Flight 2 returns on left (+Z)
+    // For RIGHT turn: Flight 1 is on left (+Z), Flight 2 returns on right (-Z)
+    const fl1Z = isLeft ? -(stairW + wellGap / 2) : wellGap / 2;
+    const fl2Z = isLeft ? wellGap / 2 : -(stairW + wellGap / 2);
 
-    // Flight 1: 0 to halfRise
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Flight 1 Solid Profile (climbing from elevation 0 to fl1Rise)
+    // ─────────────────────────────────────────────────────────────────────────────
     const s1 = new THREE.Shape();
-    s1.moveTo(0, 0);
     const stepT1 = fl1Run / fl1Risers;
-    const stepR1 = halfRise / fl1Risers;
+    const stepR1 = fl1Rise / fl1Risers;
+
+    s1.moveTo(0, 0);
+    // Draw exact risers and treads
     for (let i = 0; i < fl1Risers; i++) {
-      s1.lineTo(i * stepT1, (i + 1) * stepR1);
-      s1.lineTo((i + 1) * stepT1, (i + 1) * stepR1);
+      const rx = i * stepT1;
+      const ry = (i + 1) * stepR1;
+      s1.lineTo(rx, ry);
+      s1.lineTo((i + 1) * stepT1, ry);
     }
-    s1.lineTo(fl1Run, halfRise - waistT);
+    // Drop down at landing interface
+    s1.lineTo(fl1Run, fl1Rise - landT);
+    // Bottom waist soffit line sloping down to origin bottom
     s1.lineTo(0, -waistT);
     s1.closePath();
 
     const g1 = new THREE.ExtrudeGeometry(s1, { depth: stairW, bevelEnabled: false });
-    g1.translate(0, 0, -(stairW + wellGap / 2));
+    g1.translate(0, 0, fl1Z);
 
-    // Mid Landing Platform
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Mid Landing Platform Slab (spans across both flights + well void gap)
+    // ─────────────────────────────────────────────────────────────────────────────
     const totalLandingW = 2 * stairW + wellGap;
     const gLand = new THREE.BoxGeometry(landRun, landT, totalLandingW);
-    gLand.translate(fl1Run + landRun / 2, halfRise - landT / 2, 0);
+    // Position at exact intermediate elevation fl1Rise
+    gLand.translate(fl1Run + landRun / 2, fl1Rise - landT / 2, -(wellGap / 2) + totalLandingW / 2 - stairW);
 
-    // Flight 2: climbs from halfRise to stairRise in reverse direction
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Flight 2 Solid Profile (climbing from fl1Rise up to stairRise, returning in -X direction)
+    // ─────────────────────────────────────────────────────────────────────────────
     const s2 = new THREE.Shape();
-    s2.moveTo(0, 0);
     const stepT2 = fl2Run / fl2Risers;
-    const stepR2 = halfRise / fl2Risers;
+    const stepR2 = fl2Rise / fl2Risers;
+
+    s2.moveTo(0, 0);
     for (let i = 0; i < fl2Risers; i++) {
-      s2.lineTo(i * stepT2, (i + 1) * stepR2);
-      s2.lineTo((i + 1) * stepT2, (i + 1) * stepR2);
+      const rx = i * stepT2;
+      const ry = (i + 1) * stepR2;
+      s2.lineTo(rx, ry);
+      s2.lineTo((i + 1) * stepT2, ry);
     }
-    s2.lineTo(fl2Run, halfRise - waistT);
+    // Top connection landing extension into the upper floor slab
+    s2.lineTo(fl2Run + topLandRun, fl2Rise);
+    s2.lineTo(fl2Run + topLandRun, fl2Rise - landT);
+    s2.lineTo(fl2Run, fl2Rise - landT);
+    // Waist soffit sloping back to mid landing connection
     s2.lineTo(0, -waistT);
     s2.closePath();
 
     const g2 = new THREE.ExtrudeGeometry(s2, { depth: stairW, bevelEnabled: false });
+    // Rotate 180 degrees so Flight 2 climbs backward toward the starter end
     g2.rotateY(Math.PI);
-    g2.translate(fl1Run, halfRise, wellGap / 2 + stairW);
+    // Translate starting from the mid landing edge fl1Run, at intermediate rise fl1Rise
+    g2.translate(fl1Run, fl1Rise, fl2Z + stairW);
 
     try {
       const merged = BufferGeometryUtils.mergeGeometries([g1, gLand, g2]);
       if (merged) {
+        merged.computeVertexNormals();
         merged.center();
         return merged;
       }
     } catch {
-      // Fall through to single flight on merge error
+      // Fall through on merge exception
     }
   }
 
-  // Single Straight Flight with Top Landing
-  const risers = Math.max(4, riserCount || 14);
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Single Straight Flight with exact risers and top connecting landing
+  // ─────────────────────────────────────────────────────────────────────────────
+  const risers = Math.max(1, riserCount || (flights && Number(flights[0]?.riserCount)) || 14);
   const landLen =
     landings && landings.length > 0 && landings[0]?.length
       ? Number(landings[0].length)
-      : Math.max(0.8, Math.min(1.5, totalRun * 0.25));
-  const flightRun = Math.max(1.5, totalRun - landLen);
+      : Math.max(0.8, Math.min(1.5, totalRun * 0.22));
+  const flightRun = Math.max(1.0, totalRun - landLen);
   const stepT = flightRun / risers;
   const stepR = stairRise / risers;
 
   const s = new THREE.Shape();
   s.moveTo(0, 0);
   for (let i = 0; i < risers; i++) {
-    s.lineTo(i * stepT, (i + 1) * stepR);
-    s.lineTo((i + 1) * stepT, (i + 1) * stepR);
+    const rx = i * stepT;
+    const ry = (i + 1) * stepR;
+    s.lineTo(rx, ry);
+    s.lineTo((i + 1) * stepT, ry);
   }
-  // Top landing platform
+  // Top landing platform connecting to upper floor
   s.lineTo(flightRun + landLen, stairRise);
   s.lineTo(flightRun + landLen, stairRise - landT);
   // Sloped waist soffit
@@ -225,6 +275,7 @@ function createStaircaseGeometry(
   s.closePath();
 
   const geo = new THREE.ExtrudeGeometry(s, { depth: stairW, bevelEnabled: false });
+  geo.computeVertexNormals();
   geo.center();
   return geo;
 }
@@ -259,6 +310,10 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
   const gridGroupRef = useRef<THREE.Group | null>(null);
   const levelsGroupRef = useRef<THREE.Group | null>(null);
   const elementsGroupRef = useRef<THREE.Group | null>(null);
+  const groundGridRef = useRef<THREE.GridHelper | null>(null);
+
+  // Viewport background theme: 'white' (default) or 'black'
+  const [viewportTheme, setViewportTheme] = useState<'white' | 'black'>('white');
 
   // Multi-element selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
@@ -434,8 +489,10 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
 
     // Scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x070b14);
-    scene.fog = new THREE.FogExp2(0x070b14, 0.012);
+    const isWhite = viewportTheme === "white";
+    const bgColor = isWhite ? 0xf8fafc : 0x070b14;
+    scene.background = new THREE.Color(bgColor);
+    scene.fog = new THREE.FogExp2(bgColor, isWhite ? 0.007 : 0.012);
     sceneRef.current = scene;
 
     // Camera
@@ -502,9 +559,15 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
     elementsGroupRef.current = elemsGrp;
 
     // Ground Grid & Base Floor
-    const groundGrid = new THREE.GridHelper(70, 35, 0x0284c7, 0x1e293b);
+    const groundGrid = new THREE.GridHelper(
+      70,
+      35,
+      0x0284c7,
+      isWhite ? 0xcbd5e1 : 0x1e293b,
+    );
     groundGrid.position.y = -0.02;
     scene.add(groundGrid);
+    groundGridRef.current = groundGrid;
 
     // Orbit Camera Update Helper
     const updateCameraPos = () => {
@@ -727,8 +790,32 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
     elements,
     isMultiSelectMode,
     handleToggleElementSelect,
-    handleClearSelection,
   ]);
+
+  // Dynamically update 3D Scene Background & Ground Grid on Theme Toggle
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const isWhite = viewportTheme === "white";
+    const bgColor = isWhite ? 0xf8fafc : 0x070b14;
+    scene.background = new THREE.Color(bgColor);
+    scene.fog = new THREE.FogExp2(bgColor, isWhite ? 0.007 : 0.012);
+
+    if (groundGridRef.current) {
+      scene.remove(groundGridRef.current);
+      groundGridRef.current.geometry.dispose();
+      (groundGridRef.current.material as THREE.Material).dispose();
+      const newGrid = new THREE.GridHelper(
+        70,
+        35,
+        0x0284c7,
+        isWhite ? 0xcbd5e1 : 0x1e293b,
+      );
+      newGrid.position.y = -0.02;
+      scene.add(newGrid);
+      groundGridRef.current = newGrid;
+    }
+  }, [viewportTheme]);
 
   // Reset Camera Helper
   const handleResetCamera = () => {
@@ -1269,7 +1356,18 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
           (typeof el.landingThickness === "number"
             ? el.landingThickness
             : Number(el.landingThickness)) || 0.2;
-        const stairRise = heightM > 0.5 ? heightM : storyHeight || 3.2;
+
+        const baseElev =
+          (el.elevation !== undefined || el.bottomElevation !== undefined
+            ? (el.elevation ?? el.bottomElevation ?? 0)
+            : rawElev) * explodeFactor + ((el.elevationOffset || 0) * explodeFactor);
+
+        const topElev =
+          el.topElevation !== undefined
+            ? el.topElevation * explodeFactor + ((el.elevationOffset || 0) * explodeFactor)
+            : baseElev + storyHeight * explodeFactor;
+
+        const stairRise = Math.max(0.6, topElev - baseElev);
 
         let totalRun = lengthM || 3.6;
         if (coords.isSpan && coords.spanLength > 0.5) {
@@ -1285,6 +1383,10 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
             0,
           ) || 14);
 
+        const stairConfig = el.stairConfiguration || (el.flights && el.flights.length >= 2 ? "DOGLEG_HALF_TURN" : "STRAIGHT");
+        const turnDir = el.turnDirection || "LEFT";
+        const stairwellGap = el.stairwellGap ?? 0.15;
+
         geo = createStaircaseGeometry(
           stairW,
           stairRise,
@@ -1294,23 +1396,32 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
           riserCnt,
           el.flights,
           el.landings,
+          stairConfig,
+          turnDir,
+          stairwellGap,
         );
 
-        posY = floorElevation + stairRise / 2;
+        posY = baseElev + stairRise / 2;
+
+        // Heading / orientation resolution
+        const orient = el.flightOrientation || "NORTH";
+        let baseRotation = 0;
+        if (orient === "EAST") baseRotation = -Math.PI / 2;
+        else if (orient === "SOUTH") baseRotation = Math.PI;
+        else if (orient === "WEST") baseRotation = Math.PI / 2;
 
         if (coords.isSpan) {
           posX = coords.midX - centerOffsetX;
           posZ = coords.midY - centerOffsetZ;
-          rotationY = -coords.angleRad;
+          rotationY = orient === "ALIGN_GRID" ? -coords.angleRad : baseRotation;
         } else if (coords.isArea) {
           posX = coords.midX - centerOffsetX;
           posZ = coords.midY - centerOffsetZ;
-          if (coords.sizeY > coords.sizeX) {
-            rotationY = Math.PI / 2;
-          }
+          rotationY = baseRotation !== 0 ? baseRotation : (coords.sizeY > coords.sizeX ? Math.PI / 2 : 0);
         } else {
           posX = coords.x1 - centerOffsetX;
           posZ = coords.y1 - centerOffsetZ;
+          rotationY = baseRotation;
         }
       } else {
         posX = coords.midX - centerOffsetX;
@@ -1348,11 +1459,16 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
 
       // Highlight outline edge
       const edges = new THREE.EdgesGeometry(geo);
+      const isLight = viewportTheme === "white";
       const edgeMat = new THREE.LineBasicMaterial({
-        color: isSelected ? 0xffffff : isGhosted ? 0x334155 : 0x0f172a,
+        color: isSelected
+          ? (isLight ? 0x0284c7 : 0xffffff)
+          : isGhosted
+            ? (isLight ? 0x94a3b8 : 0x334155)
+            : (isLight ? 0x0f172a : 0x1e293b),
         linewidth: isSelected ? 3 : 1,
         transparent: true,
-        opacity: isSelected ? 1.0 : isGhosted ? 0.15 : 0.7,
+        opacity: isSelected ? 1.0 : isGhosted ? 0.15 : (isLight ? 0.85 : 0.7),
       });
       const line = new THREE.LineSegments(edges, edgeMat);
       mesh.add(line);
@@ -1367,6 +1483,7 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
     selectedIds,
     explodeFactor,
     ghostInactiveLevels,
+    viewportTheme,
     xAxes,
     zAxes,
     xMap,
@@ -1409,8 +1526,9 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
       if (!ctx)
         throw new Error("Could not initialize 2D export canvas context");
 
-      // 1. Dark Blueprint Background
-      ctx.fillStyle = "#070b14";
+      // 1. Blueprint Background (Theme-Aware)
+      const isWhiteTheme = viewportTheme === "white";
+      ctx.fillStyle = isWhiteTheme ? "#f8fafc" : "#070b14";
       ctx.fillRect(0, 0, exportWidth, exportHeight);
 
       // 2. Draw 3D WebGL Scene centered
@@ -1423,21 +1541,23 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
       const projName =
         activeProject?.name || "Structural Quality Management System";
 
-      ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+      ctx.fillStyle = isWhiteTheme
+        ? "rgba(255, 255, 255, 0.95)"
+        : "rgba(15, 23, 42, 0.92)";
       ctx.fillRect(40, 40, 560, 110);
-      ctx.strokeStyle = "#334155";
+      ctx.strokeStyle = isWhiteTheme ? "#cbd5e1" : "#334155";
       ctx.lineWidth = 2;
       ctx.strokeRect(40, 40, 560, 110);
 
-      ctx.fillStyle = "#38bdf8";
+      ctx.fillStyle = isWhiteTheme ? "#0284c7" : "#38bdf8";
       ctx.font = "bold 13px sans-serif";
       ctx.fillText(projName.toUpperCase(), 58, 68);
 
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = isWhiteTheme ? "#0f172a" : "#ffffff";
       ctx.font = "bold 20px sans-serif";
       ctx.fillText("3D BIM STRUCTURAL MODEL TWIN", 58, 96);
 
-      ctx.fillStyle = "#94a3b8";
+      ctx.fillStyle = isWhiteTheme ? "#475569" : "#94a3b8";
       ctx.font = "normal 13px sans-serif";
       ctx.fillText(
         `Floor Level: ${currentLevelName} | Filter: ${filterType} | Elements: ${elements.length}`,
@@ -1445,7 +1565,7 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         122,
       );
 
-      ctx.fillStyle = "#64748b";
+      ctx.fillStyle = isWhiteTheme ? "#64748b" : "#64748b";
       ctx.font = "normal 11px monospace";
       ctx.fillText(`Captured: ${new Date().toLocaleString()}`, 58, 140);
 
@@ -1455,9 +1575,11 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
       const legendX = exportWidth - legendW - 40;
       const legendY = exportHeight - legendH - 40;
 
-      ctx.fillStyle = "rgba(15, 23, 42, 0.94)";
+      ctx.fillStyle = isWhiteTheme
+        ? "rgba(255, 255, 255, 0.96)"
+        : "rgba(15, 23, 42, 0.94)";
       ctx.fillRect(legendX, legendY, legendW, legendH);
-      ctx.strokeStyle = "#0284c7";
+      ctx.strokeStyle = isWhiteTheme ? "#cbd5e1" : "#0284c7";
       ctx.lineWidth = 2;
       ctx.strokeRect(legendX, legendY, legendW, legendH);
 
@@ -1497,7 +1619,7 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         if (item.isBox) {
           ctx.fillStyle = item.color;
           ctx.fillRect(itemX, itemY - 11, 16, 16);
-          ctx.strokeStyle = "#ffffff";
+          ctx.strokeStyle = isWhiteTheme ? "#0f172a" : "#ffffff";
           ctx.lineWidth = 2;
           ctx.strokeRect(itemX, itemY - 11, 16, 16);
         } else {
@@ -1505,12 +1627,18 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
           ctx.beginPath();
           ctx.arc(itemX + 8, itemY - 3, 8, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = "#0f172a";
+          ctx.strokeStyle = isWhiteTheme ? "#cbd5e1" : "#0f172a";
           ctx.lineWidth = 2;
           ctx.stroke();
         }
 
-        ctx.fillStyle = item.isBox ? "#38bdf8" : "#e2e8f0";
+        ctx.fillStyle = item.isBox
+          ? isWhiteTheme
+            ? "#0284c7"
+            : "#38bdf8"
+          : isWhiteTheme
+            ? "#1e293b"
+            : "#e2e8f0";
         ctx.font = item.isBox
           ? "bold 12px sans-serif"
           : "normal 12px sans-serif";
@@ -1676,6 +1804,31 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
               <span className="px-1.5 py-0.2 rounded-full bg-cyan-500 text-slate-950 font-black text-[10px]">
                 {selectedIds.size}
               </span>
+            )}
+          </button>
+
+          {/* Viewport Background Theme Toggle (White / Black) */}
+          <button
+            onClick={() =>
+              setViewportTheme((prev) => (prev === "white" ? "black" : "white"))
+            }
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-bold transition border ${
+              viewportTheme === "white"
+                ? "bg-white text-slate-900 border-slate-300 shadow-md hover:bg-slate-100"
+                : "bg-slate-900/90 text-amber-300 border-slate-700 hover:text-amber-200"
+            }`}
+            title="Toggle Viewport Theme (Default Studio White vs. CAD Dark Mode)"
+          >
+            {viewportTheme === "white" ? (
+              <>
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                <span>White View</span>
+              </>
+            ) : (
+              <>
+                <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Black View</span>
+              </>
             )}
           </button>
 

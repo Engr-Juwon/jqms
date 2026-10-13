@@ -261,6 +261,14 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   ]);
   const [landingThickness, setLandingThickness] = useState<number>(0.2);
   const [treadWidth, setTreadWidth] = useState<number>(0.28);
+  const [stairConfiguration, setStairConfiguration] = useState<
+    'STRAIGHT' | 'DOGLEG_HALF_TURN' | 'QUARTER_TURN_L' | 'OPEN_WELL'
+  >('DOGLEG_HALF_TURN');
+  const [turnDirection, setTurnDirection] = useState<'LEFT' | 'RIGHT'>('LEFT');
+  const [stairwellGap, setStairwellGap] = useState<number>(0.15);
+  const [flightOrientation, setFlightOrientation] = useState<
+    'NORTH' | 'SOUTH' | 'EAST' | 'WEST' | 'ALIGN_GRID'
+  >('NORTH');
   const [stairViewMode, setStairViewMode] = useState<'plan' | 'section'>('plan');
   const [stairDirection, setStairDirection] = useState<'UP' | 'DOWN'>('UP');
 
@@ -387,6 +395,15 @@ export const ElementModal: React.FC<ElementModalProps> = ({
           : 0.2,
       );
       setTreadWidth(editingElement.treadWidth ?? 0.28);
+      setStairConfiguration(
+        editingElement.stairConfiguration ||
+          (editingElement.flights && editingElement.flights.length >= 2
+            ? 'DOGLEG_HALF_TURN'
+            : 'STRAIGHT')
+      );
+      setTurnDirection(editingElement.turnDirection || 'LEFT');
+      setStairwellGap(editingElement.stairwellGap ?? 0.15);
+      setFlightOrientation(editingElement.flightOrientation || 'NORTH');
       if (editingElement.flights && editingElement.flights.length > 0) {
         setFlights(editingElement.flights);
       }
@@ -1022,6 +1039,26 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       treadWidth: elementType === 'STAIR' ? treadWidth : undefined,
       flights: elementType === 'STAIR' ? flights : undefined,
       landings: elementType === 'STAIR' ? landings : undefined,
+      stairConfiguration: elementType === 'STAIR' ? stairConfiguration : undefined,
+      turnDirection: elementType === 'STAIR' ? turnDirection : undefined,
+      stairwellGap: elementType === 'STAIR' ? stairwellGap : undefined,
+      flightOrientation: elementType === 'STAIR' ? flightOrientation : undefined,
+      calculatedRiserHeight:
+        elementType === 'STAIR'
+          ? (() => {
+              const totalR = flights.reduce((s, f) => s + (Number(f.riserCount) || 0), 0);
+              return totalR > 0 ? (height || 3.0) / totalR : 0.175;
+            })()
+          : undefined,
+      pitchAngle:
+        elementType === 'STAIR'
+          ? (() => {
+              const totalR = flights.reduce((s, f) => s + (Number(f.riserCount) || 0), 0);
+              const rH = totalR > 0 ? (height || 3.0) / totalR : 0.175;
+              const tW = treadWidth || 0.28;
+              return parseFloat(((Math.atan2(rH, tW) * 180) / Math.PI).toFixed(1));
+            })()
+          : undefined,
     };
 
     return payload;
@@ -3018,6 +3055,166 @@ export const ElementModal: React.FC<ElementModalProps> = ({
             {/* ─── STAIR Profile ─── */}
             {elementType === 'STAIR' && (
               <div className="space-y-4">
+                {/* Configuration Selector & Code Validation Summary */}
+                <div className="p-3.5 bg-slate-50 dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2.5">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Staircase Configuration & Topology
+                      </span>
+                      <p className="text-[11px] text-slate-500">
+                        Define structural arrangement, turn geometry, and run orientation
+                      </p>
+                    </div>
+
+                    {/* Code Compliance pill */}
+                    {(() => {
+                      const totalR = flights.reduce((s, f) => s + (Number(f.riserCount) || 0), 0) || 1;
+                      const storyH = height || 3.0;
+                      const rH_mm = (storyH / totalR) * 1000;
+                      const tW_mm = (treadWidth || 0.28) * 1000;
+                      const pitch = (Math.atan2(rH_mm, tW_mm) * 180) / Math.PI;
+                      const rule2RG = 2 * rH_mm + tW_mm; // Ideal: 600 - 640mm (BS 5395 / IBC)
+                      const isCompliant = rH_mm >= 140 && rH_mm <= 185 && pitch <= 38;
+
+                      return (
+                        <div
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold ${
+                            isCompliant
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                          }`}
+                        >
+                          <span>
+                            {totalR} Risers @ {rH_mm.toFixed(0)}mm · Pitch {pitch.toFixed(1)}°
+                          </span>
+                          <span className="text-[10px] uppercase font-sans font-black px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10">
+                            {isCompliant ? 'Code Compliant' : 'Steep / Review'}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Topology Buttons */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      {
+                        key: 'DOGLEG_HALF_TURN',
+                        label: 'Dogleg Return',
+                        desc: '180° Half-turn with mid-landing',
+                      },
+                      {
+                        key: 'STRAIGHT',
+                        label: 'Straight Flight',
+                        desc: 'Single linear run with top landing',
+                      },
+                      {
+                        key: 'QUARTER_TURN_L',
+                        label: 'Quarter-Turn (L)',
+                        desc: '90° Turn with corner landing',
+                      },
+                      {
+                        key: 'OPEN_WELL',
+                        label: 'Open Well',
+                        desc: 'Dogleg with wide central void',
+                      },
+                    ].map((cfg) => (
+                      <button
+                        key={cfg.key}
+                        type="button"
+                        onClick={() => {
+                          setStairConfiguration(cfg.key as any);
+                          if (cfg.key === 'STRAIGHT' && flights.length > 1) {
+                            setFlights([flights[0]]);
+                          } else if (
+                            (cfg.key === 'DOGLEG_HALF_TURN' || cfg.key === 'OPEN_WELL') &&
+                            flights.length < 2
+                          ) {
+                            setFlights([
+                              flights[0] || { id: '1', length: '2.8', riserCount: '8' },
+                              { id: '2', length: '2.8', riserCount: '8' },
+                            ]);
+                            if (landings.length === 0) {
+                              setLandings([{ id: '1', length: '1.2' }]);
+                            }
+                          }
+                        }}
+                        className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
+                          stairConfiguration === cfg.key
+                            ? 'bg-brand-50 dark:bg-brand-500/10 border-brand-500 text-brand-700 dark:text-brand-300 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                        }`}
+                      >
+                        <span className="text-xs font-bold">{cfg.label}</span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          {cfg.desc}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Orientation, Turn Direction & Lightwell Gap Controls */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Turn Direction (Return Flight)
+                      </label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setTurnDirection('LEFT')}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition ${
+                            turnDirection === 'LEFT'
+                              ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                          }`}
+                        >
+                          ↺ Left Turn
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTurnDirection('RIGHT')}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition ${
+                            turnDirection === 'RIGHT'
+                              ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                          }`}
+                        >
+                          ↻ Right Turn
+                        </button>
+                      </div>
+                    </div>
+
+                    <SmartField
+                      label="Stairwell Void Gap"
+                      unit="m"
+                      type="number"
+                      step="0.01"
+                      value={stairwellGap}
+                      onChange={(v) => setStairwellGap(Number(v))}
+                    />
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Run Orientation Heading
+                      </label>
+                      <select
+                        value={flightOrientation}
+                        onChange={(e) => setFlightOrientation(e.target.value as any)}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs focus:outline-none focus:border-brand-500 font-mono"
+                      >
+                        <option value="NORTH">North (↑ Forward)</option>
+                        <option value="SOUTH">South (↓ Reverse)</option>
+                        <option value="EAST">East (→ Rightward)</option>
+                        <option value="WEST">West (← Leftward)</option>
+                        <option value="ALIGN_GRID">Align with Grid Span Axis</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Primary Dimension Fields */}
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <SmartField
                     label="Stair Flight Width"
@@ -3256,10 +3453,13 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                             const scaleX = 260 / Math.max(maxRun, 3.0);
                             const fl1W_px = 54;
                             const fl2W_px = 54;
-                            const wellGap_px = 12;
+                            const wellGap_px = Math.max(8, Math.min(26, (stairwellGap || 0.15) * 80));
                             const originX = 55;
-                            const fl1Y = 110;
-                            const fl2Y = fl1Y - wellGap_px - fl2W_px;
+                            // If turnDirection is LEFT: Flight 1 is at bottom (higher Y), Flight 2 is at top (lower Y)
+                            // If turnDirection is RIGHT: Flight 1 is at top (lower Y), Flight 2 is at bottom (higher Y)
+                            const isLeftTurn = turnDirection === 'LEFT';
+                            const fl1Y = isLeftTurn ? 112 : 50;
+                            const fl2Y = isLeftTurn ? fl1Y - wellGap_px - fl2W_px : fl1Y + fl1W_px + wellGap_px;
 
                             const fl1Len_px = fl1Len * scaleX;
                             const fl2Len_px = fl2Len * scaleX;
@@ -3278,10 +3478,10 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                                   <line key={`f1-t-${i}`} x1={originX + (i + 1) * stepW1} y1={fl1Y} x2={originX + (i + 1) * stepW1} y2={fl1Y + fl1W_px} stroke="#10b98180" strokeWidth="1.2" />
                                 ))}
 
-                                {/* Intermediate Landing Box */}
+                                {/* Intermediate Landing Box spanning both flights + well gap */}
                                 <rect
                                   x={landingX}
-                                  y={fl2Y}
+                                  y={Math.min(fl1Y, fl2Y)}
                                   width={landLen_px}
                                   height={fl1W_px + wellGap_px + fl2W_px}
                                   fill="#6366f125"
@@ -3291,26 +3491,26 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                                 />
                                 <rect
                                   x={landingX}
-                                  y={fl2Y}
+                                  y={Math.min(fl1Y, fl2Y)}
                                   width={landLen_px}
                                   height={fl1W_px + wellGap_px + fl2W_px}
                                   fill="url(#stair-landing-hatch)"
                                 />
 
-                                {/* Flight 2 Outer Box (Returning leftward) */}
+                                {/* Flight 2 Outer Box (Returning) */}
                                 <rect x={originX} y={fl2Y} width={fl2Len_px} height={fl2W_px} fill="#10b98120" stroke="#10b981" strokeWidth="2" rx="2" />
                                 {/* Flight 2 Tread Lines */}
                                 {Array.from({ length: fl2Risers - 1 }).map((_, i) => (
                                   <line key={`f2-t-${i}`} x1={originX + (i + 1) * stepW2} y1={fl2Y} x2={originX + (i + 1) * stepW2} y2={fl2Y + fl2W_px} stroke="#10b98180" strokeWidth="1.2" />
                                 ))}
 
-                                {/* Stairwell Gap divider */}
-                                <line x1={originX} y1={fl1Y - wellGap_px / 2} x2={landingX} y2={fl1Y - wellGap_px / 2} stroke="#475569" strokeWidth="1" strokeDasharray="3 3" />
+                                {/* Stairwell Gap divider & void indicator */}
+                                <line x1={originX} y1={(fl1Y + (isLeftTurn ? fl1Y - wellGap_px : fl1Y + fl1W_px + wellGap_px / 2)) / 2} x2={landingX} y2={(fl1Y + (isLeftTurn ? fl1Y - wellGap_px : fl1Y + fl1W_px + wellGap_px / 2)) / 2} stroke="#475569" strokeWidth="1" strokeDasharray="3 3" />
 
-                                {/* Walkline Arrow */}
+                                {/* Walkline Arrow with turn */}
                                 <circle cx={originX + 12} cy={fl1Y + fl1W_px / 2} r="4" fill="#38bdf8" />
                                 <path
-                                  d={`M ${originX + 12} ${fl1Y + fl1W_px / 2} L ${landingX + landLen_px / 2} ${fl1Y + fl1W_px / 2} Q ${landingX + landLen_px * 0.8} ${(fl1Y + fl2Y + fl2W_px) / 2} ${landingX + landLen_px / 2} ${fl2Y + fl2W_px / 2} L ${originX + 18} ${fl2Y + fl2W_px / 2}`}
+                                  d={`M ${originX + 12} ${fl1Y + fl1W_px / 2} L ${landingX + landLen_px / 2} ${fl1Y + fl1W_px / 2} Q ${landingX + landLen_px * 0.85} ${(fl1Y + fl2Y + fl2W_px) / 2} ${landingX + landLen_px / 2} ${fl2Y + fl2W_px / 2} L ${originX + 18} ${fl2Y + fl2W_px / 2}`}
                                   fill="none"
                                   stroke="#38bdf8"
                                   strokeWidth="1.8"
@@ -3320,13 +3520,13 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 
                                 {/* Direction text */}
                                 <text x={originX + fl1Len_px / 2} y={fl1Y + fl1W_px / 2 - 8} fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
-                                  {stairDirection === 'UP' ? 'UP →' : '← DOWN'} (Flight 1 · {fl1Risers} Risers)
+                                  {stairDirection === 'UP' ? 'UP →' : '← DOWN'} (Flight 1 · {fl1Risers}R)
                                 </text>
                                 <text x={originX + fl2Len_px / 2} y={fl2Y + fl2W_px / 2 + 14} fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
-                                  {stairDirection === 'UP' ? '← UP' : 'DOWN →'} (Flight 2 · {fl2Risers} Risers)
+                                  {stairDirection === 'UP' ? '← UP' : 'DOWN →'} (Flight 2 · {fl2Risers}R · {turnDirection} TURN)
                                 </text>
-                                <text x={landingX + landLen_px / 2} y={fl1Y - wellGap_px / 2 + 3} fill="#a5b4fc" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
-                                  HALF LANDING
+                                <text x={landingX + landLen_px / 2} y={Math.min(fl1Y, fl2Y) + (fl1W_px + wellGap_px + fl2W_px) / 2 + 3} fill="#a5b4fc" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                                  MID LANDING
                                 </text>
 
                                 {/* Dimensions: Width */}

@@ -478,6 +478,12 @@ export interface StructuralElement {
   landingThickness?: string | number;
   flights?: any[];
   landings?: any[];
+  stairConfiguration?: 'STRAIGHT' | 'DOGLEG_HALF_TURN' | 'QUARTER_TURN_L' | 'OPEN_WELL';
+  turnDirection?: 'LEFT' | 'RIGHT'; // Anti-clockwise vs Clockwise return
+  stairwellGap?: number; // Central lightwell gap between flights (meters)
+  flightOrientation?: 'NORTH' | 'SOUTH' | 'EAST' | 'WEST' | 'ALIGN_GRID';
+  calculatedRiserHeight?: number;
+  pitchAngle?: number;
 
   // Planning & Casting
   plannedCastingDate?: string;

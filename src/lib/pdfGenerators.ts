@@ -2422,6 +2422,7 @@ export interface WeeklyReportPrintOptions {
   includeNcrs?: boolean; // granular toggle
   includeSiteComments?: boolean; // granular toggle
   includeSiteInstructions?: boolean; // default true
+  revisionNumber?: string;
 }
 
 
@@ -2431,6 +2432,14 @@ export function generateWeeklyReportPDF(
   company: Partial<Company> = {},
   options?: WeeklyReportPrintOptions,
 ): void {
+  const rawRevision =
+    options?.revisionNumber ||
+    report.revisionNumber ||
+    (report as any)?.revision;
+  const revisionText =
+    rawRevision && String(rawRevision).trim().length > 0
+      ? String(rawRevision).trim()
+      : "Rev 1.0 (Final Submission)";
   const companyName = company.name || "Collection Developments LTD";
   const companyLegalName =
     company.legalName || (company as any)?.companyName || "Collection Developments Limited";
@@ -2681,7 +2690,7 @@ export function generateWeeklyReportPDF(
           </div>
         </div>
         <div style="font-size: 8.5px; font-weight: 800; color: #64748b; letter-spacing: 0.5px; text-transform: uppercase;">
-          <span style="color: #0f172a;">${projectName.toUpperCase()}</span> &nbsp;|&nbsp; <span style="color: ${theme.accentColor}; font-weight: 800;">${theme.name.toUpperCase()}</span> &nbsp;|&nbsp; <span style="color: #94a3b8;">CONFIDENTIAL</span>
+          <span style="color: #0f172a;">${projectName.toUpperCase()}</span> &nbsp;|&nbsp; <span style="color: #94a3b8;">CONFIDENTIAL</span>
         </div>
       </div>
       <div class="pdf-header-rule" style="background: ${theme.ruleColor}; height: 2px;"></div>
@@ -2692,7 +2701,7 @@ export function generateWeeklyReportPDF(
   const renderFooter = (slideNumber: number) => `
     <div class="pdf-footer" style="border-top: 1px solid ${theme.cardBorder};">
       <div style="font-size: 7.5px; color: #94a3b8; font-weight: 600;">
-        Compiled By: <strong style="color: #475569;">${compilerName} (${compilerRole})</strong> &nbsp;|&nbsp; ISO 9001:2015 Quality Management System &nbsp;|&nbsp; <span style="color: ${theme.accentColor}; font-weight: 700;">Theme: ${theme.name}</span>
+        Compiled By: <strong style="color: #475569;">${compilerName} (${compilerRole})</strong> &nbsp;|&nbsp; ISO 9001:2015 Quality Management System
       </div>
       <div class="pdf-slide-badge" style="background: ${theme.badgeBg}; color: ${theme.badgeTextColor}; border: 1px solid ${theme.badgeBorder}; border-radius: ${theme.cardRadius};">
         SLIDE ${String(slideNumber).padStart(2, "0")}
@@ -2753,12 +2762,6 @@ export function generateWeeklyReportPDF(
           <!-- Date Range Pill -->
           <div style="display: inline-block; background: #FFFFFF; border: 1.5px solid ${theme.accentColor}; color: ${theme.accentDark}; font-size: 10.5px; font-weight: 800; padding: 6px 22px; border-radius: 9999px; letter-spacing: 0.5px; text-transform: uppercase;">
             ${startDateStr} &nbsp;TO&nbsp; ${endDateStr}
-          </div>
-
-          <div style="margin-top: 10px;">
-            <span style="display: inline-block; font-size: 8px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.8px;">
-              Theme: ${theme.name} • ${theme.tagline}
-            </span>
           </div>
         </div>
 
@@ -3426,7 +3429,50 @@ export function generateWeeklyReportPDF(
               <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; overflow: hidden; background: #ffffff;">
                 <img src="${layoutImg}" style="max-width: 100%; max-height: 100%; object-fit: contain;" alt="${layoutDrawingTitle}" />
               </div>
-              <div style="background: #0f172a; border-left: 5px solid #ea580c; color: #ffffff; padding: 8px 14px; font-size: 8px; font-weight: 800; display: flex; justify-content: space-between; align-items: center;">
+
+              <!-- Integrated Spatial Blueprint Legend -->
+              <div style="background: #f8fafc; border-top: 1.5px solid #e2e8f0; padding: 6px 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="display: inline-block; background: #0284c7; color: #ffffff; font-size: 7.5px; font-weight: 900; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.5px; text-transform: uppercase;">
+                    SPATIAL LEGEND
+                  </span>
+                  <span style="font-size: 7.5px; font-weight: 700; color: #475569; text-transform: uppercase;">
+                    ${typeLabel.toUpperCase()} SURVEILLANCE KEY:
+                  </span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <span style="width: 9px; height: 9px; background: #fef3c7; border: 1.5px solid #d97706; border-radius: 2px; display: inline-block;"></span>
+                    <span style="font-size: 7px; font-weight: 700; color: #334155;">Pending</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <span style="width: 9px; height: 9px; background: #e0e7ff; border: 1.5px solid #4338ca; border-radius: 2px; display: inline-block;"></span>
+                    <span style="font-size: 7px; font-weight: 700; color: #334155;">Rebar Active</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <span style="width: 9px; height: 9px; background: #f3e8ff; border: 1.5px solid #7e22ce; border-radius: 2px; display: inline-block;"></span>
+                    <span style="font-size: 7px; font-weight: 700; color: #334155;">Formwork Active</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <span style="width: 9px; height: 9px; background: #fef08a; border: 1.5px solid #ca8a04; border-radius: 2px; display: inline-block;"></span>
+                    <span style="font-size: 7px; font-weight: 700; color: #334155;">Ready Cast</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <span style="width: 9px; height: 9px; background: #cffaff; border: 1.5px solid #0891b2; border-radius: 2px; display: inline-block;"></span>
+                    <span style="font-size: 7px; font-weight: 700; color: #334155;">Concreted</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <span style="width: 9px; height: 9px; background: #d1fae5; border: 1.5px solid #059669; border-radius: 2px; display: inline-block;"></span>
+                    <span style="font-size: 7px; font-weight: 700; color: #059669;">QA Approved</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <span style="width: 9px; height: 9px; background: #fee2e2; border: 1.5px solid #dc2626; border-radius: 2px; display: inline-block;"></span>
+                    <span style="font-size: 7px; font-weight: 700; color: #dc2626;">QA Rejected</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="background: #0f172a; border-left: 5px solid #ea580c; color: #ffffff; padding: 7px 14px; font-size: 8px; font-weight: 800; display: flex; justify-content: space-between; align-items: center;">
                 <span style="letter-spacing: 0.5px; text-transform: uppercase;">
                   ${layoutDrawingTitle || `${typeLabel.toUpperCase()} LAYOUT`} &nbsp;|&nbsp; VERIFIED AS-BUILT SURVEILLANCE OVERLAY
                 </span>
@@ -3549,7 +3595,9 @@ export function generateWeeklyReportPDF(
               <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(d.deliveryDate || d.date) || "—"}</td>
               <td style="font-weight: 800; color: #0f172a;">${d.materialDescription || d.materialName || d.name || "Material"}</td>
               <td>${d.supplier || d.supplierName || "—"}</td>
-              <td style="font-family: monospace; font-weight: 700;">${total} ${unit} [${acc} Acc / ${rej} Rej]</td>
+              <td style="font-family: monospace; font-weight: 700; text-align: right;">${total} <span style="font-size: 7px; color: #64748b; font-weight: normal;">${unit}</span></td>
+              <td style="font-family: monospace; font-weight: 800; text-align: right; color: #059669;">${acc} <span style="font-size: 7px; color: #10b981; font-weight: normal;">${unit}</span></td>
+              <td style="font-family: monospace; font-weight: 800; text-align: right; color: ${rej > 0 ? "#dc2626" : "#94a3b8"};">${rej} <span style="font-size: 7px; color: ${rej > 0 ? "#ef4444" : "#cbd5e1"}; font-weight: normal;">${unit}</span></td>
               <td style="text-align: center; font-weight: 800; color: ${badgeColor}; font-size: 7.5px;">${st}</td>
             </tr>
           `;
@@ -3557,8 +3605,8 @@ export function generateWeeklyReportPDF(
           .join("")
       : `
         <tr>
-          <td colspan="6" style="text-align: center; color: #64748b; padding: 24px;">
-            Zero material rejections recorded during this surveillance period.
+          <td colspan="8" style="text-align: center; color: #64748b; padding: 24px;">
+            Zero material deliveries recorded during this surveillance period.
           </td>
         </tr>
       `;
@@ -3571,12 +3619,14 @@ export function generateWeeklyReportPDF(
         <table class="data-table" style="margin-top: 8px;">
           <thead>
             <tr>
-              <th style="width: 5%; text-align: center;">S/N</th>
-              <th style="width: 14%;">DELIVERY DATE</th>
-              <th style="width: 33%;">MATERIAL DESCRIPTION</th>
-              <th style="width: 18%;">SOURCE / SUPPLIER</th>
-              <th style="width: 18%;">QUANTITY</th>
-              <th style="width: 12%; text-align: center;">QC ADMISSION STATUS</th>
+              <th style="width: 4%; text-align: center;">S/N</th>
+              <th style="width: 12%;">DELIVERY DATE</th>
+              <th style="width: 27%;">MATERIAL DESCRIPTION</th>
+              <th style="width: 17%;">SOURCE / SUPPLIER</th>
+              <th style="width: 11%; text-align: right;">DELIVERED</th>
+              <th style="width: 11%; text-align: right; color: #10b981;">APPROVED</th>
+              <th style="width: 8%; text-align: right; color: #ef4444;">REJECTED</th>
+              <th style="width: 10%; text-align: center;">QC STATUS</th>
             </tr>
           </thead>
           <tbody>
@@ -3911,7 +3961,7 @@ export function generateWeeklyReportPDF(
             </div>
             <div>
               <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Revision Control</p>
-              <p style="font-weight: 700; color: #1e293b; margin: 0;">Rev 1.0 (Final Submission)</p>
+              <p style="font-weight: 700; color: #1e293b; margin: 0;">${revisionText}</p>
             </div>
           </div>
         </div>

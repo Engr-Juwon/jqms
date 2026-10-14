@@ -228,6 +228,9 @@ export const WeeklyReportDetail: React.FC = () => {
     "SIGN_WEEKLY_REPORT",
   );
 
+  const [revisionNumber, setRevisionNumber] = useState<string>(
+    "Rev 1.0 (Final Submission)",
+  );
   const [executiveSummary, setExecutiveSummary] = useState("");
   const [synopsis, setSynopsis] = useState("");
   const [highlights, setHighlights] = useState("");
@@ -308,6 +311,11 @@ export const WeeklyReportDetail: React.FC = () => {
         }
 
         setReport(data);
+        if (data.revisionNumber) {
+          setRevisionNumber(data.revisionNumber);
+        } else if ((data as any).revision) {
+          setRevisionNumber((data as any).revision);
+        }
         setExecutiveSummary(data.executiveSummary || "");
         setSynopsis(data.synopsis || "");
         setHighlights(data.highlights || "");
@@ -1420,6 +1428,7 @@ export const WeeklyReportDetail: React.FC = () => {
 
       const updatedReport: WeeklyReport = {
         ...report,
+        revisionNumber,
         executiveSummary,
         synopsis,
         highlights,
@@ -2081,6 +2090,11 @@ export const WeeklyReportDetail: React.FC = () => {
                     </button>
                   </div>
 
+                  {/* Revision Badge */}
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800/60 text-xs font-mono font-bold text-orange-700 dark:text-orange-300" title="Document Revision Control">
+                    <span>{revisionNumber}</span>
+                  </div>
+
                   {/* Document Title */}
                   <h1 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight truncate max-w-xs sm:max-w-sm">
                     {report.title || "Weekly Quality Assurance Dossier"}
@@ -2291,6 +2305,8 @@ export const WeeklyReportDetail: React.FC = () => {
             setColumnLayoutImg={setColumnLayoutImg}
             slabImg={slabImg}
             setslabImg={setslabImg}
+            revisionNumber={revisionNumber}
+            setRevisionNumber={setRevisionNumber}
             mepClearance={mepClearance}
             setMepClearance={setMepClearance}
             pictorialUrls={pictorialUrls}
@@ -4735,6 +4751,22 @@ export const WeeklyReportDetail: React.FC = () => {
                         </p>
                       </div>
                     ) : null}
+
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                        Revision Control (Back Sign-Off Display)
+                      </label>
+                      <input
+                        type="text"
+                        value={revisionNumber}
+                        onChange={(e) => setRevisionNumber(e.target.value)}
+                        placeholder="Rev 1.0 (Final Submission)"
+                        className="w-full sm:max-w-xs px-3 py-1.5 text-xs font-mono font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                      />
+                      <span className="text-[9px] text-slate-400 block mt-0.5">
+                        Printed on the final summary card of this dossier.
+                      </span>
+                    </div>
                   </div>
 
                   <div className="flex flex-col justify-center items-start md:items-end border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800 pt-4 md:pt-0 md:pl-6">
@@ -5049,6 +5081,26 @@ export const WeeklyReportDetail: React.FC = () => {
                     </label>
                   </div>
                 </div>
+
+                {/* Revision Control Selector */}
+                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <FileText size={13} className="text-orange-500" />
+                      <span>4. Document Revision Control (Last Page)</span>
+                    </label>
+                  </div>
+                  <input
+                    type="text"
+                    value={revisionNumber}
+                    onChange={(e) => setRevisionNumber(e.target.value)}
+                    placeholder="e.g. Rev 1.0 (Final Submission) or Rev 02"
+                    className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-mono font-bold focus:border-orange-500 focus:outline-none transition-colors"
+                  />
+                  <p className="text-[10px] text-slate-400 italic px-1">
+                    Sets the revision identifier stamped on the back sign-off page of the final quality dossier.
+                  </p>
+                </div>
               </div>
 
               {/* Modal Footer */}
@@ -5085,7 +5137,7 @@ export const WeeklyReportDetail: React.FC = () => {
                     type="button"
                     onClick={() => {
                       generateWeeklyReportPDF(
-                        { ...report, templateId: selectedTemplate },
+                        { ...report, templateId: selectedTemplate, revisionNumber },
                         activeProject || {},
                         company || {},
                         {
@@ -5096,6 +5148,7 @@ export const WeeklyReportDetail: React.FC = () => {
                           includeNcrs: printIncludeNcrs,
                           includeSiteComments: printIncludeComments,
                           includeSiteInstructions: printIncludeSIs,
+                          revisionNumber,
                         },
                       );
                       setIsPrintModalOpen(false);

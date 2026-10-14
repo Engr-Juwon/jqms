@@ -702,6 +702,9 @@ export const WeeklyReports: React.FC = () => {
                       includeNcrs: printIncludeNcrs,
                       includeSiteComments: printIncludeComments,
                       includeSiteInstructions: printIncludeSIs,
+                      revisionNumber:
+                        selectedReportForPrint.revisionNumber ||
+                        (selectedReportForPrint as any).revision,
                     },
                   );
                   setSelectedReportForPrint(null);

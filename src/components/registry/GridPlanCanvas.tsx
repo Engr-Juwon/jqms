@@ -603,100 +603,102 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
       ctx.font = "normal 11px monospace";
       ctx.fillText(`Captured: ${new Date().toLocaleString()}`, 58, 140);
 
-      // 4. Draw Comprehensive Layer Legend (Bottom-Right)
-      const legendW = 440;
-      const legendH = activeLayer === "STATUS" ? 260 : 180;
-      const legendX = exportWidth - legendW - 40;
-      const legendY = exportHeight - legendH - 40;
+      // 4. Draw Comprehensive Layer Legend (Bottom-Right, only if showLegend is enabled)
+      if (showLegend) {
+        const legendW = 440;
+        const legendH = activeLayer === "STATUS" ? 260 : 180;
+        const legendX = exportWidth - legendW - 40;
+        const legendY = exportHeight - legendH - 40;
 
-      ctx.fillStyle = isLight
-        ? "rgba(255, 255, 255, 0.96)"
-        : "rgba(15, 23, 42, 0.94)";
-      ctx.fillRect(legendX, legendY, legendW, legendH);
-      ctx.strokeStyle = isLight ? "#0284c7" : "#0284c7";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(legendX, legendY, legendW, legendH);
+        ctx.fillStyle = isLight
+          ? "rgba(255, 255, 255, 0.96)"
+          : "rgba(15, 23, 42, 0.94)";
+        ctx.fillRect(legendX, legendY, legendW, legendH);
+        ctx.strokeStyle = isLight ? "#0284c7" : "#0284c7";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(legendX, legendY, legendW, legendH);
 
-      // Legend Header
-      ctx.fillStyle = "#0284c7";
-      ctx.fillRect(legendX, legendY, legendW, 36);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 14px sans-serif";
-      ctx.fillText(
-        `SPATIAL PLAN LEGEND (${activeLayer} OVERLAY)`,
-        legendX + 16,
-        legendY + 24,
-      );
+        // Legend Header
+        ctx.fillStyle = "#0284c7";
+        ctx.fillRect(legendX, legendY, legendW, 36);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 14px sans-serif";
+        ctx.fillText(
+          `SPATIAL PLAN LEGEND (${activeLayer} OVERLAY)`,
+          legendX + 16,
+          legendY + 24,
+        );
 
-      if (activeLayer === "STATUS") {
-        const statusEntries = [
-          { label: "Pending Inspection", color: "#d97706", fill: "#fef3c7" },
-          { label: "Rebar in Progress", color: "#4338ca", fill: "#e0e7ff" },
-          { label: "Formwork in Progress", color: "#7e22ce", fill: "#f3e8ff" },
-          { label: "Ready for Casting", color: "#ca8a04", fill: "#fef08a" },
-          { label: "Rebar Inspected", color: "#2563eb", fill: "#dbeafe" },
-          { label: "Concrete Poured", color: "#0891b2", fill: "#cffaff" },
-          { label: "QA Approved", color: "#059669", fill: "#d1fae5" },
-          { label: "QA Rejected", color: "#dc2626", fill: "#fee2e2" },
-        ];
+        if (activeLayer === "STATUS") {
+          const statusEntries = [
+            { label: "Pending Inspection", color: "#d97706", fill: "#fef3c7" },
+            { label: "Rebar in Progress", color: "#4338ca", fill: "#e0e7ff" },
+            { label: "Formwork in Progress", color: "#7e22ce", fill: "#f3e8ff" },
+            { label: "Ready for Casting", color: "#ca8a04", fill: "#fef08a" },
+            { label: "Rebar Inspected", color: "#2563eb", fill: "#dbeafe" },
+            { label: "Concrete Poured", color: "#0891b2", fill: "#cffaff" },
+            { label: "QA Approved", color: "#059669", fill: "#d1fae5" },
+            { label: "QA Rejected", color: "#dc2626", fill: "#fee2e2" },
+          ];
 
-        statusEntries.forEach((item, idx) => {
-          const col = idx < 4 ? 0 : 1;
-          const row = idx < 4 ? idx : idx - 4;
-          const itemX = legendX + 18 + col * 210;
-          const itemY = legendY + 58 + row * 45;
+          statusEntries.forEach((item, idx) => {
+            const col = idx < 4 ? 0 : 1;
+            const row = idx < 4 ? idx : idx - 4;
+            const itemX = legendX + 18 + col * 210;
+            const itemY = legendY + 58 + row * 45;
 
-          ctx.fillStyle = item.fill;
-          ctx.fillRect(itemX, itemY - 12, 18, 18);
-          ctx.strokeStyle = item.color;
-          ctx.lineWidth = 2;
-          ctx.strokeRect(itemX, itemY - 12, 18, 18);
+            ctx.fillStyle = item.fill;
+            ctx.fillRect(itemX, itemY - 12, 18, 18);
+            ctx.strokeStyle = item.color;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(itemX, itemY - 12, 18, 18);
 
-          ctx.fillStyle = "#e2e8f0";
-          ctx.font = "normal 12px sans-serif";
-          ctx.fillText(item.label, itemX + 26, itemY + 2);
-        });
-      } else if (activeLayer === "RISK") {
-        const riskEntries = [
-          { label: "Critical Risk (Defect / Open NCR)", color: "#ef4444" },
-          { label: "Moderate Risk (Pending Sign-off)", color: "#f59e0b" },
-          { label: "Low Risk (Compliant Verified)", color: "#10b981" },
-        ];
+            ctx.fillStyle = "#e2e8f0";
+            ctx.font = "normal 12px sans-serif";
+            ctx.fillText(item.label, itemX + 26, itemY + 2);
+          });
+        } else if (activeLayer === "RISK") {
+          const riskEntries = [
+            { label: "Critical Risk (Defect / Open NCR)", color: "#ef4444" },
+            { label: "Moderate Risk (Pending Sign-off)", color: "#f59e0b" },
+            { label: "Low Risk (Compliant Verified)", color: "#10b981" },
+          ];
 
-        riskEntries.forEach((item, idx) => {
-          const itemX = legendX + 18;
-          const itemY = legendY + 60 + idx * 36;
+          riskEntries.forEach((item, idx) => {
+            const itemX = legendX + 18;
+            const itemY = legendY + 60 + idx * 36;
 
-          ctx.fillStyle = item.color;
-          ctx.beginPath();
-          ctx.arc(itemX + 8, itemY - 3, 8, 0, Math.PI * 2);
-          ctx.fill();
+            ctx.fillStyle = item.color;
+            ctx.beginPath();
+            ctx.arc(itemX + 8, itemY - 3, 8, 0, Math.PI * 2);
+            ctx.fill();
 
-          ctx.fillStyle = "#e2e8f0";
-          ctx.font = "normal 13px sans-serif";
-          ctx.fillText(item.label, itemX + 26, itemY + 2);
-        });
-      } else if (activeLayer === "FORMWORK") {
-        const formworkEntries = [
-          { label: "High Contact Area (> 30 m²)", color: "#059669" },
-          { label: "Medium Contact Area (15 – 30 m²)", color: "#34d399" },
-          { label: "Low Contact Area (< 15 m²)", color: "#a7f3d0" },
-        ];
+            ctx.fillStyle = "#e2e8f0";
+            ctx.font = "normal 13px sans-serif";
+            ctx.fillText(item.label, itemX + 26, itemY + 2);
+          });
+        } else if (activeLayer === "FORMWORK") {
+          const formworkEntries = [
+            { label: "High Contact Area (> 30 m²)", color: "#059669" },
+            { label: "Medium Contact Area (15 – 30 m²)", color: "#34d399" },
+            { label: "Low Contact Area (< 15 m²)", color: "#a7f3d0" },
+          ];
 
-        formworkEntries.forEach((item, idx) => {
-          const itemX = legendX + 18;
-          const itemY = legendY + 60 + idx * 36;
+          formworkEntries.forEach((item, idx) => {
+            const itemX = legendX + 18;
+            const itemY = legendY + 60 + idx * 36;
 
-          ctx.fillStyle = item.color;
-          ctx.fillRect(itemX, itemY - 12, 18, 18);
-          ctx.strokeStyle = "#ffffff";
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(itemX, itemY - 12, 18, 18);
+            ctx.fillStyle = item.color;
+            ctx.fillRect(itemX, itemY - 12, 18, 18);
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(itemX, itemY - 12, 18, 18);
 
-          ctx.fillStyle = "#e2e8f0";
-          ctx.font = "normal 13px sans-serif";
-          ctx.fillText(item.label, itemX + 26, itemY + 2);
-        });
+            ctx.fillStyle = "#e2e8f0";
+            ctx.font = "normal 13px sans-serif";
+            ctx.fillText(item.label, itemX + 26, itemY + 2);
+          });
+        }
       }
 
       // 5. Trigger Direct Browser Download

@@ -2461,6 +2461,8 @@ export interface WeeklyReport {
   beamLayoutImg?: string;
   columnLayoutImg?: string;
   slabImg?: string;
+  revisionNumber?: string;
+  revision?: string;
   createdAt: number | string;
   updatedAt?: number | string;
   [key: string]: any;

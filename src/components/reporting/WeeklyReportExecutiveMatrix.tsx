@@ -59,6 +59,8 @@ export interface WeeklyReportExecutiveMatrixProps {
   setColumnLayoutImg: any;
   slabImg: any;
   setslabImg: any;
+  revisionNumber?: string;
+  setRevisionNumber?: (val: string) => void;
   mepClearance: MepClearanceRow[];
   setMepClearance: any;
   pictorialUrls: PictorialAsset[];
@@ -133,6 +135,8 @@ export const WeeklyReportExecutiveMatrix: React.FC<
   setColumnLayoutImg,
   slabImg,
   setslabImg,
+  revisionNumber,
+  setRevisionNumber,
   mepClearance,
   setMepClearance,
   pictorialUrls,
@@ -1973,6 +1977,25 @@ export const WeeklyReportExecutiveMatrix: React.FC<
                     <span>Pending Digital Certification</span>
                   </div>
                 )}
+
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                    Document Revision Control (Back Sign-Off)
+                  </span>
+                  {setRevisionNumber ? (
+                    <input
+                      type="text"
+                      value={revisionNumber || ""}
+                      onChange={(e) => setRevisionNumber(e.target.value)}
+                      placeholder="e.g. Rev 1.0 (Final Submission)"
+                      className="w-full sm:max-w-xs px-3 py-1.5 text-xs font-mono font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                    />
+                  ) : (
+                    <p className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">
+                      {revisionNumber || report.revisionNumber || "Rev 1.0 (Final Submission)"}
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-col justify-center items-start md:items-end border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800 pt-4 md:pt-0 md:pl-6">

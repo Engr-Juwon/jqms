@@ -224,6 +224,7 @@ export const WeeklyReportCreate: React.FC = () => {
     weekStart: mondayStr,
     weekEnd: saturdayStr,
     title: `QAQC WEEKLY REPORT (W${String(initialIso.week).padStart(2, "0")}) - PROJECT QUALITY PERFORMANCE`,
+    revisionNumber: "Rev 1.0 (Final Submission)",
     executiveSummary: defaultExecutiveSummary,
     highlights: "",
     concerns: "",
@@ -1202,6 +1203,7 @@ export const WeeklyReportCreate: React.FC = () => {
         startDate: form.weekStart,
         endDate: form.weekEnd,
         title: form.title,
+        revisionNumber: form.revisionNumber || "Rev 1.0 (Final Submission)",
         weekStart: form.weekStart,
         weekEnd: form.weekEnd,
         includeNcrsAndComments,
@@ -1508,9 +1510,9 @@ export const WeeklyReportCreate: React.FC = () => {
           </div>
         </div>
 
-        {/* --- TITLE & COMPLIANCE RATE ROW --- */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="md:col-span-3">
+        {/* --- TITLE, REVISION & COMPLIANCE RATE ROW --- */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+          <div className="md:col-span-6">
             <Field label="Document Report / Slide Deck Title Header">
               <input
                 type="text"
@@ -1522,7 +1524,20 @@ export const WeeklyReportCreate: React.FC = () => {
               />
             </Field>
           </div>
-          <div>
+          <div className="md:col-span-3">
+            <Field label="Revision Control (Back Sign-Off Page)">
+              <input
+                type="text"
+                value={form.revisionNumber}
+                placeholder="e.g. Rev 1.0 (Final Submission)"
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, revisionNumber: e.target.value }))
+                }
+                className={`${inputClass} font-mono`}
+              />
+            </Field>
+          </div>
+          <div className="md:col-span-3">
             <Field label="Auto Quality Compliance">
               <div className="relative flex items-center">
                 <input

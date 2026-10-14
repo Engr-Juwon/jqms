@@ -1384,6 +1384,18 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                 )}
               </div>
               <div className="flex items-center gap-2 text-xs font-mono text-slate-500 dark:text-slate-400">
+                <button
+                  type="button"
+                  onClick={() => setConfig(prev => ({ ...prev, showLegend: !prev.showLegend }))}
+                  title={config.showLegend ? "Click to remove legend from snapshot" : "Click to include legend in snapshot"}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-all shadow-sm ${
+                    config.showLegend
+                      ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50"
+                      : "bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-300 dark:border-slate-700 line-through hover:text-slate-700 dark:hover:text-slate-200"
+                  }`}
+                >
+                  <span>{config.showLegend ? "✓ Legend On" : "✕ Legend Off"}</span>
+                </button>
                 <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
                   {config.width * (config.dpiScale || 1)} ×{" "}
                   {config.height * (config.dpiScale || 1)} px
@@ -1436,6 +1448,12 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
                   {config.orientation === "PORTRAIT"
                     ? "Portrait / Vertical"
                     : "Landscape / Horizontal"}
+                </strong>
+              </span>
+              <span>
+                Legend:{" "}
+                <strong className={config.showLegend ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>
+                  {config.showLegend ? "Visible" : "Removed"}
                 </strong>
               </span>
               <span>

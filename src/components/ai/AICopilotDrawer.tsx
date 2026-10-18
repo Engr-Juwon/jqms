@@ -23,6 +23,10 @@ import {
   Boxes,
   PlusCircle,
   ExternalLink,
+  Calendar,
+  Table,
+  Mail,
+  FolderOpen,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
@@ -33,6 +37,14 @@ import { dbService } from "@/lib/db";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { CopilotMarkdown } from "./CopilotMarkdown";
+import { GoogleWorkspaceSyncModal } from "./GoogleWorkspaceSyncModal";
+import {
+  syncToGoogleCalendar,
+  exportToGoogleSheets,
+  exportToGoogleDocs,
+  openGoogleDrive,
+  sendViaGmail,
+} from "@/lib/googleSyncService";
 import {
   NonConformanceReport,
   DailySiteLog,
@@ -73,6 +85,16 @@ const QUICK_PROMPTS = [
     title: "Compile Weekly Report",
     prompt: "Compile a weekly quality summary report highlighting 3 passed cube tests, 1 minor NCR closed, and zero HSE incidents.",
   },
+  {
+    icon: Calendar,
+    title: "Sync Google Calendar",
+    prompt: "Schedule a formal pre-pour concrete inspection for Level 2 slab on Google Calendar with checklist.",
+  },
+  {
+    icon: Table,
+    title: "Sync Google Sheets",
+    prompt: "Export current project NCR register and containment matrix to Google Sheets.",
+  },
 ];
 
 export const AICopilotDrawer: React.FC = () => {
@@ -83,6 +105,7 @@ export const AICopilotDrawer: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
@@ -555,6 +578,53 @@ How can I assist your site operations or technical audit today?`,
           break;
         }
 
+        case "SYNC_GOOGLE_CALENDAR": {
+          syncToGoogleCalendar({
+            title: proposal.title || "Pre-Pour QA/QC Inspection",
+            description: proposal.description || "Scheduled via Jay-QMS Technical Copilot",
+            location: proposal.location || activeProject.name,
+            startDateTime: proposal.startDateTime,
+            endDateTime: proposal.endDateTime,
+          });
+          toast.success("Opened Google Calendar event creator!");
+          break;
+        }
+
+        case "SYNC_GOOGLE_SHEETS": {
+          await exportToGoogleSheets({
+            title: proposal.title || `${activeProject.name}_Quality_Register`,
+            headers: proposal.headers || ["Item #", "Title", "Status"],
+            rows: proposal.rows || [],
+          });
+          toast.success("Exported to Google Sheets & CSV downloaded!");
+          break;
+        }
+
+        case "SYNC_GOOGLE_DOCS": {
+          await exportToGoogleDocs({
+            title: proposal.title || "Technical Document",
+            content: proposal.content || "Drafted via Jay-QMS Technical Copilot",
+          });
+          toast.success("Opened Google Docs! (Content copied to clipboard)");
+          break;
+        }
+
+        case "SYNC_GOOGLE_DRIVE": {
+          openGoogleDrive(activeProject.name, proposal.folderUrl);
+          toast.success("Opening Google Drive project folder...");
+          break;
+        }
+
+        case "SYNC_GMAIL": {
+          sendViaGmail({
+            to: proposal.to || "",
+            subject: proposal.subject || "Jay-QMS Site Quality Directive",
+            body: proposal.body || "Notification from Jay-QMS Platform",
+          });
+          toast.success("Opened Gmail compose window!");
+          break;
+        }
+
         default:
           toast.error("Unsupported action type");
           break;
@@ -664,6 +734,16 @@ How can I assist your site operations or technical audit today?`,
             <div className="flex items-center gap-1">
               <button
                 type="button"
+                onClick={() => setIsGoogleModalOpen(true)}
+                className="px-2 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[10px] font-bold tracking-tight transition flex items-center gap-1.5 border border-white/20 shadow-xs mr-0.5"
+                title="Google Workspace & Products Sync Hub"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                <span>Google Sync</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleClearHistory}
                 className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition"
                 title="Clear conversation"
@@ -767,71 +847,156 @@ How can I assist your site operations or technical audit today?`,
                     </div>
 
                     {/* Action Execution Proposal Card */}
-                    {hasAction && (
-                      <div className="mt-2 p-3 rounded-xl bg-white dark:bg-slate-900 border border-brand-500/30 space-y-2 shadow-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5 text-brand-600 dark:text-brand-400 font-bold text-[11px]">
-                            <Sparkles className="w-3.5 h-3.5" />
-                            {msg.actionProposal?.action.replace("CREATE_", "NEW ")}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-brand-500/10 text-brand-600">
-                            Ready for Database
-                          </span>
-                        </div>
+                    {hasAction && (() => {
+                      const action = msg.actionProposal?.action;
+                      const isGoogle = action?.startsWith("SYNC_GOOGLE_") || action === "SYNC_GMAIL";
 
-                        {/* Proposal Details Preview */}
-                        <div className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1 bg-slate-50 dark:bg-slate-950 p-2 rounded-lg font-mono">
-                          {msg.actionProposal?.title && (
-                            <div>
-                              <strong className="text-slate-400">Title:</strong> {msg.actionProposal.title}
-                            </div>
-                          )}
-                          {msg.actionProposal?.severity && (
-                            <div>
-                              <strong className="text-slate-400">Severity:</strong> {msg.actionProposal.severity}
-                            </div>
-                          )}
-                          {msg.actionProposal?.elementName && (
-                            <div>
-                              <strong className="text-slate-400">Element:</strong> {msg.actionProposal.elementName} ({msg.actionProposal.elementType})
-                            </div>
-                          )}
-                          {msg.actionProposal?.weather && (
-                            <div>
-                              <strong className="text-slate-400">Weather:</strong> {msg.actionProposal.weather} | Manpower: {msg.actionProposal.manpowerCount}
-                            </div>
-                          )}
-                        </div>
+                      let actionTitle = msg.actionProposal?.action.replace("CREATE_", "NEW ");
+                      let buttonLabel = "Approve & Save Now";
+                      let successLabel = "Created & Saved to Live Database";
+                      let productBadge = "Ready for Database";
 
-                        {/* Confirmation Button */}
-                        <div className="pt-1 flex items-center justify-end">
-                          {msg.actionExecuted ? (
-                            <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] px-3 py-1.5 bg-emerald-500/10 rounded-lg">
-                              <Check className="w-3.5 h-3.5" />
-                              <span>Created & Saved to Live Database</span>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleExecuteAction(msg.id, msg.actionProposal!)}
-                              disabled={executingActionId === msg.id}
-                              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 active:scale-95 transition"
+                      if (action === "SYNC_GOOGLE_CALENDAR") {
+                        actionTitle = "Google Calendar Sync";
+                        buttonLabel = "Sync to Google Calendar";
+                        successLabel = "Synced to Google Calendar";
+                        productBadge = "Google Calendar";
+                      } else if (action === "SYNC_GOOGLE_SHEETS") {
+                        actionTitle = "Google Sheets Export";
+                        buttonLabel = "Open in Google Sheets";
+                        successLabel = "Exported to Google Sheets";
+                        productBadge = "Google Sheets";
+                      } else if (action === "SYNC_GOOGLE_DOCS") {
+                        actionTitle = "Google Docs Export";
+                        buttonLabel = "Open in Google Docs";
+                        successLabel = "Opened in Google Docs";
+                        productBadge = "Google Docs";
+                      } else if (action === "SYNC_GOOGLE_DRIVE") {
+                        actionTitle = "Google Drive Sync";
+                        buttonLabel = "Open Google Drive";
+                        successLabel = "Opened Google Drive";
+                        productBadge = "Google Drive";
+                      } else if (action === "SYNC_GMAIL") {
+                        actionTitle = "Gmail Dispatch";
+                        buttonLabel = "Compose in Gmail";
+                        successLabel = "Opened in Gmail";
+                        productBadge = "Gmail";
+                      }
+
+                      return (
+                        <div
+                          className={`mt-2 p-3 rounded-xl border space-y-2 shadow-xs ${
+                            isGoogle
+                              ? "bg-blue-50/60 dark:bg-slate-900 border-blue-400/40"
+                              : "bg-white dark:bg-slate-900 border-brand-500/30"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`flex items-center gap-1.5 font-bold text-[11px] ${
+                                isGoogle
+                                  ? "text-blue-600 dark:text-blue-400"
+                                  : "text-brand-600 dark:text-brand-400"
+                              }`}
                             >
-                              {executingActionId === msg.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <PlusCircle className="w-3.5 h-3.5" />
-                              )}
-                              <span>
-                                {executingActionId === msg.id
-                                  ? "Saving to Project..."
-                                  : "Approve & Save Now"}
-                              </span>
-                            </button>
-                          )}
+                              <Sparkles className="w-3.5 h-3.5" />
+                              {actionTitle}
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${
+                                isGoogle
+                                  ? "bg-blue-500/10 text-blue-600 dark:text-blue-300"
+                                  : "bg-brand-500/10 text-brand-600"
+                              }`}
+                            >
+                              {productBadge}
+                            </span>
+                          </div>
+
+                          {/* Proposal Details Preview */}
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1 bg-white/80 dark:bg-slate-950 p-2 rounded-lg font-mono border border-slate-200/50 dark:border-slate-800">
+                            {msg.actionProposal?.title && (
+                              <div>
+                                <strong className="text-slate-400">Title:</strong> {msg.actionProposal.title}
+                              </div>
+                            )}
+                            {msg.actionProposal?.location && (
+                              <div>
+                                <strong className="text-slate-400">Location:</strong> {msg.actionProposal.location}
+                              </div>
+                            )}
+                            {msg.actionProposal?.startDateTime && (
+                              <div>
+                                <strong className="text-slate-400">Date/Time:</strong>{" "}
+                                {new Date(msg.actionProposal.startDateTime).toLocaleString()}
+                              </div>
+                            )}
+                            {msg.actionProposal?.headers && (
+                              <div>
+                                <strong className="text-slate-400">Columns:</strong>{" "}
+                                {msg.actionProposal.headers.length} headers | {msg.actionProposal.rows?.length || 0} rows
+                              </div>
+                            )}
+                            {msg.actionProposal?.to && (
+                              <div>
+                                <strong className="text-slate-400">Recipient:</strong> {msg.actionProposal.to}
+                              </div>
+                            )}
+                            {msg.actionProposal?.severity && (
+                              <div>
+                                <strong className="text-slate-400">Severity:</strong> {msg.actionProposal.severity}
+                              </div>
+                            )}
+                            {msg.actionProposal?.elementName && (
+                              <div>
+                                <strong className="text-slate-400">Element:</strong> {msg.actionProposal.elementName} (
+                                {msg.actionProposal.elementType})
+                              </div>
+                            )}
+                            {msg.actionProposal?.weather && (
+                              <div>
+                                <strong className="text-slate-400">Weather:</strong> {msg.actionProposal.weather} | Manpower:{" "}
+                                {msg.actionProposal.manpowerCount}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Confirmation Button */}
+                          <div className="pt-1 flex items-center justify-end">
+                            {msg.actionExecuted ? (
+                              <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] px-3 py-1.5 bg-emerald-500/10 rounded-lg">
+                                <Check className="w-3.5 h-3.5" />
+                                <span>{successLabel}</span>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleExecuteAction(msg.id, msg.actionProposal!)}
+                                disabled={executingActionId === msg.id}
+                                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-white font-bold text-xs shadow-md active:scale-95 transition ${
+                                  isGoogle
+                                    ? "bg-blue-600 hover:bg-blue-500 shadow-blue-500/20"
+                                    : "bg-brand-600 hover:bg-brand-500 shadow-brand-500/20"
+                                }`}
+                              >
+                                {executingActionId === msg.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : isGoogle ? (
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                ) : (
+                                  <PlusCircle className="w-3.5 h-3.5" />
+                                )}
+                                <span>
+                                  {executingActionId === msg.id
+                                    ? "Processing..."
+                                    : buttonLabel}
+                                </span>
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Footer Actions */}
                     <div
@@ -973,6 +1138,17 @@ How can I assist your site operations or technical audit today?`,
           </div>
         </div>
       )}
+
+      {/* Google Workspace & Products Sync Hub Modal */}
+      <GoogleWorkspaceSyncModal
+        isOpen={isGoogleModalOpen}
+        onClose={() => setIsGoogleModalOpen(false)}
+        activeProject={activeProject}
+        onAskCopilot={(promptText) => {
+          setIsOpen(true);
+          handleSend(promptText);
+        }}
+      />
     </>
   );
 };

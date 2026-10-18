@@ -4,7 +4,12 @@ export type AIActionType =
   | "CREATE_SITE_INSTRUCTION"
   | "CREATE_SITE_COMMENT"
   | "CREATE_ELEMENT"
-  | "CREATE_WEEKLY_REPORT";
+  | "CREATE_WEEKLY_REPORT"
+  | "SYNC_GOOGLE_CALENDAR"
+  | "SYNC_GOOGLE_SHEETS"
+  | "SYNC_GOOGLE_DOCS"
+  | "SYNC_GOOGLE_DRIVE"
+  | "SYNC_GMAIL";
 
 export interface AIActionProposal {
   action: AIActionType;

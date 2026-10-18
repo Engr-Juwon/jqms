@@ -36,27 +36,25 @@ import { useProjectStore } from "@/stores/useProjectStore";
 // ==========================================
 
 const COMMON_CSS = `
-  * { box-sizing: border-box; }
+  *, *::before, *::after {
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
   @page {
     size: A4 portrait;
-    margin: 10mm 10mm 12mm 10mm;
-    @bottom-left {
-      content: "CONFIDENTIAL & PROPRIETARY";
-      font-family: 'Segoe UI', -apple-system, sans-serif;
-      font-size: 7.5px;
-      color: #64748b;
-      font-weight: 600;
-    }
-    @bottom-right {
-      content: "Page " counter(page) " of " counter(pages);
-      font-family: 'Segoe UI', -apple-system, sans-serif;
-      font-size: 7.5px;
-      color: #64748b;
-      font-weight: 700;
-    }
+    margin: 0;
   }
   @media print {
-    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; }
+    html, body {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #ffffff !important;
+    }
     .no-print { display: none !important; }
   }
   body {
@@ -66,11 +64,15 @@ const COMMON_CSS = `
     margin: 0;
     line-height: 1.35;
     background: #ffffff;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   .page-container {
     width: 100%;
-    max-width: 190mm;
+    max-width: 210mm;
     margin: 0 auto;
+    padding: 10mm 10mm 12mm 10mm;
+    box-sizing: border-box;
   }
   .pdf-section {
     page-break-inside: avoid;
@@ -396,6 +398,7 @@ export function openPrintWindow(
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title}</title>
   <style>
     ${COMMON_CSS}
@@ -2935,61 +2938,96 @@ export function generateWeeklyReportPDF(
   // =========================================================================
   const sampleCubes = cubeList;
 
-  const cubeRowsHtml =
-    sampleCubes.length > 0
-      ? sampleCubes
-          .map((c: any, idx: number) => {
-            const d7 = c.strength7Days || (c.day7Results?.[0]?.averageStrength ? `${c.day7Results[0].averageStrength} N/mm²` : "—");
-            const d28 = c.strength28Days || (c.day28Results?.[0]?.averageStrength ? `${c.day28Results[0].averageStrength} N/mm²` : "—");
-            const st7 = String(c.status7Days || (d7 !== "—" ? "PASS" : "pending")).toLowerCase();
-            const st28 = String(c.status28Days || (d28 !== "—" ? "PASS" : "pending")).toLowerCase();
-
-            return `
+  if (sampleCubes.length === 0) {
+    slidesHtml.push(`
+      <div class="pdf-sheet">
+        <div>
+          ${renderHeader("CONCRETE COMPRESSIVE STRENGTH TEST MATRIX")}
+          
+          <table class="data-table" style="margin-top: 8px;">
+            <thead>
               <tr>
-                <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(idx + 1).padStart(2, "0")}</td>
-                <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(c.dateCast || c.castDate || c.date) || "—"}</td>
-                <td style="font-weight: 800; color: #0f172a; text-transform: uppercase;">${c.elementLevel || c.element || c.inscribedName || "Structural Element"}</td>
-                <td style="font-family: monospace; font-weight: 700; text-align: center;">${d7}</td>
-                <td style="text-align: center; font-weight: 800; color: ${st7.includes("pass") ? "#16a34a" : "#d97706"};">${st7.includes("pass") ? "PASS" : st7.toUpperCase()}</td>
-                <td style="font-family: monospace; font-weight: 700; text-align: center;">${d28}</td>
-                <td style="text-align: center; font-weight: 800; color: ${st28.includes("pass") ? "#16a34a" : "#d97706"};">${st28.includes("pass") ? "PASS" : st28.toUpperCase()}</td>
+                <th style="width: 5%; text-align: center;">S/N</th>
+                <th style="width: 14%;">DATE CAST</th>
+                <th style="width: 35%;">ELEMENT / LEVEL</th>
+                <th style="width: 13%; text-align: center;">7-DAY STRENGTH</th>
+                <th style="width: 11%; text-align: center;">7-DAY STATUS</th>
+                <th style="width: 13%; text-align: center;">28-DAY STRENGTH</th>
+                <th style="width: 11%; text-align: center;">28-DAY STATUS</th>
               </tr>
-            `;
-          })
-          .join("")
-      : `
-        <tr>
-          <td colspan="7" style="text-align: center; color: #64748b; padding: 24px; font-weight: 600;">
-            No concrete compressive strength test records logged for this reporting period.
-          </td>
-        </tr>
-      `;
-
-  slidesHtml.push(`
-    <div class="pdf-sheet">
-      <div>
-        ${renderHeader("CONCRETE COMPRESSIVE STRENGTH TEST MATRIX")}
-        
-        <table class="data-table" style="margin-top: 8px;">
-          <thead>
-            <tr>
-              <th style="width: 5%; text-align: center;">S/N</th>
-              <th style="width: 14%;">DATE CAST</th>
-              <th style="width: 35%;">ELEMENT / LEVEL</th>
-              <th style="width: 13%; text-align: center;">7-DAY STRENGTH</th>
-              <th style="width: 11%; text-align: center;">7-DAY STATUS</th>
-              <th style="width: 13%; text-align: center;">28-DAY STRENGTH</th>
-              <th style="width: 11%; text-align: center;">28-DAY STATUS</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${cubeRowsHtml}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="7" style="text-align: center; color: #64748b; padding: 24px; font-weight: 600;">
+                  No concrete compressive strength test records logged for this reporting period.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        ${renderFooter(slidesHtml.length + 1)}
       </div>
-      ${renderFooter(slidesHtml.length + 1)}
-    </div>
-  `);
+    `);
+  } else {
+    const ROWS_PER_PAGE = 14;
+    const totalPages = Math.ceil(sampleCubes.length / ROWS_PER_PAGE);
+
+    for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+      const pageCubes = sampleCubes.slice(pageIdx * ROWS_PER_PAGE, (pageIdx + 1) * ROWS_PER_PAGE);
+      const pageTitle =
+        totalPages > 1
+          ? `CONCRETE COMPRESSIVE STRENGTH TEST MATRIX (PART ${pageIdx + 1} OF ${totalPages})`
+          : "CONCRETE COMPRESSIVE STRENGTH TEST MATRIX";
+
+      const cubeRowsHtml = pageCubes
+        .map((c: any, idx: number) => {
+          const globalIdx = pageIdx * ROWS_PER_PAGE + idx + 1;
+          const d7 = c.strength7Days || (c.day7Results?.[0]?.averageStrength ? `${c.day7Results[0].averageStrength} N/mm²` : "—");
+          const d28 = c.strength28Days || (c.day28Results?.[0]?.averageStrength ? `${c.day28Results[0].averageStrength} N/mm²` : "—");
+          const st7 = String(c.status7Days || (d7 !== "—" ? "PASS" : "pending")).toLowerCase();
+          const st28 = String(c.status28Days || (d28 !== "—" ? "PASS" : "pending")).toLowerCase();
+
+          return `
+            <tr>
+              <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(globalIdx).padStart(2, "0")}</td>
+              <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(c.dateCast || c.castDate || c.date) || "—"}</td>
+              <td style="font-weight: 800; color: #0f172a; text-transform: uppercase;">${c.elementLevel || c.element || c.inscribedName || "Structural Element"}</td>
+              <td style="font-family: monospace; font-weight: 700; text-align: center;">${d7}</td>
+              <td style="text-align: center; font-weight: 800; color: ${st7.includes("pass") ? "#16a34a" : "#d97706"};">${st7.includes("pass") ? "PASS" : st7.toUpperCase()}</td>
+              <td style="font-family: monospace; font-weight: 700; text-align: center;">${d28}</td>
+              <td style="text-align: center; font-weight: 800; color: ${st28.includes("pass") ? "#16a34a" : "#d97706"};">${st28.includes("pass") ? "PASS" : st28.toUpperCase()}</td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      slidesHtml.push(`
+        <div class="pdf-sheet">
+          <div>
+            ${renderHeader(pageTitle)}
+            
+            <table class="data-table" style="margin-top: 8px;">
+              <thead>
+                <tr>
+                  <th style="width: 5%; text-align: center;">S/N</th>
+                  <th style="width: 14%;">DATE CAST</th>
+                  <th style="width: 35%;">ELEMENT / LEVEL</th>
+                  <th style="width: 13%; text-align: center;">7-DAY STRENGTH</th>
+                  <th style="width: 11%; text-align: center;">7-DAY STATUS</th>
+                  <th style="width: 13%; text-align: center;">28-DAY STRENGTH</th>
+                  <th style="width: 11%; text-align: center;">28-DAY STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${cubeRowsHtml}
+              </tbody>
+            </table>
+          </div>
+          ${renderFooter(slidesHtml.length + 1)}
+        </div>
+      `);
+    }
+  }
 
   // =========================================================================
   // SLIDE 5: MATERIAL & QUANTITY SUMMARY + PIE CHART & GROUPED VERTICAL BAR CHART
@@ -3523,13 +3561,55 @@ export function generateWeeklyReportPDF(
   // =========================================================================
   // SLIDE 18: MEP QA/QC CLEARANCE STATUS — PRE-CASTING
   // =========================================================================
-  const mepRowsHtml =
-    mepList.length > 0
-      ? mepList
-          .map((m: any, idx: number) => {
-            return `
+  if (mepList.length === 0) {
+    slidesHtml.push(`
+      <div class="pdf-sheet">
+        <div>
+          ${renderHeader("MEP QA/QC CLEARANCE STATUS — PRE-CASTING")}
+          
+          <table class="data-table" style="margin-top: 8px;">
+            <thead>
+              <tr>
+                <th style="width: 5%; text-align: center;">S/N</th>
+                <th style="width: 25%;">SERVICE / INSTALLATION</th>
+                <th style="width: 22%;">TRADE SUBCONTRACTOR</th>
+                <th style="width: 12%; text-align: center;">PROGRESS %</th>
+                <th style="width: 14%; text-align: center;">CLEARANCE STATUS</th>
+                <th style="width: 22%;">ENGINEERING REMARKS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="text-align: center; font-family: monospace;">—</td>
+                <td style="font-weight: 600; color: #64748b;">No MEP service clearances recorded for this cycle</td>
+                <td style="text-align: center;">—</td>
+                <td style="text-align: center;">—</td>
+                <td style="text-align: center;">—</td>
+                <td style="text-align: center;">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        ${renderFooter(slidesHtml.length + 1)}
+      </div>
+    `);
+  } else {
+    const ROWS_PER_PAGE = 14;
+    const totalPages = Math.ceil(mepList.length / ROWS_PER_PAGE);
+
+    for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+      const pageMep = mepList.slice(pageIdx * ROWS_PER_PAGE, (pageIdx + 1) * ROWS_PER_PAGE);
+      const pageTitle =
+        totalPages > 1
+          ? `MEP QA/QC CLEARANCE STATUS — PRE-CASTING (PART ${pageIdx + 1} OF ${totalPages})`
+          : "MEP QA/QC CLEARANCE STATUS — PRE-CASTING";
+
+      const mepRowsHtml = pageMep
+        .map((m: any, idx: number) => {
+          const globalIdx = pageIdx * ROWS_PER_PAGE + idx + 1;
+          return `
             <tr>
-              <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(idx + 1).padStart(2, "0")}</td>
+              <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(globalIdx).padStart(2, "0")}</td>
               <td style="font-weight: 800; color: #0f172a;">${m.service || m.system || m.elementService || "—"}</td>
               <td>${m.subcontractor || m.trade || "—"}</td>
               <td style="font-family: monospace; font-weight: 700; text-align: center;">${m.completionPct !== undefined ? m.completionPct : 0}%</td>
@@ -3537,61 +3617,94 @@ export function generateWeeklyReportPDF(
               <td style="font-size: 7.5px; color: #475569;">${m.remarks || "—"}</td>
             </tr>
           `;
-          })
-          .join("")
-      : `
-        <tr>
-          <td style="text-align: center; font-family: monospace;">—</td>
-          <td style="font-weight: 600; color: #64748b;">No MEP service clearances recorded for this cycle</td>
-          <td style="text-align: center;">—</td>
-          <td style="text-align: center;">—</td>
-          <td style="text-align: center;">—</td>
-          <td style="text-align: center;">—</td>
-        </tr>
-      `;
+        })
+        .join("");
 
-  slidesHtml.push(`
-    <div class="pdf-sheet">
-      <div>
-        ${renderHeader("MEP QA/QC CLEARANCE STATUS — PRE-CASTING")}
-        
-        <table class="data-table" style="margin-top: 8px;">
-          <thead>
-            <tr>
-              <th style="width: 5%; text-align: center;">S/N</th>
-              <th style="width: 25%;">SERVICE / INSTALLATION</th>
-              <th style="width: 22%;">TRADE SUBCONTRACTOR</th>
-              <th style="width: 12%; text-align: center;">PROGRESS %</th>
-              <th style="width: 14%; text-align: center;">CLEARANCE STATUS</th>
-              <th style="width: 22%;">ENGINEERING REMARKS</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${mepRowsHtml}
-          </tbody>
-        </table>
-      </div>
-      ${renderFooter(slidesHtml.length + 1)}
-    </div>
-  `);
+      slidesHtml.push(`
+        <div class="pdf-sheet">
+          <div>
+            ${renderHeader(pageTitle)}
+            
+            <table class="data-table" style="margin-top: 8px;">
+              <thead>
+                <tr>
+                  <th style="width: 5%; text-align: center;">S/N</th>
+                  <th style="width: 25%;">SERVICE / INSTALLATION</th>
+                  <th style="width: 22%;">TRADE SUBCONTRACTOR</th>
+                  <th style="width: 12%; text-align: center;">PROGRESS %</th>
+                  <th style="width: 14%; text-align: center;">CLEARANCE STATUS</th>
+                  <th style="width: 22%;">ENGINEERING REMARKS</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${mepRowsHtml}
+              </tbody>
+            </table>
+          </div>
+          ${renderFooter(slidesHtml.length + 1)}
+        </div>
+      `);
+    }
+  }
 
   // =========================================================================
   // SLIDE 19: MATERIAL DELIVERY LOG & TRACEABILITY
   // =========================================================================
-  const deliveriesRowsHtml =
-    deliveriesList.length > 0
-      ? deliveriesList
-          .map((d: any, idx: number) => {
-            const st = String(d.qcStatus || d.status || "APPROVED").toUpperCase();
-            const badgeColor = st.includes("REJECT") ? "#dc2626" : st.includes("NOTED") ? "#0284c7" : "#16a34a";
-            const unit = d.unit || "units";
-            const acc = d.quantityAccepted !== undefined ? d.quantityAccepted : d.quantity || 0;
-            const rej = d.quantityRejected ?? 0;
-            const total = d.quantityReceived ?? d.quantity ?? 0;
+  if (deliveriesList.length === 0) {
+    slidesHtml.push(`
+      <div class="pdf-sheet">
+        <div>
+          ${renderHeader("MATERIAL DELIVERY LOG & TRACEABILITY")}
+          
+          <table class="data-table" style="margin-top: 8px;">
+            <thead>
+              <tr>
+                <th style="width: 4%; text-align: center;">S/N</th>
+                <th style="width: 12%;">DELIVERY DATE</th>
+                <th style="width: 27%;">MATERIAL DESCRIPTION</th>
+                <th style="width: 17%;">SOURCE / SUPPLIER</th>
+                <th style="width: 11%; text-align: right;">DELIVERED</th>
+                <th style="width: 11%; text-align: right; color: #10b981;">APPROVED</th>
+                <th style="width: 8%; text-align: right; color: #ef4444;">REJECTED</th>
+                <th style="width: 10%; text-align: center;">QC STATUS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="8" style="text-align: center; color: #64748b; padding: 24px;">
+                  Zero material deliveries recorded during this surveillance period.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        ${renderFooter(slidesHtml.length + 1)}
+      </div>
+    `);
+  } else {
+    const ROWS_PER_PAGE = 14;
+    const totalPages = Math.ceil(deliveriesList.length / ROWS_PER_PAGE);
 
-            return `
+    for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+      const pageDeliveries = deliveriesList.slice(pageIdx * ROWS_PER_PAGE, (pageIdx + 1) * ROWS_PER_PAGE);
+      const pageTitle =
+        totalPages > 1
+          ? `MATERIAL DELIVERY LOG & TRACEABILITY (PART ${pageIdx + 1} OF ${totalPages})`
+          : "MATERIAL DELIVERY LOG & TRACEABILITY";
+
+      const deliveriesRowsHtml = pageDeliveries
+        .map((d: any, idx: number) => {
+          const globalIdx = pageIdx * ROWS_PER_PAGE + idx + 1;
+          const st = String(d.qcStatus || d.status || "APPROVED").toUpperCase();
+          const badgeColor = st.includes("REJECT") ? "#dc2626" : st.includes("NOTED") ? "#0284c7" : "#16a34a";
+          const unit = d.unit || "units";
+          const acc = d.quantityAccepted !== undefined ? d.quantityAccepted : d.quantity || 0;
+          const rej = d.quantityRejected ?? 0;
+          const total = d.quantityReceived ?? d.quantity ?? 0;
+
+          return `
             <tr>
-              <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(idx + 1).padStart(2, "0")}</td>
+              <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(globalIdx).padStart(2, "0")}</td>
               <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(d.deliveryDate || d.date) || "—"}</td>
               <td style="font-weight: 800; color: #0f172a;">${d.materialDescription || d.materialName || d.name || "Material"}</td>
               <td>${d.supplier || d.supplierName || "—"}</td>
@@ -3601,56 +3714,89 @@ export function generateWeeklyReportPDF(
               <td style="text-align: center; font-weight: 800; color: ${badgeColor}; font-size: 7.5px;">${st}</td>
             </tr>
           `;
-          })
-          .join("")
-      : `
-        <tr>
-          <td colspan="8" style="text-align: center; color: #64748b; padding: 24px;">
-            Zero material deliveries recorded during this surveillance period.
-          </td>
-        </tr>
-      `;
+        })
+        .join("");
 
-  slidesHtml.push(`
-    <div class="pdf-sheet">
-      <div>
-        ${renderHeader("MATERIAL DELIVERY LOG & TRACEABILITY")}
-        
-        <table class="data-table" style="margin-top: 8px;">
-          <thead>
-            <tr>
-              <th style="width: 4%; text-align: center;">S/N</th>
-              <th style="width: 12%;">DELIVERY DATE</th>
-              <th style="width: 27%;">MATERIAL DESCRIPTION</th>
-              <th style="width: 17%;">SOURCE / SUPPLIER</th>
-              <th style="width: 11%; text-align: right;">DELIVERED</th>
-              <th style="width: 11%; text-align: right; color: #10b981;">APPROVED</th>
-              <th style="width: 8%; text-align: right; color: #ef4444;">REJECTED</th>
-              <th style="width: 10%; text-align: center;">QC STATUS</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${deliveriesRowsHtml}
-          </tbody>
-        </table>
-      </div>
-      ${renderFooter(slidesHtml.length + 1)}
-    </div>
-  `);
+      slidesHtml.push(`
+        <div class="pdf-sheet">
+          <div>
+            ${renderHeader(pageTitle)}
+            
+            <table class="data-table" style="margin-top: 8px;">
+              <thead>
+                <tr>
+                  <th style="width: 4%; text-align: center;">S/N</th>
+                  <th style="width: 12%;">DELIVERY DATE</th>
+                  <th style="width: 27%;">MATERIAL DESCRIPTION</th>
+                  <th style="width: 17%;">SOURCE / SUPPLIER</th>
+                  <th style="width: 11%; text-align: right;">DELIVERED</th>
+                  <th style="width: 11%; text-align: right; color: #10b981;">APPROVED</th>
+                  <th style="width: 8%; text-align: right; color: #ef4444;">REJECTED</th>
+                  <th style="width: 10%; text-align: center;">QC STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${deliveriesRowsHtml}
+              </tbody>
+            </table>
+          </div>
+          ${renderFooter(slidesHtml.length + 1)}
+        </div>
+      `);
+    }
+  }
 
   // =========================================================================
   // SLIDE 20: APPENDIX: NCR REGISTER
   // =========================================================================
   if (showNcrs) {
-    const ncrRowsHtml =
-      ncrList.length > 0
-        ? ncrList
-            .map((n: any) => {
-              const st = String(n.status || "OPEN").toUpperCase();
-              const isClosed = st === "CLOSED" || st === "RECTIFIED" || st === "RESOLVED";
-              const desc = Array.isArray(n.descriptionItems) ? n.descriptionItems.join(", ") : n.description || "Field variance logged";
+    if (ncrList.length === 0) {
+      slidesHtml.push(`
+        <div class="pdf-sheet">
+          <div>
+            ${renderHeader("APPENDIX: NCR REGISTER")}
+            
+            <table class="data-table" style="margin-top: 8px;">
+              <thead>
+                <tr>
+                  <th style="width: 16%;">NCR NO.</th>
+                  <th style="width: 15%;">LOCATION / TRADE</th>
+                  <th style="width: 45%;">DESCRIPTION</th>
+                  <th style="width: 10%;">DATE RAISED</th>
+                  <th style="width: 10%;">TARGET DATE</th>
+                  <th style="width: 8%; text-align: center;">STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="6" style="text-align: center; color: #166534; padding: 24px; font-weight: 800;">
+                    &#10003; ZERO ACTIVE NON-CONFORMANCE REPORTS LOGGED
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          ${renderFooter(slidesHtml.length + 1)}
+        </div>
+      `);
+    } else {
+      const ROWS_PER_PAGE = 10;
+      const totalPages = Math.ceil(ncrList.length / ROWS_PER_PAGE);
 
-              return `
+      for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+        const pageNcrs = ncrList.slice(pageIdx * ROWS_PER_PAGE, (pageIdx + 1) * ROWS_PER_PAGE);
+        const pageTitle =
+          totalPages > 1
+            ? `APPENDIX: NCR REGISTER (PART ${pageIdx + 1} OF ${totalPages})`
+            : "APPENDIX: NCR REGISTER";
+
+        const ncrRowsHtml = pageNcrs
+          .map((n: any) => {
+            const st = String(n.status || "OPEN").toUpperCase();
+            const isClosed = st === "CLOSED" || st === "RECTIFIED" || st === "RESOLVED";
+            const desc = Array.isArray(n.descriptionItems) ? n.descriptionItems.join(", ") : n.description || "Field variance logged";
+
+            return `
               <tr>
                 <td style="font-family: monospace; font-weight: 800; color: #0f172a;">${n.refNo || n.ncrNumber || "NCR"}</td>
                 <td style="font-weight: 700;">${n.elementLevel || n.location || "Structural Component"}</td>
@@ -3660,158 +3806,395 @@ export function generateWeeklyReportPDF(
                 <td style="text-align: center; font-weight: 900; color: ${isClosed ? "#16a34a" : "#dc2626"}; font-size: 7.5px;">${isClosed ? "CLOSED" : "OPEN"}</td>
               </tr>
             `;
-            })
-            .join("")
-        : `
-          <tr>
-            <td colspan="6" style="text-align: center; color: #166534; padding: 24px; font-weight: 800;">
-              &#10003; ZERO ACTIVE NON-CONFORMANCE REPORTS LOGGED
-            </td>
-          </tr>
-        `;
+          })
+          .join("");
 
-    slidesHtml.push(`
-      <div class="pdf-sheet">
-        <div>
-          ${renderHeader("APPENDIX: NCR REGISTER")}
-          
-          <table class="data-table" style="margin-top: 8px;">
-            <thead>
-              <tr>
-                <th style="width: 16%;">NCR NO.</th>
-                <th style="width: 15%;">LOCATION / TRADE</th>
-                <th style="width: 45%;">DESCRIPTION</th>
-                <th style="width: 10%;">DATE RAISED</th>
-                <th style="width: 10%;">TARGET DATE</th>
-                <th style="width: 8%; text-align: center;">STATUS</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${ncrRowsHtml}
-            </tbody>
-          </table>
-        </div>
-        ${renderFooter(slidesHtml.length + 1)}
-      </div>
-    `);
+        slidesHtml.push(`
+          <div class="pdf-sheet">
+            <div>
+              ${renderHeader(pageTitle)}
+              
+              <table class="data-table" style="margin-top: 8px;">
+                <thead>
+                  <tr>
+                    <th style="width: 16%;">NCR NO.</th>
+                    <th style="width: 15%;">LOCATION / TRADE</th>
+                    <th style="width: 45%;">DESCRIPTION</th>
+                    <th style="width: 10%;">DATE RAISED</th>
+                    <th style="width: 10%;">TARGET DATE</th>
+                    <th style="width: 8%; text-align: center;">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${ncrRowsHtml}
+                </tbody>
+              </table>
+            </div>
+            ${renderFooter(slidesHtml.length + 1)}
+          </div>
+        `);
+      }
+    }
   }
 
   // =========================================================================
   // SLIDE 21: APPENDIX: SITE INSTRUCTION REGISTER
   // =========================================================================
   if (includeSiteInstructions) {
-    const siRowsHtml =
-      siteInstructionsList.length > 0
-        ? siteInstructionsList
-            .map((si: any) => {
-              const st = String(si.status || "ISSUED").toUpperCase();
-              const isClosed = st.includes("CLOSE") || st.includes("COMPLET");
+    const totalSIs = siteInstructionsList.length;
+    const closedCount = siteInstructionsList.filter((si: any) => {
+      const st = String(si.status || "").toUpperCase();
+      return (
+        st.includes("CLOSE") ||
+        st.includes("COMPLET") ||
+        st.includes("COMPLI") ||
+        Boolean(si.closedAt)
+      );
+    }).length;
+    const overdueCount = siteInstructionsList.filter((si: any) => {
+      const st = String(si.status || "").toUpperCase();
+      const isClosed =
+        st.includes("CLOSE") ||
+        st.includes("COMPLET") ||
+        st.includes("COMPLI") ||
+        Boolean(si.closedAt);
+      if (isClosed) return false;
+      if (st.includes("OVERDUE")) return true;
+      const dueVal =
+        si.complianceDeadline || (si as any).dueDate || (si as any).targetDate;
+      if (!dueVal) return false;
+      const dueTime = new Date(dueVal).getTime();
+      const refTime = reportDate ? new Date(reportDate).getTime() : Date.now();
+      return !isNaN(dueTime) && dueTime < refTime;
+    }).length;
+    const openActiveCount = totalSIs - closedCount;
 
-              return `
-              <tr>
-                <td style="font-family: monospace; font-weight: 800; color: #0f172a;">${si.instructionNumber || si.siNumber || si.id || "SI"}</td>
-                <td style="font-weight: 700; font-size: 7.5px; color: #0f172a;">${si.title || si.subject || "Formal Notice of Defect Rectification"}</td>
-                <td style="font-size: 7.5px; text-transform: uppercase;">${si.contractorName || si.recipient || "Subcontractor"}</td>
-                <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(si.issuedDate || si.date)}</td>
-                <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(si.complianceDeadline || si.dueDate || reportDate)}</td>
-                <td style="text-align: center; font-weight: 900; color: ${isClosed ? "#16a34a" : "#d97706"}; font-size: 7.5px;">${isClosed ? "CLOSED" : "ISSUED"}</td>
+    if (siteInstructionsList.length === 0) {
+      slidesHtml.push(`
+        <div class="pdf-sheet">
+          <div>
+            ${renderHeader("APPENDIX: SITE INSTRUCTION REGISTER")}
+
+            <table class="data-table" style="margin-top: 8px;">
+              <thead>
+                <tr>
+                  <th style="width: 13%;">SI NO.</th>
+                  <th style="width: 41%;">DIRECTIVE &amp; SCOPE OF WORK</th>
+                  <th style="width: 18%;">RECIPIENT &amp; TRADE</th>
+                  <th style="width: 9%; text-align: center;">ISSUE DATE</th>
+                  <th style="width: 9%; text-align: center;">DUE DATE</th>
+                  <th style="width: 10%; text-align: center;">COMPLIANCE STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="6" style="text-align: center; color: #64748b; padding: 24px;">
+                    No contractual site instructions issued during this reporting period.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          ${renderFooter(slidesHtml.length + 1)}
+        </div>
+      `);
+    } else {
+      const ROWS_PER_PAGE = 6;
+      const totalPages = Math.ceil(siteInstructionsList.length / ROWS_PER_PAGE);
+
+      for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+        const pageSIs = siteInstructionsList.slice(pageIdx * ROWS_PER_PAGE, (pageIdx + 1) * ROWS_PER_PAGE);
+        const pageTitle =
+          totalPages > 1
+            ? `APPENDIX: SITE INSTRUCTION REGISTER (PART ${pageIdx + 1} OF ${totalPages})`
+            : "APPENDIX: SITE INSTRUCTION REGISTER";
+
+        const siRowsHtml = pageSIs
+          .map((si: any, idx: number) => {
+            const globalIdx = pageIdx * ROWS_PER_PAGE + idx;
+            const st = String(si.status || "ISSUED").trim().toUpperCase();
+            const isClosed =
+              st.includes("CLOSE") ||
+              st.includes("COMPLET") ||
+              st.includes("COMPLI") ||
+              Boolean(si.closedAt);
+
+            const dueVal =
+              si.complianceDeadline ||
+              (si as any).dueDate ||
+              (si as any).targetDate;
+            let isOverdue = false;
+            if (!isClosed && dueVal) {
+              const dueTime = new Date(dueVal).getTime();
+              const refTime = reportDate
+                ? new Date(reportDate).getTime()
+                : Date.now();
+              if (!isNaN(dueTime) && dueTime < refTime) {
+                isOverdue = true;
+              }
+            }
+            if (st.includes("OVERDUE")) isOverdue = true;
+
+            let displayStatus = "ISSUED";
+            let statusColor = "#d97706";
+            if (isClosed) {
+              displayStatus = "CLOSED";
+              statusColor = "#16a34a";
+            } else if (isOverdue) {
+              displayStatus = "OVERDUE";
+              statusColor = "#dc2626";
+            } else if (
+              st.includes("ACKNOW") ||
+              st.includes("PROGRESS") ||
+              st.includes("REVIEW")
+            ) {
+              displayStatus = "IN PROGRESS";
+              statusColor = "#2563eb";
+            } else if (st) {
+              displayStatus = st.replace(/_/g, " ");
+              statusColor = "#d97706";
+            }
+
+            const titleText =
+              si.title ||
+              si.subject ||
+              "Formal Notice of Defect Rectification";
+            const directiveText =
+              si.instructionText ||
+              si.issueSummary ||
+              (si as any).directiveText ||
+              (si as any).description ||
+              "";
+            const stopWorkBadge = si.stopWorkOrdered
+              ? `<span style="display: inline-block; background: #dc2626; color: #ffffff; font-size: 6.5px; font-weight: 900; padding: 1.5px 4px; border-radius: 2px; margin-bottom: 2px; letter-spacing: 0.5px;">STOP WORK ORDERED</span><br/>`
+              : "";
+            const locBadge =
+              si.location || si.elementName
+                ? `<div style="font-size: 6.5px; color: #64748b; font-weight: 600; margin-top: 2px;">Zone: ${si.location || "Site"}${si.elementName ? ` &bull; ${si.elementName}` : ""}</div>`
+                : "";
+
+            const recipientPerson =
+              si.recipientName ||
+              (si as any).assignedToName ||
+              (si as any).recipient ||
+              "";
+            const recipientOrg =
+              si.contractorName ||
+              (si as any).subcontractorCompany ||
+              (si as any).subcontractor ||
+              (si as any).contractor ||
+              "";
+            const recipientDisplay =
+              recipientPerson &&
+              recipientOrg &&
+              recipientPerson !== recipientOrg
+                ? `<div style="font-weight: 700; color: #0f172a;">${recipientPerson}</div><div style="font-size: 6.5px; color: #64748b; text-transform: uppercase;">${recipientOrg}</div>`
+                : `<div style="font-weight: 700; color: #0f172a; text-transform: uppercase;">${recipientPerson || recipientOrg || "Main Contractor"}</div>`;
+
+            return `
+              <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="font-family: monospace; font-weight: 800; color: #0f172a; vertical-align: top; padding: 5px 6px;">
+                  ${si.instructionNumber || si.siNumber || si.id || `SI-${String(globalIdx + 1).padStart(3, "0")}`}
+                </td>
+                <td style="vertical-align: top; padding: 5px 6px;">
+                  ${stopWorkBadge}
+                  <div style="font-weight: 700; font-size: 7.5px; color: #0f172a; line-height: 1.35;">${titleText}</div>
+                  ${directiveText ? `<div style="font-size: 7px; color: #475569; margin-top: 2px; line-height: 1.35; white-space: pre-line;">${directiveText}</div>` : ""}
+                  ${locBadge}
+                </td>
+                <td style="font-size: 7.5px; vertical-align: top; padding: 5px 6px;">
+                  ${recipientDisplay}
+                  ${si.recipientRole ? `<div style="font-size: 6.5px; color: #94a3b8;">${si.recipientRole}</div>` : ""}
+                </td>
+                <td style="font-family: monospace; font-weight: 600; text-align: center; vertical-align: top; padding: 5px 6px; font-size: 7px;">
+                  ${formatDateYMD(si.issuedDate || (si as any).date || si.createdAt || si.signedBy?.signedAt) || "—"}
+                </td>
+                <td style="font-family: monospace; font-weight: 600; text-align: center; vertical-align: top; padding: 5px 6px; font-size: 7px;">
+                  ${formatDateYMD(dueVal) || "Immediate"}
+                </td>
+                <td style="text-align: center; font-weight: 900; color: ${statusColor}; font-size: 7.5px; vertical-align: top; padding: 5px 6px; text-transform: uppercase;">
+                  ${displayStatus}
+                </td>
               </tr>
             `;
-            })
-            .join("")
-        : `
-          <tr>
-            <td colspan="6" style="text-align: center; color: #64748b; padding: 24px;">
-              No contractual site instructions issued during this reporting period.
-            </td>
-          </tr>
-        `;
+          })
+          .join("");
 
-    slidesHtml.push(`
-      <div class="pdf-sheet">
-        <div>
-          ${renderHeader("APPENDIX: SITE INSTRUCTION REGISTER")}
-          
-          <table class="data-table" style="margin-top: 8px;">
-            <thead>
-              <tr>
-                <th style="width: 14%;">SI NO.</th>
-                <th style="width: 38%;">SUBJECT</th>
-                <th style="width: 22%;">RECIPIENT</th>
-                <th style="width: 10%;">ISSUE DATE</th>
-                <th style="width: 10%;">DUE DATE</th>
-                <th style="width: 10%; text-align: center;">COMPLIANCE STATUS</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${siRowsHtml}
-            </tbody>
-          </table>
-        </div>
-        ${renderFooter(slidesHtml.length + 1)}
-      </div>
-    `);
+        const kpiRibbonHtml =
+          pageIdx === 0
+            ? `
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 8px; margin-bottom: 8px;">
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 10px;">
+              <div style="font-size: 7px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Total Directives</div>
+              <div style="font-size: 13px; font-weight: 900; color: #0f172a; margin-top: 1px;">${totalSIs}</div>
+            </div>
+            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 6px 10px;">
+              <div style="font-size: 7px; font-weight: 800; color: #b91c1c; text-transform: uppercase; letter-spacing: 0.5px;">Overdue Directives</div>
+              <div style="font-size: 13px; font-weight: 900; color: #dc2626; margin-top: 1px;">${overdueCount}</div>
+            </div>
+            <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 6px 10px;">
+              <div style="font-size: 7px; font-weight: 800; color: #b45309; text-transform: uppercase; letter-spacing: 0.5px;">Open / In Progress</div>
+              <div style="font-size: 13px; font-weight: 900; color: #d97706; margin-top: 1px;">${openActiveCount}</div>
+            </div>
+            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 6px 10px;">
+              <div style="font-size: 7px; font-weight: 800; color: #15803d; text-transform: uppercase; letter-spacing: 0.5px;">Closed &amp; Complied</div>
+              <div style="font-size: 13px; font-weight: 900; color: #16a34a; margin-top: 1px;">${closedCount}</div>
+            </div>
+          </div>
+        `
+            : "";
+
+        slidesHtml.push(`
+          <div class="pdf-sheet">
+            <div>
+              ${renderHeader(pageTitle)}
+              ${kpiRibbonHtml}
+              
+              <table class="data-table" style="margin-top: ${pageIdx === 0 ? "4px" : "8px"};">
+                <thead>
+                  <tr>
+                    <th style="width: 13%;">SI NO.</th>
+                    <th style="width: 41%;">DIRECTIVE &amp; SCOPE OF WORK</th>
+                    <th style="width: 18%;">RECIPIENT &amp; TRADE</th>
+                    <th style="width: 9%; text-align: center;">ISSUE DATE</th>
+                    <th style="width: 9%; text-align: center;">DUE DATE</th>
+                    <th style="width: 10%; text-align: center;">COMPLIANCE STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${siRowsHtml}
+                </tbody>
+              </table>
+            </div>
+            ${renderFooter(slidesHtml.length + 1)}
+          </div>
+        `);
+      }
+    }
   }
 
   // =========================================================================
   // SLIDE 22: APPENDIX: SITE COMMENTS / OBSERVATION LOG
   // =========================================================================
   if (showSiteComments) {
-    const commentsRowsHtml =
-      commentsList.length > 0
-        ? commentsList
-            .map((c: any, idx: number) => {
-              const st = String(c.status || "Non-Compliant");
-              const isComp = st.toLowerCase().includes("comp") || st.toLowerCase().includes("passed") || st.toLowerCase().includes("approved");
-              const isPend = st.toLowerCase().includes("pend");
-              const color = isComp ? "#16a34a" : isPend ? "#d97706" : "#dc2626";
+    if (commentsList.length === 0) {
+      slidesHtml.push(`
+        <div class="pdf-sheet">
+          <div>
+            ${renderHeader("APPENDIX: SITE COMMENTS / OBSERVATION LOG")}
+            
+            <table class="data-table" style="margin-top: 8px;">
+              <thead>
+                <tr>
+                  <th style="width: 4%; text-align: center;">S/N</th>
+                  <th style="width: 10%;">DATE</th>
+                  <th style="width: 16%;">LOCATION / LEVEL</th>
+                  <th style="width: 14%;">STRUCTURAL ELEMENT</th>
+                  <th style="width: 34%;">ROUTINE QUALITY OBSERVATIONS</th>
+                  <th style="width: 14%;">INSPECTOR / VENDOR CHECK</th>
+                  <th style="width: 8%; text-align: center;">STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="7" style="text-align: center; color: #64748b; padding: 24px;">
+                    Zero outstanding quality observations recorded for this surveillance cycle.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          ${renderFooter(slidesHtml.length + 1)}
+        </div>
+      `);
+    } else {
+      const ROWS_PER_PAGE = 12;
+      const totalPages = Math.ceil(commentsList.length / ROWS_PER_PAGE);
 
-              return `
+      for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+        const pageComments = commentsList.slice(pageIdx * ROWS_PER_PAGE, (pageIdx + 1) * ROWS_PER_PAGE);
+        const pageTitle =
+          totalPages > 1
+            ? `APPENDIX: SITE COMMENTS / OBSERVATION LOG (PART ${pageIdx + 1} OF ${totalPages})`
+            : "APPENDIX: SITE COMMENTS / OBSERVATION LOG";
+
+        const commentsRowsHtml = pageComments
+          .map((c: any, idx: number) => {
+            const globalIdx = pageIdx * ROWS_PER_PAGE + idx + 1;
+            const rawSt = String(c.status || "Non-Compliant").trim();
+            const normSt = rawSt.toLowerCase().replace(/[\s-]+/g, "_");
+
+            const isNonCompliant =
+              normSt.includes("non_comp") ||
+              normSt.includes("noncomp") ||
+              normSt.includes("defect") ||
+              normSt.includes("fail") ||
+              normSt.includes("reject") ||
+              normSt === "open";
+
+            const isResolved =
+              normSt.includes("rectif") ||
+              normSt.includes("fixed") ||
+              normSt.includes("closed") ||
+              normSt.includes("pass") ||
+              normSt.includes("approv") ||
+              (normSt.includes("comp") && !isNonCompliant);
+
+            const isPending =
+              normSt.includes("pend") ||
+              normSt.includes("prog") ||
+              normSt.includes("review") ||
+              normSt.includes("action");
+
+            const color = isNonCompliant
+              ? "#dc2626"
+              : isResolved
+                ? "#16a34a"
+                : isPending
+                  ? "#d97706"
+                  : "#dc2626";
+
+            return `
               <tr>
-                <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(idx + 1).padStart(2, "0")}</td>
+                <td style="font-weight: 700; font-family: monospace; text-align: center;">${String(globalIdx).padStart(2, "0")}</td>
                 <td style="font-family: monospace; font-weight: 600;">${formatDateYMD(c.date || c.createdAt) || "—"}</td>
                 <td>${c.level || selectedLevel}${c.location ? ` &bull; ${c.location}` : ""}</td>
                 <td style="font-weight: 700;">${c.element || "—"}</td>
                 <td style="font-size: 7.5px; line-height: 1.4; color: #334155; white-space: pre-line;">${(c.comments || c.text || "—").replace(/<br\s*\/?>/gi, "\n")}</td>
                 <td>${c.inspector || compilerName}${c.vendorCheck ? ` / ${c.vendorCheck}` : ""}</td>
-                <td style="text-align: center; font-weight: 800; color: ${color}; font-size: 7.5px;">${st}</td>
+                <td style="text-align: center; font-weight: 800; color: ${color}; font-size: 7.5px;">${rawSt}</td>
               </tr>
             `;
-            })
-            .join("")
-        : `
-          <tr>
-            <td colspan="7" style="text-align: center; color: #64748b; padding: 24px;">
-              Zero outstanding quality observations recorded for this surveillance cycle.
-            </td>
-          </tr>
-        `;
+          })
+          .join("");
 
-    slidesHtml.push(`
-      <div class="pdf-sheet">
-        <div>
-          ${renderHeader("APPENDIX: SITE COMMENTS / OBSERVATION LOG")}
-          
-          <table class="data-table" style="margin-top: 8px;">
-            <thead>
-              <tr>
-                <th style="width: 4%; text-align: center;">S/N</th>
-                <th style="width: 10%;">DATE</th>
-                <th style="width: 16%;">LOCATION / LEVEL</th>
-                <th style="width: 14%;">STRUCTURAL ELEMENT</th>
-                <th style="width: 34%;">ROUTINE QUALITY OBSERVATIONS</th>
-                <th style="width: 14%;">INSPECTOR / VENDOR CHECK</th>
-                <th style="width: 8%; text-align: center;">STATUS</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${commentsRowsHtml}
-            </tbody>
-          </table>
-        </div>
-        ${renderFooter(slidesHtml.length + 1)}
-      </div>
-    `);
+        slidesHtml.push(`
+          <div class="pdf-sheet">
+            <div>
+              ${renderHeader(pageTitle)}
+              
+              <table class="data-table" style="margin-top: 8px;">
+                <thead>
+                  <tr>
+                    <th style="width: 4%; text-align: center;">S/N</th>
+                    <th style="width: 10%;">DATE</th>
+                    <th style="width: 16%;">LOCATION / LEVEL</th>
+                    <th style="width: 14%;">STRUCTURAL ELEMENT</th>
+                    <th style="width: 34%;">ROUTINE QUALITY OBSERVATIONS</th>
+                    <th style="width: 14%;">INSPECTOR / VENDOR CHECK</th>
+                    <th style="width: 8%; text-align: center;">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${commentsRowsHtml}
+                </tbody>
+              </table>
+            </div>
+            ${renderFooter(slidesHtml.length + 1)}
+          </div>
+        `);
+      }
+    }
   }
 
   // =========================================================================

@@ -34,18 +34,25 @@ export function generateQAQCHandbookHTML(
     <html lang="en">
     <head>
       <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>QA/QC System Instruction Booklet & SOP Manual - ${docRef}</title>
       <style>
-        * { box-sizing: border-box; }
+        *, *::before, *::after {
+          box-sizing: border-box;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
         @page {
           size: A4 portrait;
-          margin: 10mm 12mm 10mm 12mm;
+          margin: 0;
         }
         @media print {
-          body {
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-            margin: 0;
+          html, body {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            margin: 0 !important;
+            padding: 10mm 12mm 10mm 12mm !important;
             background: #ffffff !important;
             color: #0f172a !important;
           }
@@ -59,9 +66,11 @@ export function generateQAQCHandbookHTML(
           color: #0f172a;
           background: #ffffff;
           margin: 0;
-          padding: 12px 16px;
+          padding: 10mm 12mm 10mm 12mm;
           font-size: 9.5px;
           line-height: 1.45;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
         }
         .no-print {
           background: #0f172a;

@@ -141,13 +141,20 @@ export const generateStandardNCRPDF = (data: StandardNCRPDFData): void => {
     <html lang="en">
     <head>
       <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>${data.ncrNumber || "NCR"} - Non-Conformance Report</title>
       <style>
-        * { box-sizing: border-box; }
+        *, *::before, *::after {
+          box-sizing: border-box;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
         
         @page {
           size: A4 portrait;
-          margin: 12mm 10mm 14mm 10mm;
+          margin: 0;
+        }
           @bottom-left {
             content: "CONFIDENTIAL & PROPRIETARY — ${data.companyName || "JQMS"}";
             font-family: 'Segoe UI', -apple-system, sans-serif;
@@ -169,8 +176,11 @@ export const generateStandardNCRPDF = (data: StandardNCRPDFData): void => {
           font-size: 9px; 
           color: #1e293b; 
           margin: 0; 
+          padding: 12mm 10mm 14mm 10mm;
           line-height: 1.35; 
           background: #fff; 
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
         }
 
         .pdf-section {

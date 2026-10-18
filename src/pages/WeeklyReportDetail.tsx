@@ -130,9 +130,42 @@ const PhotoSkeleton: React.FC = () => (
   <div className="aspect-[4/3] rounded-xl bg-slate-200 animate-pulse" />
 );
 
-// ==========================================
-// MAIN COMPONENT
-// ==========================================
+const resolveTimestamp = (fieldVal: any, fallbackField?: any): number => {
+  const target = fieldVal ?? fallbackField;
+  if (!target) return 0;
+  if (typeof target === "number") return target;
+
+  if (typeof target === "object" && target !== null) {
+    if (typeof target.toMillis === "function") return target.toMillis();
+    if (typeof target.toDate === "function") return target.toDate().getTime();
+    if (typeof target.seconds === "number") return target.seconds * 1000;
+  }
+
+  if (
+    typeof target === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(target.trim())
+  ) {
+    const [y, m, d] = target.split("-").map(Number);
+    return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+  }
+
+  const parsed = new Date(target).getTime();
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+const isDateInWeek = (val: any, start: number, end: number): boolean => {
+  if (!val) return false;
+  const t = resolveTimestamp(val);
+  return t >= start && t <= end;
+};
+
+const isAnyDateInWeek = (
+  start: number,
+  end: number,
+  ...dates: any[]
+): boolean => {
+  return dates.some((d) => isDateInWeek(d, start, end));
+};
 
 export const WeeklyReportDetail: React.FC = () => {
   const {
@@ -415,13 +448,76 @@ export const WeeklyReportDetail: React.FC = () => {
           setProjectPhotos((photos as any) || []);
           setRawDeliveries(dels || []);
           setRawCubeTests(cubes || []);
-          setRawSiteInstructions(
-            data.siteInstructions &&
-              Array.isArray(data.siteInstructions) &&
-              data.siteInstructions.length > 0
-              ? data.siteInstructions
-              : instructions || [],
-          );
+          let resolvedSIs = data.siteInstructions;
+          if (
+            !resolvedSIs ||
+            !Array.isArray(resolvedSIs) ||
+            resolvedSIs.length === 0
+          ) {
+            let startMs = 0;
+            if (data.weekStart) {
+              const [sY, sM, sD] = data.weekStart.split("-").map(Number);
+              startMs = new Date(sY, sM - 1, sD, 0, 0, 0, 0).getTime();
+            }
+            let endMs = Infinity;
+            if (data.weekEnd) {
+              const [eY, eM, eD] = data.weekEnd.split("-").map(Number);
+              endMs = new Date(eY, eM - 1, eD, 23, 59, 59, 999).getTime();
+            }
+            const targetLevel = data.selectedLevelId || data.selectedLevel;
+
+            resolvedSIs = (instructions || []).filter((si: any) => {
+              const isIssuedInWeek = isAnyDateInWeek(
+                startMs,
+                endMs,
+                si.createdAt,
+                si.issuedDate,
+                si.date,
+                si.signedBy?.signedAt,
+              );
+              const st = String(si.status || "ISSUED")
+                .trim()
+                .toUpperCase();
+              const isClosed =
+                st === "CLOSED" ||
+                st === "COMPLETED" ||
+                st === "RESOLVED" ||
+                st === "CANCELLED" ||
+                Boolean(si.closedAt);
+              const isOpen = !isClosed;
+              const isClosedOrUpdatedInWeek = isAnyDateInWeek(
+                startMs,
+                endMs,
+                si.updatedAt,
+                si.modifiedAt,
+                si.lastModified,
+                si.closedAt,
+                si.completedAt,
+                si.resolvedAt,
+                si.verifiedAt,
+                si.signedAt,
+                si.statusChangeDate,
+                si.signedBy?.signedAt,
+              );
+              const siLevelId = si.levelId || "";
+              const matchesLevel =
+                !targetLevel ||
+                targetLevel === "ALL" ||
+                targetLevel.toLowerCase().includes("all") ||
+                !siLevelId ||
+                siLevelId === targetLevel ||
+                si.level === targetLevel ||
+                String(siLevelId).toLowerCase() ===
+                  String(targetLevel).toLowerCase() ||
+                String(si.level || "").toLowerCase() ===
+                  String(targetLevel).toLowerCase();
+              return (
+                (isIssuedInWeek || isOpen || isClosedOrUpdatedInWeek) &&
+                matchesLevel
+              );
+            });
+          }
+          setRawSiteInstructions(resolvedSIs || []);
         }
       } catch (err) {
         console.error("Error loading weekly report:", err);
@@ -1037,24 +1133,7 @@ export const WeeklyReportDetail: React.FC = () => {
     toast("Restored current period cube tests.", { icon: "🔄" });
   };
 
-  const resolveTimestamp = (fieldVal: any, fallbackField?: any): number => {
-    const target = fieldVal ?? fallbackField;
-    if (!target) return 0;
-    if (typeof target === "number") return target;
-
-    if (
-      typeof target === "string" &&
-      /^\d{4}-\d{2}-\d{2}$/.test(target.trim())
-    ) {
-      const [y, m, d] = target.split("-").map(Number);
-      return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
-    }
-
-    const parsed = new Date(target).getTime();
-    return isNaN(parsed) ? 0 : parsed;
-  };
-
-  // Flatten & Filter Site Comments (Type 1: Created in week, Type 2: Open regardless of age, Type 3: Closed/Status changed in week)
+  // Flatten & Filter Site Comments (Type 1: Created in week, Type 2: Open regardless of age, Type 3: Closed/Status changed/Edited in week)
   const getFlattenedSiteComments = (
     reports: any[],
     levelIdFilter: string,
@@ -1063,27 +1142,23 @@ export const WeeklyReportDetail: React.FC = () => {
   ) => {
     const flat = (reports || [])
       .flatMap((rep: any) => {
-        const reportCreatedDate = resolveTimestamp(
+        const isReportCreatedInWeek = isAnyDateInWeek(
+          dateStart,
+          dateEnd,
           rep.inspectionDate,
           rep.createdAt,
         );
-        const isReportCreatedInWeek =
-          reportCreatedDate >= dateStart && reportCreatedDate <= dateEnd;
 
         return (rep.observations || []).map((obs: any) => {
-          const obsCreatedDate = resolveTimestamp(
-            obs.date,
-            reportCreatedDate,
-          );
-          const obsUpdatedDate = resolveTimestamp(
-            obs.updatedAt || obs.closedAt || obs.rectifiedAt || obs.resolvedAt,
-            rep.updatedAt || obsCreatedDate,
-          );
-
           // Type 1: Created within the week in question
           const isCreatedInWeek =
             isReportCreatedInWeek ||
-            (obsCreatedDate >= dateStart && obsCreatedDate <= dateEnd);
+            isAnyDateInWeek(
+              dateStart,
+              dateEnd,
+              obs.date,
+              obs.createdAt,
+            );
 
           const normStatus = String(obs.status || "OPEN")
             .trim()
@@ -1091,6 +1166,8 @@ export const WeeklyReportDetail: React.FC = () => {
             .replace(/[\s-]+/g, "_");
 
           const isClosedOrCompliant =
+            Boolean(obs.isRectified) ||
+            Boolean(obs.resolved) ||
             normStatus === "compliant" ||
             normStatus === "fixed" ||
             normStatus === "rectified" ||
@@ -1102,22 +1179,76 @@ export const WeeklyReportDetail: React.FC = () => {
           // Type 2: Open (even if created years ago)
           const isOpenObservation = !isClosedOrCompliant;
 
-          // Type 3: Closed or status changed within the week
-          const isClosedOrUpdatedInWeek =
-            obsUpdatedDate >= dateStart && obsUpdatedDate <= dateEnd;
+          // Type 3: Closed, rectified, or edited within the week
+          const isClosedOrUpdatedInWeek = isAnyDateInWeek(
+            dateStart,
+            dateEnd,
+            obs.rectifiedDate,
+            obs.rectifiedAt,
+            obs.closedAt,
+            obs.resolvedAt,
+            obs.updatedAt,
+            obs.modifiedAt,
+            obs.statusChangeDate,
+            rep.updatedAt,
+          );
 
           // Inclusion rule: Type 1 OR Type 2 OR Type 3
           if (isCreatedInWeek || isOpenObservation || isClosedOrUpdatedInWeek) {
+            const commentContent =
+              obs.comments ||
+              obs.observationText ||
+              obs.fieldObservation ||
+              obs.comment ||
+              obs.text ||
+              obs.description ||
+              (Array.isArray(obs.commentItems)
+                ? obs.commentItems
+                    .map((ci: any) =>
+                      typeof ci === "string"
+                        ? ci
+                        : ci?.text || ci?.comment || "",
+                    )
+                    .filter(Boolean)
+                    .join("\n")
+                : "") ||
+              "";
+
+            const rawPhotos = obs.photos || obs.images || obs.photoUrls || [];
+            const sanitizedPhotos = Array.isArray(rawPhotos)
+              ? rawPhotos
+                  .map((p: any) => {
+                    if (typeof p === "string") {
+                      return p.length > 200000 ? "" : p;
+                    }
+                    if (
+                      p &&
+                      typeof p === "object" &&
+                      typeof p.url === "string"
+                    ) {
+                      return p.url.length > 200000 ? { ...p, url: "" } : p;
+                    }
+                    return p;
+                  })
+                  .filter(Boolean)
+              : [];
+
             return {
               id: obs.elementId || "",
               levelId: obs.levelId || "",
               level: obs.levelName || "",
-              element: obs.structuralElement || "",
-              location: obs.gridLocation || "",
-              comments: obs.comments || obs.fieldObservation || "",
+              element: obs.structuralElement || obs.elementName || "",
+              location: obs.gridLocation || obs.location || "",
+              comments: commentContent,
+              commentText: commentContent,
+              comment: commentContent,
+              text: commentContent,
+              observationText: commentContent,
+              fieldObservation: commentContent,
               commentItems: obs.commentItems || [],
               status: obs.status || "Open",
               inspector: rep.raisedByName || "Inspector",
+              author: rep.raisedByName || "Inspector",
               date:
                 obs.date ||
                 rep.inspectionDate ||
@@ -1126,8 +1257,10 @@ export const WeeklyReportDetail: React.FC = () => {
                   : ""),
               projectName: rep.projectName || "",
               reportNumber: rep.reportNumber || "",
-              photos: obs.photos || [],
+              photos: sanitizedPhotos,
+              images: sanitizedPhotos,
               vendorCheck: obs.vendorCheck || obs.assignedTo || "",
+              trade: obs.tradeName || obs.trade || "",
             };
           }
           return null;
@@ -1145,7 +1278,11 @@ export const WeeklyReportDetail: React.FC = () => {
       (item: any) =>
         !item.levelId ||
         item.levelId === levelIdFilter ||
-        item.level === levelIdFilter,
+        item.level === levelIdFilter ||
+        String(item.levelId || "").toLowerCase() ===
+          String(levelIdFilter).toLowerCase() ||
+        String(item.level || "").toLowerCase() ===
+          String(levelIdFilter).toLowerCase(),
     );
   };
 
@@ -1172,11 +1309,17 @@ export const WeeklyReportDetail: React.FC = () => {
 
       const targetLevel = report.selectedLevelId || report.selectedLevel;
 
-      // NCR Filter (Type 1: Created in week, Type 2: Open/Unrectified regardless of age, Type 3: Closed/Status changed in week)
+      // NCR Filter (Type 1: Created in week, Type 2: Open/Unrectified regardless of age, Type 3: Closed/Status changed/Edited in week)
       const rangeNcrs = (rawNcrs || []).filter((n: any) => {
         // Type 1: Created within the week in question
-        const tCreated = resolveTimestamp(n.createdAt, n.dateFound);
-        const isCreatedInWeek = tCreated >= startMs && tCreated <= endMs;
+        const isCreatedInWeek = isAnyDateInWeek(
+          startMs,
+          endMs,
+          n.createdAt,
+          n.dateFound,
+          n.dateRaised,
+          n.date,
+        );
 
         const st = String(n.status || "")
           .trim()
@@ -1190,22 +1333,27 @@ export const WeeklyReportDetail: React.FC = () => {
           st === "RESOLVED" ||
           st === "APPROVED" ||
           finalSt === "CLOSED" ||
-          finalSt === "RESOLVED";
+          finalSt === "RESOLVED" ||
+          Boolean(n.closedAt);
 
         // Type 2: Open (even if created years ago)
         const isOpenOrNotRectified = !isClosedOrRectified;
 
-        // Type 3: Closed or status changed within the week
-        const tUpdated = resolveTimestamp(
-          n.closedAt ||
-            n.rectifiedAt ||
-            n.resolvedAt ||
-            n.signDate ||
-            n.remedyDate ||
-            n.statusChangeDate,
+        // Type 3: Closed, status changed, or edited within the week
+        const isClosedOrUpdatedInWeek = isAnyDateInWeek(
+          startMs,
+          endMs,
           n.updatedAt,
+          n.modifiedAt,
+          n.lastModified,
+          n.dateUpdated,
+          n.closedAt,
+          n.rectifiedAt,
+          n.resolvedAt,
+          n.signDate,
+          n.remedyDate,
+          n.statusChangeDate,
         );
-        const isClosedOrUpdatedInWeek = tUpdated >= startMs && tUpdated <= endMs;
 
         const ncrLevelId = n.levelId || n.locationLevelId || "";
         const matchesLevel =
@@ -1214,7 +1362,11 @@ export const WeeklyReportDetail: React.FC = () => {
           targetLevel.toLowerCase().includes("all") ||
           !ncrLevelId ||
           ncrLevelId === targetLevel ||
-          n.level === targetLevel;
+          n.level === targetLevel ||
+          String(ncrLevelId).toLowerCase() ===
+            String(targetLevel).toLowerCase() ||
+          String(n.level || "").toLowerCase() ===
+            String(targetLevel).toLowerCase();
 
         // Inclusion rule: Type 1 OR Type 2 OR Type 3
         return (
@@ -1256,7 +1408,8 @@ export const WeeklyReportDetail: React.FC = () => {
           st === "RESOLVED" ||
           st === "APPROVED" ||
           finalSt === "CLOSED" ||
-          finalSt === "RESOLVED"
+          finalSt === "RESOLVED" ||
+          Boolean(n.closedAt)
         );
       };
 
@@ -1279,7 +1432,7 @@ export const WeeklyReportDetail: React.FC = () => {
       );
 
       toast.success(
-        `Refreshed! Found ${formattedNcrLog.length} NCR item(s) (issued in week, open, or updated in week).`,
+        `Refreshed! Found ${formattedNcrLog.length} NCR item(s) (active/open, issued in week, or edited/closed in week).`,
       );
     } catch (err) {
       console.error("Error refreshing NCRs:", err);
@@ -1320,6 +1473,7 @@ export const WeeklyReportDetail: React.FC = () => {
       );
 
       const isCommentClosedOrRectified = (f: any) => {
+        if (Boolean(f.isRectified) || Boolean(f.resolved)) return true;
         const s = String(f.status || "")
           .trim()
           .toLowerCase()
@@ -1367,7 +1521,7 @@ export const WeeklyReportDetail: React.FC = () => {
       );
 
       toast.success(
-        `Refreshed! Found ${flattened.length} site observation(s) (created in week or non-compliant/in-progress/open).`,
+        `Refreshed! Found ${flattened.length} site observation(s) (active/open, created in week, or edited/rectified in week).`,
       );
     } catch (err) {
       console.error("Error refreshing site comments:", err);
@@ -1680,14 +1834,17 @@ export const WeeklyReportDetail: React.FC = () => {
 
       const targetLevel = report.selectedLevelId || report.selectedLevel;
 
-      // Site Instructions Filter (Type 1: Issued in week, Type 2: Open regardless of age, Type 3: Closed/Status changed in week)
+      // Site Instructions Filter (Type 1: Issued in week, Type 2: Open regardless of age, Type 3: Closed/Status changed/Edited in week)
       const filteredList = (list || []).filter((si: any) => {
         // Type 1: Issued/Created within the week in question
-        const tIssued = resolveTimestamp(
-          si.issuedDate || si.date || si.signedBy?.signedAt,
+        const isIssuedInWeek = isAnyDateInWeek(
+          startMs,
+          endMs,
           si.createdAt,
+          si.issuedDate,
+          si.date,
+          si.signedBy?.signedAt,
         );
-        const isIssuedInWeek = tIssued >= startMs && tIssued <= endMs;
 
         // Type 2: Open (even if created years ago)
         const st = String(si.status || "ISSUED")
@@ -1697,19 +1854,25 @@ export const WeeklyReportDetail: React.FC = () => {
           st === "CLOSED" ||
           st === "COMPLETED" ||
           st === "RESOLVED" ||
-          st === "CANCELLED";
+          st === "CANCELLED" ||
+          Boolean(si.closedAt);
         const isOpen = !isClosed;
 
-        // Type 3: Closed or status changed within the week
-        const tUpdated = resolveTimestamp(
-          si.closedAt ||
-            si.completedAt ||
-            si.resolvedAt ||
-            si.verifiedAt ||
-            si.signedAt,
+        // Type 3: Closed, status changed, or edited within the week
+        const isClosedOrUpdatedInWeek = isAnyDateInWeek(
+          startMs,
+          endMs,
           si.updatedAt,
+          si.modifiedAt,
+          si.lastModified,
+          si.closedAt,
+          si.completedAt,
+          si.resolvedAt,
+          si.verifiedAt,
+          si.signedAt,
+          si.statusChangeDate,
+          si.signedBy?.signedAt,
         );
-        const isClosedOrUpdatedInWeek = tUpdated >= startMs && tUpdated <= endMs;
 
         const siLevelId = si.levelId || "";
         const matchesLevel =
@@ -1718,7 +1881,11 @@ export const WeeklyReportDetail: React.FC = () => {
           targetLevel.toLowerCase().includes("all") ||
           !siLevelId ||
           siLevelId === targetLevel ||
-          si.level === targetLevel;
+          si.level === targetLevel ||
+          String(siLevelId).toLowerCase() ===
+            String(targetLevel).toLowerCase() ||
+          String(si.level || "").toLowerCase() ===
+            String(targetLevel).toLowerCase();
 
         // Inclusion rule: Type 1 OR Type 2 OR Type 3
         return (
@@ -1737,7 +1904,7 @@ export const WeeklyReportDetail: React.FC = () => {
           : prev,
       );
       toast.success(
-        `Refreshed! Found ${filteredList.length} site instruction(s) (issued in week, open, or updated in week).`,
+        `Refreshed! Found ${filteredList.length} site instruction(s) (active/open, issued in week, or edited/closed in week).`,
       );
     } catch (err) {
       console.error("Error refreshing site instructions:", err);

@@ -1791,24 +1791,36 @@ export const WeeklyReportExecutiveMatrix: React.FC<
                           <span className="font-mono">{comment.date || "Active Cycle"}</span>
                         </div>
                         <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-line">
-                          {comment.commentText || comment.text || comment.comment}
+                          {comment.commentText ||
+                            comment.text ||
+                            comment.comment ||
+                            comment.comments ||
+                            comment.observationText ||
+                            comment.fieldObservation ||
+                            "—"}
                         </p>
                       </div>
 
-                      {comment.photos && comment.photos.length > 0 && (
+                      {((comment.photos && comment.photos.length > 0) ||
+                        (comment.images && comment.images.length > 0)) && (
                         <div className="flex items-center gap-2 overflow-x-auto pt-2 border-t border-slate-200 dark:border-slate-800">
-                          {comment.photos.map((photo: any, pIdx: number) => {
-                            const photoUrl = typeof photo === "string" ? photo : photo?.url || photo?.thumbnailUrl || "";
-                            if (!photoUrl) return null;
-                            return (
-                              <img
-                                key={pIdx}
-                                src={getThumbnail(photoUrl, 300)}
-                                alt="Observation evidence"
-                                className="w-12 h-12 rounded-lg object-cover border border-slate-300 dark:border-slate-700 shrink-0"
-                              />
-                            );
-                          })}
+                          {(comment.photos || comment.images || []).map(
+                            (photo: any, pIdx: number) => {
+                              const photoUrl =
+                                typeof photo === "string"
+                                  ? photo
+                                  : photo?.url || photo?.thumbnailUrl || "";
+                              if (!photoUrl) return null;
+                              return (
+                                <img
+                                  key={pIdx}
+                                  src={getThumbnail(photoUrl, 300)}
+                                  alt="Observation evidence"
+                                  className="w-12 h-12 rounded-lg object-cover border border-slate-300 dark:border-slate-700 shrink-0"
+                                />
+                              );
+                            },
+                          )}
                         </div>
                       )}
 

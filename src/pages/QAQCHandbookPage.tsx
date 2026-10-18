@@ -1004,13 +1004,25 @@ export const QAQCHandbookPage: React.FC = () => {
 
       {/* Print-specific style block fallback */}
       <style>{`
+        @page {
+          margin: 0;
+        }
         @media print {
+          *, *::before, *::after {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
           .no-print, header, nav, aside {
             display: none !important;
           }
           body, html {
             background: #ffffff !important;
             color: #0f172a !important;
+            margin: 0 !important;
+            padding: 8mm !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
         }
       `}</style>

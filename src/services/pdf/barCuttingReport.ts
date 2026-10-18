@@ -857,15 +857,27 @@ export function generateCuttingScheduleHTML(
     <html lang="en">
     <head>
       <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>${docRef} - Cutting Schedule</title>
       <style>
-        * { box-sizing: border-box; }
+        *, *::before, *::after {
+          box-sizing: border-box;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
         @page {
           size: A4 landscape;
-          margin: 6mm 8mm 6mm 8mm;
+          margin: 0;
         }
         @media print {
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; }
+          html, body {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            margin: 0 !important;
+            padding: 6mm 8mm 6mm 8mm !important;
+            background: #ffffff !important;
+          }
           .no-print { display: none !important; }
         }
         body {
@@ -873,7 +885,7 @@ export function generateCuttingScheduleHTML(
           color: #0f172a;
           background: #ffffff;
           margin: 0;
-          padding: 8px 10px;
+          padding: 6mm 8mm 6mm 8mm;
           font-size: 9.5px;
         }
         .doc-header {

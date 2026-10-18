@@ -493,6 +493,20 @@ export const WeeklyReportCreate: React.FC = () => {
     return isNaN(parsed) ? 0 : parsed;
   };
 
+  const isDateInWeek = (val: any, start: number, end: number): boolean => {
+    if (!val) return false;
+    const t = resolveTimestamp(val);
+    return t >= start && t <= end;
+  };
+
+  const isAnyDateInWeek = (
+    start: number,
+    end: number,
+    ...dates: any[]
+  ): boolean => {
+    return dates.some((d) => isDateInWeek(d, start, end));
+  };
+
   const handleLevelChange = (newLevelId: string) => {
     setSelectedLevelId(newLevelId);
 
@@ -649,30 +663,23 @@ export const WeeklyReportCreate: React.FC = () => {
   ): FlattenedSiteComment[] => {
     const flat = (reports || [])
       .flatMap((report) => {
-        const reportCreatedDate = resolveTimestamp(
+        const isReportCreatedInWeek = isAnyDateInWeek(
+          dateStart,
+          dateEnd,
           report.inspectionDate,
           report.createdAt,
         );
-        const isReportCreatedInWeek =
-          reportCreatedDate >= dateStart && reportCreatedDate <= dateEnd;
 
         return (report.observations || []).map((obs) => {
-          const obsCreatedDate = resolveTimestamp(
-            (obs as any).date,
-            reportCreatedDate,
-          );
-          const obsUpdatedDate = resolveTimestamp(
-            (obs as any).updatedAt ||
-              (obs as any).closedAt ||
-              (obs as any).rectifiedAt ||
-              (obs as any).resolvedAt,
-            (report as any).updatedAt || obsCreatedDate,
-          );
-
           // Type 1: Created within the week in question
           const isCreatedInWeek =
             isReportCreatedInWeek ||
-            (obsCreatedDate >= dateStart && obsCreatedDate <= dateEnd);
+            isAnyDateInWeek(
+              dateStart,
+              dateEnd,
+              (obs as any).date,
+              (obs as any).createdAt,
+            );
 
           const normStatus = String(obs.status || "OPEN")
             .trim()
@@ -680,6 +687,8 @@ export const WeeklyReportCreate: React.FC = () => {
             .replace(/[\s-]+/g, "_");
 
           const isClosedOrCompliant =
+            Boolean((obs as any).isRectified) ||
+            Boolean((obs as any).resolved) ||
             normStatus === "compliant" ||
             normStatus === "fixed" ||
             normStatus === "rectified" ||
@@ -691,22 +700,81 @@ export const WeeklyReportCreate: React.FC = () => {
           // Type 2: Open (even if created years ago)
           const isOpenObservation = !isClosedOrCompliant;
 
-          // Type 3: Closed or status changed within the week
-          const isClosedOrUpdatedInWeek =
-            obsUpdatedDate >= dateStart && obsUpdatedDate <= dateEnd;
+          // Type 3: Closed, rectified, or edited within the week
+          const isClosedOrUpdatedInWeek = isAnyDateInWeek(
+            dateStart,
+            dateEnd,
+            (obs as any).rectifiedDate,
+            (obs as any).rectifiedAt,
+            (obs as any).closedAt,
+            (obs as any).resolvedAt,
+            (obs as any).updatedAt,
+            (obs as any).modifiedAt,
+            (obs as any).statusChangeDate,
+            (report as any).updatedAt,
+          );
 
           // Inclusion rule: Type 1 OR Type 2 OR Type 3
           if (isCreatedInWeek || isOpenObservation || isClosedOrUpdatedInWeek) {
+            const commentContent =
+              obs.comments ||
+              (obs as any).observationText ||
+              (obs as any).fieldObservation ||
+              (obs as any).comment ||
+              (obs as any).text ||
+              (obs as any).description ||
+              (Array.isArray((obs as any).commentItems)
+                ? (obs as any).commentItems
+                    .map((ci: any) =>
+                      typeof ci === "string"
+                        ? ci
+                        : ci?.text || ci?.comment || "",
+                    )
+                    .filter(Boolean)
+                    .join("\n")
+                : "") ||
+              "";
+
+            const rawPhotos =
+              (obs as any).photos ||
+              (obs as any).images ||
+              (obs as any).photoUrls ||
+              [];
+            const sanitizedPhotos = Array.isArray(rawPhotos)
+              ? rawPhotos
+                  .map((p: any) => {
+                    if (typeof p === "string") {
+                      return p.length > 200000 ? "" : p;
+                    }
+                    if (
+                      p &&
+                      typeof p === "object" &&
+                      typeof p.url === "string"
+                    ) {
+                      return p.url.length > 200000 ? { ...p, url: "" } : p;
+                    }
+                    return p;
+                  })
+                  .filter(Boolean)
+              : [];
+
             return {
               id: obs.elementId || "",
               levelId: obs.levelId || "",
               level: obs.levelName || "",
-              element: obs.structuralElement || "",
-              location: obs.gridLocation || "",
-              comments: obs.comments || (obs as any).fieldObservation || "",
+              element:
+                obs.structuralElement || (obs as any).elementName || "",
+              location: obs.gridLocation || (obs as any).location || "",
+              comments: commentContent,
+              commentText: commentContent,
+              comment: commentContent,
+              text: commentContent,
+              observationText: commentContent,
+              fieldObservation: commentContent,
               commentItems: (obs as any).commentItems || [],
               status: obs.status || "Open",
               inspector: report.raisedByName || "Inspector",
+              author: report.raisedByName || "Inspector",
               date:
                 (obs as any).date ||
                 report.inspectionDate ||
@@ -715,25 +783,11 @@ export const WeeklyReportCreate: React.FC = () => {
                   : ""),
               projectName: report.projectName || "",
               reportNumber: report.reportNumber || "",
-              photos: Array.isArray((obs as any).photos)
-                ? (obs as any).photos
-                    .map((p: any) => {
-                      if (typeof p === "string") {
-                        return p.length > 200000 ? "" : p;
-                      }
-                      if (
-                        p &&
-                        typeof p === "object" &&
-                        typeof p.url === "string"
-                      ) {
-                        return p.url.length > 200000 ? { ...p, url: "" } : p;
-                      }
-                      return p;
-                    })
-                    .filter(Boolean)
-                : [],
+              photos: sanitizedPhotos,
+              images: sanitizedPhotos,
               vendorCheck:
                 (obs as any).vendorCheck || (obs as any).assignedTo || "",
+              trade: (obs as any).tradeName || (obs as any).trade || "",
             };
           }
           return null;
@@ -753,7 +807,11 @@ export const WeeklyReportCreate: React.FC = () => {
       (item) =>
         !item.levelId ||
         item.levelId === levelIdFilter ||
-        item.level === levelIdFilter,
+        item.level === levelIdFilter ||
+        String(item.levelId || "").toLowerCase() ===
+          String(levelIdFilter).toLowerCase() ||
+        String(item.level || "").toLowerCase() ===
+          String(levelIdFilter).toLowerCase(),
     );
   };
 
@@ -819,11 +877,17 @@ export const WeeklyReportCreate: React.FC = () => {
         ncrNumber: d.ncrNumber || "",
       }));
 
-    // NCR Filter (Type 1: Created in week, Type 2: Open/Unrectified regardless of age, Type 3: Closed/Status changed in week)
+    // NCR Filter (Type 1: Created in week, Type 2: Open/Unrectified regardless of age, Type 3: Closed/Status changed/Edited in week)
     const rangeNcrs = ncrs.filter((n) => {
       // Type 1: Created within the week in question
-      const tCreated = resolveTimestamp(n.createdAt, n.dateFound);
-      const isCreatedInWeek = tCreated >= start && tCreated <= end;
+      const isCreatedInWeek = isAnyDateInWeek(
+        start,
+        end,
+        n.createdAt,
+        n.dateFound,
+        (n as any).dateRaised,
+        (n as any).date,
+      );
 
       const st = String(n.status || "")
         .trim()
@@ -837,22 +901,27 @@ export const WeeklyReportCreate: React.FC = () => {
         st === "RESOLVED" ||
         st === "APPROVED" ||
         finalSt === "CLOSED" ||
-        finalSt === "RESOLVED";
+        finalSt === "RESOLVED" ||
+        Boolean((n as any).closedAt);
 
       // Type 2: Open (even if created years ago)
       const isOpenOrNotRectified = !isClosedOrRectified;
 
-      // Type 3: Closed or status changed within the week
-      const tUpdated = resolveTimestamp(
-        (n as any).closedAt ||
-          (n as any).rectifiedAt ||
-          (n as any).resolvedAt ||
-          (n as any).signDate ||
-          (n as any).remedyDate ||
-          (n as any).statusChangeDate,
+      // Type 3: Closed, status changed, or edited within the week
+      const isClosedOrUpdatedInWeek = isAnyDateInWeek(
+        start,
+        end,
         n.updatedAt,
+        (n as any).modifiedAt,
+        (n as any).lastModified,
+        (n as any).dateUpdated,
+        (n as any).closedAt,
+        (n as any).rectifiedAt,
+        (n as any).resolvedAt,
+        (n as any).signDate,
+        (n as any).remedyDate,
+        (n as any).statusChangeDate,
       );
-      const isClosedOrUpdatedInWeek = tUpdated >= start && tUpdated <= end;
 
       const ncrLevelId = (n as any).levelId || (n as any).locationLevelId || "";
       const matchesLevel =
@@ -863,7 +932,11 @@ export const WeeklyReportCreate: React.FC = () => {
           .includes("all") ||
         !ncrLevelId ||
         ncrLevelId === selectedLevelId ||
-        (n as any).level === selectedLevelId;
+        (n as any).level === selectedLevelId ||
+        String(ncrLevelId).toLowerCase() ===
+          String(selectedLevelId).toLowerCase() ||
+        String((n as any).level || "").toLowerCase() ===
+          String(selectedLevelId).toLowerCase();
 
       // Inclusion rule: Type 1 OR Type 2 OR Type 3
       return (
@@ -1058,14 +1131,17 @@ export const WeeklyReportCreate: React.FC = () => {
       status: n.status || "OPEN",
     }));
 
-    // Site Instructions Filter (Type 1: Issued in week, Type 2: Open regardless of age, Type 3: Closed/Status changed in week)
+    // Site Instructions Filter (Type 1: Issued in week, Type 2: Open regardless of age, Type 3: Closed/Status changed/Edited in week)
     const rangeSiteInstructions = siteInstructions.filter((si) => {
       // Type 1: Issued/Created within the week in question
-      const tIssued = resolveTimestamp(
-        (si as any).issuedDate || (si as any).date || si.signedBy?.signedAt,
+      const isIssuedInWeek = isAnyDateInWeek(
+        start,
+        end,
         si.createdAt,
+        (si as any).issuedDate,
+        (si as any).date,
+        (si as any).signedBy?.signedAt,
       );
-      const isIssuedInWeek = tIssued >= start && tIssued <= end;
 
       // Type 2: Open (even if created years ago)
       const st = String(si.status || "ISSUED")
@@ -1075,19 +1151,25 @@ export const WeeklyReportCreate: React.FC = () => {
         st === "CLOSED" ||
         st === "COMPLETED" ||
         st === "RESOLVED" ||
-        st === "CANCELLED";
+        st === "CANCELLED" ||
+        Boolean((si as any).closedAt);
       const isOpen = !isClosed;
 
-      // Type 3: Closed or status changed within the week
-      const tUpdated = resolveTimestamp(
-        (si as any).closedAt ||
-          (si as any).completedAt ||
-          (si as any).resolvedAt ||
-          (si as any).verifiedAt ||
-          (si as any).signedAt,
+      // Type 3: Closed, status changed, or edited within the week
+      const isClosedOrUpdatedInWeek = isAnyDateInWeek(
+        start,
+        end,
         si.updatedAt,
+        (si as any).modifiedAt,
+        (si as any).lastModified,
+        (si as any).closedAt,
+        (si as any).completedAt,
+        (si as any).resolvedAt,
+        (si as any).verifiedAt,
+        (si as any).signedAt,
+        (si as any).statusChangeDate,
+        (si as any).signedBy?.signedAt,
       );
-      const isClosedOrUpdatedInWeek = tUpdated >= start && tUpdated <= end;
 
       const siLevelId = (si as any).levelId || "";
       const matchesLevel =
@@ -1098,7 +1180,11 @@ export const WeeklyReportCreate: React.FC = () => {
           .includes("all") ||
         !siLevelId ||
         siLevelId === selectedLevelId ||
-        (si as any).level === selectedLevelId;
+        (si as any).level === selectedLevelId ||
+        String(siLevelId).toLowerCase() ===
+          String(selectedLevelId).toLowerCase() ||
+        String((si as any).level || "").toLowerCase() ===
+          String(selectedLevelId).toLowerCase();
 
       // Inclusion rule: Type 1 OR Type 2 OR Type 3
       return (

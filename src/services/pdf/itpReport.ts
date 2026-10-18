@@ -565,11 +565,26 @@ export function generateITPHTML(
     <html>
     <head>
       <meta charset="utf-8"/>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
       <title>${docRef} - ITP Matrix</title>
       <style>
-        * { box-sizing: border-box; }
-        @page { size: A4 landscape; margin: 8mm; }
-        body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; font-size: 10px; color: #0f172a; margin: 0; padding: 10px; }
+        *, *::before, *::after {
+          box-sizing: border-box;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
+        @page { size: A4 landscape; margin: 0; }
+        @media print {
+          html, body {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            margin: 0 !important;
+            padding: 8mm !important;
+            background: #ffffff !important;
+          }
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; font-size: 10px; color: #0f172a; margin: 0; padding: 8mm; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         .doc-header { width: 100%; border: 1.5px solid #0f172a; border-collapse: collapse; margin-bottom: 8px; background: #ffffff; }
         .doc-header td { border: 1px solid #cbd5e1; padding: 6px; vertical-align: middle; }
         .header-brand { width: 22%; background: #ffffff; text-align: center; }

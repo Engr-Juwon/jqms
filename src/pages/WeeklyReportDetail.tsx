@@ -424,6 +424,9 @@ export const WeeklyReportDetail: React.FC = () => {
         if (data.templateId && data.templateId in WEEKLY_REPORT_TEMPLATES) {
           setSelectedTemplate(data.templateId as WeeklyReportTemplateId);
         }
+        if (data.printOrientation) {
+          setPrintOrientation(data.printOrientation);
+        }
         setPrintIncludeNcrs(
           (data as any).includeNcrs !== undefined
             ? (data as any).includeNcrs
@@ -5304,7 +5307,7 @@ export const WeeklyReportDetail: React.FC = () => {
                     type="button"
                     onClick={() => {
                       generateWeeklyReportPDF(
-                        { ...report, templateId: selectedTemplate, revisionNumber },
+                        { ...report, templateId: selectedTemplate, revisionNumber, printOrientation },
                         activeProject || {},
                         company || {},
                         {

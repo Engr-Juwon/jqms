@@ -2435,6 +2435,8 @@ export function generateWeeklyReportPDF(
   company: Partial<Company> = {},
   options?: WeeklyReportPrintOptions,
 ): void {
+  const orientation = options?.orientation || report.printOrientation || "portrait";
+  const isPortrait = orientation === "portrait";
   const rawRevision =
     options?.revisionNumber ||
     report.revisionNumber ||
@@ -2718,87 +2720,184 @@ export function generateWeeklyReportPDF(
   // =========================================================================
   // SLIDE 1: COVER SLIDE (Theme Adaptive Hero Layout)
   // =========================================================================
-  slidesHtml.push(`
-    <div class="pdf-sheet" style="padding: 0; display: flex; flex-direction: row; height: 210mm; overflow: hidden; position: relative;">
-      <!-- Left Hero Column (~46% width) -->
-      <div style="width: 46%; padding: 24mm 14mm 16mm 16mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; position: relative; border-right: 3px solid ${theme.accentColor};">
-        <div>
+  if (isPortrait) {
+    slidesHtml.push(`
+      <div class="pdf-sheet" style="padding: 0; display: flex; flex-direction: column; height: 297mm; overflow: hidden; position: relative; background: #ffffff;">
+        <!-- Top Hero Column -->
+        <div style="padding: 14mm 16mm 10mm 16mm; background: #ffffff; border-bottom: 3px solid ${theme.accentColor};">
           <!-- Company Brand Header -->
-          <div style="margin-bottom: 22px;">
-            <div style="display: flex; align-items: flex-end; gap: 2px; margin-bottom: 4px;">
+          <div style="margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 8px;">
               ${
                 companyLogo
-                  ? `<img src="${companyLogo}" style="max-height: 120px; max-width: 190px; object-fit: contain;" alt="${companyName}" />`
+                  ? `<img src="${companyLogo}" style="max-height: 44px; max-width: 150px; object-fit: contain;" alt="${companyName}" />`
                   : `
-                <div style="display: flex; gap: 3px; align-items: flex-end; height: 26px;">
-                  <span style="width: 5px; height: 14px; background: ${theme.accentColor}; border-radius: 1px;"></span>
-                  <span style="width: 5px; height: 24px; background: ${theme.accentColor}; border-radius: 1px;"></span>
-                  <span style="width: 5px; height: 18px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+                <div style="display: flex; gap: 2.5px; align-items: flex-end; height: 20px;">
+                  <span style="width: 4px; height: 11px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+                  <span style="width: 4px; height: 20px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+                  <span style="width: 4px; height: 15px; background: ${theme.accentColor}; border-radius: 1px;"></span>
                 </div>
               `
               }
+              <div style="font-size: 13px; font-weight: 900; color: #0f172a; letter-spacing: 1.2px; text-transform: uppercase;">
+                ${companyName.toUpperCase()}
+              </div>
             </div>
-            <div style="font-size: 13px; font-weight: 900; color: #0f172a; letter-spacing: 1.5px; text-transform: uppercase;">
-              ${companyName.toUpperCase()}
+            <div style="font-size: 7.5px; font-weight: 800; color: #64748b; letter-spacing: 0.5px; text-transform: uppercase; background: #f8fafc; border: 1px solid #e2e8f0; padding: 3px 8px; border-radius: 4px;">
+              ISO 9001:2015 AUDITED
             </div>
           </div>
 
           <!-- Project Title & Divider -->
-          <div style="margin-bottom: 18px;">
-            <div style="font-size: 34px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; text-transform: uppercase; line-height: 1.05;">
+          <div style="margin-bottom: 8px;">
+            <div style="font-size: 28px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; text-transform: uppercase; line-height: 1.1;">
               ${projectName.toUpperCase()}
             </div>
-            <div style="width: 100%; height: 2px; background: ${theme.accentColor}; margin-top: 14px;"></div>
           </div>
 
           <!-- Report Title -->
-          <div style="font-size: 19px; font-weight: 900; color: #0f172a; text-transform: uppercase; letter-spacing: -0.3px; margin-bottom: 12px;">
-            ${report.title || "QA/QC WEEKLY REPORT"}
+          <div style="font-size: 16px; font-weight: 900; color: #0f172a; text-transform: uppercase; letter-spacing: -0.2px; margin-bottom: 10px;">
+            ${report.title || "QA/QC WEEKLY SURVEILLANCE REPORT"}
           </div>
 
-          <!-- Surveillance Level Tag -->
-          <div style="display: inline-block; background: ${theme.accentLight}; color: ${theme.accentDark}; font-size: 10px; font-weight: 800; padding: 5px 12px; border-radius: ${theme.cardRadius}; border: 1px solid ${theme.cardBorder}; text-transform: uppercase; margin-bottom: 12px;">
-            SURVEILLANCE: ${selectedLevel}
-          </div>
-          <div></div>
-
-          <!-- Date Range Pill -->
-          <div style="display: inline-block; background: #FFFFFF; border: 1.5px solid ${theme.accentColor}; color: ${theme.accentDark}; font-size: 10.5px; font-weight: 800; padding: 6px 22px; border-radius: 9999px; letter-spacing: 0.5px; text-transform: uppercase;">
-            ${startDateStr} &nbsp;TO&nbsp; ${endDateStr}
-          </div>
-        </div>
-
-        <!-- Compiler Card (Bottom Left) -->
-        <div style="background: #ffffff; border: 1px solid ${theme.cardBorder}; border-left: 4px solid ${theme.accentColor}; border-radius: ${theme.cardRadius}; padding: 12px 16px; margin-top: auto;">
-          <div style="font-size: 7.5px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
-            AUTHORIZED COMPILER &amp; QA/QC OFFICER
-          </div>
-          <div style="font-size: 14px; font-weight: 900; color: #0f172a; margin-top: 3px;">
-            ${compilerName}
-          </div>
-          <div style="font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase; margin-top: 1px;">
-            ${compilerRole}
-          </div>
-        </div>
-      </div>
-
-      <!-- Right Column (~54% width) Full-Bleed Cover Image -->
-      <div style="width: 54%; height: 100%; background: #0f172a; overflow: hidden; position: relative;">
-        ${
-          projectCoverImage
-            ? `<img src="${projectCoverImage}" style="width: 100%; height: 100%; object-fit: cover;" alt="${projectName}" />`
-            : `
-          <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);">
-            <div style="text-align: center; color: #ffffff; padding: 30px;">
-              <div style="font-size: 36px; font-weight: 900; color: #c28b5e;">${projectName.toUpperCase()}</div>
-              <div style="font-size: 12px; color: #94a3b8; font-weight: 700; margin-top: 8px;">OFFICIAL QA/QC SURVEILLANCE DOSSIER</div>
+          <!-- Surveillance Level Tag & Date Range Pill -->
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <div style="display: inline-block; background: ${theme.accentLight}; color: ${theme.accentDark}; font-size: 9px; font-weight: 800; padding: 4px 10px; border-radius: ${theme.cardRadius}; border: 1px solid ${theme.cardBorder}; text-transform: uppercase;">
+              SURVEILLANCE: ${selectedLevel}
+            </div>
+            <div style="display: inline-block; background: #FFFFFF; border: 1.5px solid ${theme.accentColor}; color: ${theme.accentDark}; font-size: 9px; font-weight: 800; padding: 4px 14px; border-radius: 9999px; letter-spacing: 0.3px; text-transform: uppercase;">
+              ${startDateStr} &nbsp;TO&nbsp; ${endDateStr}
             </div>
           </div>
-        `
-        }
+        </div>
+
+        <!-- Center Full-Bleed Cover Image -->
+        <div style="flex: 1; min-height: 120mm; max-height: 145mm; width: 100%; background: #0f172a; overflow: hidden; position: relative;">
+          ${
+            projectCoverImage
+              ? `<img src="${projectCoverImage}" style="width: 100%; height: 100%; object-fit: cover;" alt="${projectName}" />`
+              : `
+            <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);">
+              <div style="text-align: center; color: #ffffff; padding: 30px;">
+                <div style="font-size: 32px; font-weight: 900; color: #c28b5e;">${projectName.toUpperCase()}</div>
+                <div style="font-size: 11px; color: #94a3b8; font-weight: 700; margin-top: 6px;">OFFICIAL QA/QC SURVEILLANCE DOSSIER</div>
+              </div>
+            </div>
+          `
+          }
+        </div>
+
+        <!-- Bottom Compiler Card & Reference Info -->
+        <div style="padding: 10mm 16mm 12mm 16mm; background: #ffffff; border-top: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+          <div style="border-left: 4px solid ${theme.accentColor}; padding-left: 12px;">
+            <div style="font-size: 7.5px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
+              AUTHORIZED COMPILER &amp; QA/QC OFFICER
+            </div>
+            <div style="font-size: 14px; font-weight: 900; color: #0f172a; margin-top: 2px;">
+              ${compilerName}
+            </div>
+            <div style="font-size: 8.5px; font-weight: 800; color: #64748b; text-transform: uppercase; margin-top: 1px;">
+              ${compilerRole} &bull; ${compilerEmail}
+            </div>
+          </div>
+
+          <div style="text-align: right;">
+            <div style="font-size: 7px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
+              DOCUMENT REFERENCE
+            </div>
+            <div style="font-size: 11px; font-weight: 900; font-family: monospace; color: #0f172a; margin-top: 1px;">
+              ${docRef}
+            </div>
+            <div style="font-size: 8px; color: #059669; font-weight: 800; margin-top: 2px;">
+              ${revisionText}
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-  `);
+    `);
+  } else {
+    slidesHtml.push(`
+      <div class="pdf-sheet" style="padding: 0; display: flex; flex-direction: row; height: 210mm; overflow: hidden; position: relative;">
+        <!-- Left Hero Column (~46% width) -->
+        <div style="width: 46%; padding: 24mm 14mm 16mm 16mm; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; position: relative; border-right: 3px solid ${theme.accentColor};">
+          <div>
+            <!-- Company Brand Header -->
+            <div style="margin-bottom: 22px;">
+              <div style="display: flex; align-items: flex-end; gap: 2px; margin-bottom: 4px;">
+                ${
+                  companyLogo
+                    ? `<img src="${companyLogo}" style="max-height: 120px; max-width: 190px; object-fit: contain;" alt="${companyName}" />`
+                    : `
+                  <div style="display: flex; gap: 3px; align-items: flex-end; height: 26px;">
+                    <span style="width: 5px; height: 14px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+                    <span style="width: 5px; height: 24px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+                    <span style="width: 5px; height: 18px; background: ${theme.accentColor}; border-radius: 1px;"></span>
+                  </div>
+                `
+                }
+              </div>
+              <div style="font-size: 13px; font-weight: 900; color: #0f172a; letter-spacing: 1.5px; text-transform: uppercase;">
+                ${companyName.toUpperCase()}
+              </div>
+            </div>
+
+            <!-- Project Title & Divider -->
+            <div style="margin-bottom: 18px;">
+              <div style="font-size: 34px; font-weight: 900; color: #0f172a; letter-spacing: -0.5px; text-transform: uppercase; line-height: 1.05;">
+                ${projectName.toUpperCase()}
+              </div>
+              <div style="width: 100%; height: 2px; background: ${theme.accentColor}; margin-top: 14px;"></div>
+            </div>
+
+            <!-- Report Title -->
+            <div style="font-size: 19px; font-weight: 900; color: #0f172a; text-transform: uppercase; letter-spacing: -0.3px; margin-bottom: 12px;">
+              ${report.title || "QA/QC WEEKLY REPORT"}
+            </div>
+
+            <!-- Surveillance Level Tag -->
+            <div style="display: inline-block; background: ${theme.accentLight}; color: ${theme.accentDark}; font-size: 10px; font-weight: 800; padding: 5px 12px; border-radius: ${theme.cardRadius}; border: 1px solid ${theme.cardBorder}; text-transform: uppercase; margin-bottom: 12px;">
+              SURVEILLANCE: ${selectedLevel}
+            </div>
+            <div></div>
+
+            <!-- Date Range Pill -->
+            <div style="display: inline-block; background: #FFFFFF; border: 1.5px solid ${theme.accentColor}; color: ${theme.accentDark}; font-size: 10.5px; font-weight: 800; padding: 6px 22px; border-radius: 9999px; letter-spacing: 0.5px; text-transform: uppercase;">
+              ${startDateStr} &nbsp;TO&nbsp; ${endDateStr}
+            </div>
+          </div>
+
+          <!-- Compiler Card (Bottom Left) -->
+          <div style="background: #ffffff; border: 1px solid ${theme.cardBorder}; border-left: 4px solid ${theme.accentColor}; border-radius: ${theme.cardRadius}; padding: 12px 16px; margin-top: auto;">
+            <div style="font-size: 7.5px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
+              AUTHORIZED COMPILER &amp; QA/QC OFFICER
+            </div>
+            <div style="font-size: 14px; font-weight: 900; color: #0f172a; margin-top: 3px;">
+              ${compilerName}
+            </div>
+            <div style="font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase; margin-top: 1px;">
+              ${compilerRole}
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column (~54% width) Full-Bleed Cover Image -->
+        <div style="width: 54%; height: 100%; background: #0f172a; overflow: hidden; position: relative;">
+          ${
+            projectCoverImage
+              ? `<img src="${projectCoverImage}" style="width: 100%; height: 100%; object-fit: cover;" alt="${projectName}" />`
+              : `
+            <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);">
+              <div style="text-align: center; color: #ffffff; padding: 30px;">
+                <div style="font-size: 36px; font-weight: 900; color: #c28b5e;">${projectName.toUpperCase()}</div>
+                <div style="font-size: 12px; color: #94a3b8; font-weight: 700; margin-top: 8px;">OFFICIAL QA/QC SURVEILLANCE DOSSIER</div>
+              </div>
+            </div>
+          `
+          }
+        </div>
+      </div>
+    `);
+  }
 
   // =========================================================================
   // SLIDE 2: EXECUTIVE SUMMARY: OPERATIONAL OVERVIEW
@@ -2809,7 +2908,7 @@ export function generateWeeklyReportPDF(
         ${renderHeader("EXECUTIVE SUMMARY: OPERATIONAL OVERVIEW")}
         
         <!-- 4 Top Cards Grid -->
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px;">
+        <div style="display: grid; grid-template-columns: ${isPortrait ? "repeat(2, 1fr)" : "repeat(4, 1fr)"}; gap: ${isPortrait ? "10px" : "14px"}; margin-bottom: ${isPortrait ? "12px" : "18px"};">
           <!-- Card 1: Total Scope Volume -->
           <div style="background: #ffffff; border: 1px solid #e2e8f0; border-top: 3px solid #0f172a; border-radius: 4px; padding: 12px 14px;">
             <div style="font-size: 7.5px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">TOTAL SCOPE VOLUME</div>
@@ -2840,7 +2939,7 @@ export function generateWeeklyReportPDF(
         </div>
 
         <!-- Large Content Card -->
-        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 22px 26px; min-height: 320px; position: relative;">
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 22px 26px; min-height: ${isPortrait ? "420px" : "320px"}; position: relative;">
           <div style="border-left: 6px solid #0f172a; padding-left: 14px; margin-bottom: 16px;">
             <div style="font-size: 12px; font-weight: 900; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;">
               EXECUTIVE QA/QC SYNOPSIS &amp; MANAGEMENT EVALUATION
@@ -2896,34 +2995,34 @@ export function generateWeeklyReportPDF(
       <div>
         ${renderHeader("EXECUTIVE SUMMARY: STRATEGIC INSIGHTS")}
         
-        <!-- 3 Columns Grid -->
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; min-height: 420px;">
+        <!-- 3 Columns / Cards Layout -->
+        <div style="display: flex; flex-direction: ${isPortrait ? "column" : "row"}; gap: 12px; min-height: ${isPortrait ? "auto" : "420px"};">
           <!-- Column 1: Highlights -->
-          <div style="display: flex; flex-direction: column;">
-            <div style="background: #16a34a; color: #ffffff; text-align: center; padding: 10px 12px; font-weight: 800; font-size: 10.5px; border-radius: 4px 4px 0 0; text-transform: uppercase; letter-spacing: 0.5px;">
+          <div style="display: flex; flex-direction: column; flex: 1;">
+            <div style="background: #16a34a; color: #ffffff; text-align: center; padding: 8px 12px; font-weight: 800; font-size: 10px; border-radius: 4px 4px 0 0; text-transform: uppercase; letter-spacing: 0.5px;">
               KEY PROJECT HIGHLIGHTS
             </div>
-            <div style="flex: 1; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 4px 4px; padding: 16px; font-size: 9px; line-height: 1.5; color: #334155; background: #ffffff;">
+            <div style="flex: 1; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 4px 4px; padding: 12px 14px; font-size: 8.5px; line-height: 1.5; color: #334155; background: #ffffff;">
               ${formatBulletSection(report.highlights)}
             </div>
           </div>
 
           <!-- Column 2: Risks & Concerns -->
-          <div style="display: flex; flex-direction: column;">
-            <div style="background: #d97706; color: #ffffff; text-align: center; padding: 10px 12px; font-weight: 800; font-size: 10.5px; border-radius: 4px 4px 0 0; text-transform: uppercase; letter-spacing: 0.5px;">
+          <div style="display: flex; flex-direction: column; flex: 1;">
+            <div style="background: #d97706; color: #ffffff; text-align: center; padding: 8px 12px; font-weight: 800; font-size: 10px; border-radius: 4px 4px 0 0; text-transform: uppercase; letter-spacing: 0.5px;">
               CRITICAL RISKS &amp; OPEN CONCERNS
             </div>
-            <div style="flex: 1; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 4px 4px; padding: 16px; font-size: 9px; line-height: 1.5; color: #334155; background: #ffffff;">
+            <div style="flex: 1; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 4px 4px; padding: 12px 14px; font-size: 8.5px; line-height: 1.5; color: #334155; background: #ffffff;">
               ${formatBulletSection(report.concerns)}
             </div>
           </div>
 
           <!-- Column 3: Look-Ahead Plan -->
-          <div style="display: flex; flex-direction: column;">
-            <div style="background: #4f46e5; color: #ffffff; text-align: center; padding: 10px 12px; font-weight: 800; font-size: 10.5px; border-radius: 4px 4px 0 0; text-transform: uppercase; letter-spacing: 0.5px;">
+          <div style="display: flex; flex-direction: column; flex: 1;">
+            <div style="background: #4f46e5; color: #ffffff; text-align: center; padding: 8px 12px; font-weight: 800; font-size: 10px; border-radius: 4px 4px 0 0; text-transform: uppercase; letter-spacing: 0.5px;">
               LOOK-AHEAD PLAN &amp; ACTION TARGETS
             </div>
-            <div style="flex: 1; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 4px 4px; padding: 16px; font-size: 9px; line-height: 1.5; color: #334155; background: #ffffff;">
+            <div style="flex: 1; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 4px 4px; padding: 12px 14px; font-size: 8.5px; line-height: 1.5; color: #334155; background: #ffffff;">
               ${formatBulletSection(report.nextWeekPlan)}
             </div>
           </div>
@@ -2969,7 +3068,7 @@ export function generateWeeklyReportPDF(
       </div>
     `);
   } else {
-    const ROWS_PER_PAGE = 14;
+    const ROWS_PER_PAGE = isPortrait ? 20 : 14;
     const totalPages = Math.ceil(sampleCubes.length / ROWS_PER_PAGE);
 
     for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
@@ -3313,7 +3412,7 @@ export function generateWeeklyReportPDF(
     showElementsTable: boolean = true,
   ) {
     if (showElementsTable && elements.length > 0) {
-      const ROWS_PER_PAGE = 26;
+      const ROWS_PER_PAGE = isPortrait ? 32 : 26;
       const totalPages = Math.ceil(elements.length / ROWS_PER_PAGE);
 
       let runningTotalCalc = 0;
@@ -3463,7 +3562,7 @@ export function generateWeeklyReportPDF(
           <div>
             ${renderHeader(layoutDrawingTitle || `${typeLabel.toUpperCase()} LAYOUT &amp; INSPECTION`)}
             
-            <div style="height: 154mm; background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 6px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; position: relative; margin-top: 6px;">
+            <div style="height: ${isPortrait ? "230mm" : "154mm"}; background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 6px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; position: relative; margin-top: 6px;">
               <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; overflow: hidden; background: #ffffff;">
                 <img src="${layoutImg}" style="max-width: 100%; max-height: 100%; object-fit: contain;" alt="${layoutDrawingTitle}" />
               </div>
@@ -3594,7 +3693,7 @@ export function generateWeeklyReportPDF(
       </div>
     `);
   } else {
-    const ROWS_PER_PAGE = 14;
+    const ROWS_PER_PAGE = isPortrait ? 20 : 14;
     const totalPages = Math.ceil(mepList.length / ROWS_PER_PAGE);
 
     for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
@@ -3682,7 +3781,7 @@ export function generateWeeklyReportPDF(
       </div>
     `);
   } else {
-    const ROWS_PER_PAGE = 14;
+    const ROWS_PER_PAGE = isPortrait ? 20 : 14;
     const totalPages = Math.ceil(deliveriesList.length / ROWS_PER_PAGE);
 
     for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
@@ -3780,7 +3879,7 @@ export function generateWeeklyReportPDF(
         </div>
       `);
     } else {
-      const ROWS_PER_PAGE = 10;
+      const ROWS_PER_PAGE = isPortrait ? 15 : 10;
       const totalPages = Math.ceil(ncrList.length / ROWS_PER_PAGE);
 
       for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
@@ -3899,7 +3998,7 @@ export function generateWeeklyReportPDF(
         </div>
       `);
     } else {
-      const ROWS_PER_PAGE = 6;
+      const ROWS_PER_PAGE = isPortrait ? 9 : 6;
       const totalPages = Math.ceil(siteInstructionsList.length / ROWS_PER_PAGE);
 
       for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
@@ -4108,7 +4207,7 @@ export function generateWeeklyReportPDF(
         </div>
       `);
     } else {
-      const ROWS_PER_PAGE = 12;
+      const ROWS_PER_PAGE = isPortrait ? 16 : 12;
       const totalPages = Math.ceil(commentsList.length / ROWS_PER_PAGE);
 
       for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
@@ -4213,7 +4312,7 @@ export function generateWeeklyReportPDF(
           <div>
             ${renderHeader(`PICTORIAL SURVEILLANCE RECORD (SPECIMEN ${idx + 1} OF ${validPictorials.length})`)}
             
-            <div style="height: 154mm; background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 6px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; position: relative; margin-top: 6px;">
+            <div style="height: ${isPortrait ? "230mm" : "154mm"}; background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 6px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; position: relative; margin-top: 6px;">
               <!-- Photo Viewport -->
               <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px; overflow: hidden; background: #ffffff;">
                 <img src="${url}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 2px;" alt="${caption}" />
@@ -4249,164 +4348,308 @@ export function generateWeeklyReportPDF(
     report.executiveSummary ||
     "";
 
-  slidesHtml.push(`
-    <div class="pdf-sheet" style="padding: 0; display: flex; flex-direction: row; height: 210mm; overflow: hidden; position: relative;">
-      <!-- Left Dark Emerald Panel (~30% width) -->
-      <div style="width: 30%; background: #091a18; color: #ffffff; padding: 28mm 12mm 16mm 14mm; display: flex; flex-direction: column; justify-content: space-between;">
-        <div>
+  if (isPortrait) {
+    slidesHtml.push(`
+      <div class="pdf-sheet" style="padding: 0; display: flex; flex-direction: column; height: 297mm; overflow: hidden; position: relative;">
+        <!-- Top Dark Emerald Panel (~60mm height) -->
+        <div style="height: 60mm; width: 100%; background: #091a18; color: #ffffff; padding: 8mm 16mm; display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #10b981;">
           <!-- Company Brand -->
-          <div style="margin-bottom: 24px;">
-            <div style="display: flex; align-items: flex-end; gap: 2px; margin-bottom: 6px; justify-content: center;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
               ${
                 companyLogo
-                  ? `<img src="${companyLogo}" style="max-height: 150px; max-width: 200px; object-fit: contain;" alt="${companyName}" />`
+                  ? `<img src="${companyLogo}" style="max-height: 40px; max-width: 140px; object-fit: contain;" alt="${companyName}" />`
                   : `
-                <div style="display: flex; gap: 3px; align-items: flex-end; height: 24px;">
-                  <span style="width: 4.5px; height: 12px; background: #c28b5e; border-radius: 1px;"></span>
-                  <span style="width: 4.5px; height: 22px; background: #c28b5e; border-radius: 1px;"></span>
-                  <span style="width: 4.5px; height: 16px; background: #c28b5e; border-radius: 1px;"></span>
+                <div style="display: flex; gap: 2.5px; align-items: flex-end; height: 18px;">
+                  <span style="width: 4px; height: 10px; background: #c28b5e; border-radius: 1px;"></span>
+                  <span style="width: 4px; height: 18px; background: #c28b5e; border-radius: 1px;"></span>
+                  <span style="width: 4px; height: 14px; background: #c28b5e; border-radius: 1px;"></span>
                 </div>
               `
               }
+              <div style="font-size: 12px; font-weight: 700; color: #FFFFFF; letter-spacing: 0.5px; text-transform: uppercase;">
+                ${companyLegalName.toUpperCase()}
+              </div>
             </div>
-            <div style="font-size: 13px; text-align: center; font-weight: 700; color: #FFFFFF; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 5px;">
-              ${companyLegalName.toUpperCase()}
+            <div style="font-size: 6.5px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px;">
+              JQMS ENTERPRISE COMPLIANCE FRAMEWORK &bull; QUALITY ASSURANCE
             </div>
           </div>
 
           <!-- ISO Accreditation Box -->
-          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 14px;">
-            <div style="font-size: 7px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 0.8px;">
+          <div style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px 14px; text-align: right;">
+            <div style="font-size: 6.5px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 0.8px;">
               QUALITY MANAGEMENT SYSTEM
             </div>
-            <div style="font-size: 15px; font-weight: 900; color: #ffffff; margin: 4px 0 2px 0;">
+            <div style="font-size: 13px; font-weight: 900; color: #ffffff; margin: 2px 0;">
               ISO 9001:2015
             </div>
-            <div style="font-size: 7px; color: #94a3b8; line-height: 1.4;">
+            <div style="font-size: 6.5px; color: #94a3b8;">
               Civil Engineering &amp; Quality Compliance Verified
             </div>
           </div>
         </div>
 
-        <div style="font-size: 6.5px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">
-          JQMS ENTERPRISE COMPLIANCE FRAMEWORK
-        </div>
-      </div>
-
-      <!-- Right White Panel (~70% width) -->
-      <div style="width: 70%; background: #ffffff; padding: 16mm 16mm 12mm 16mm; display: flex; flex-direction: column; justify-content: space-between;">
-        
-        <!-- Top Section: Header & Metadata Grid & Scope Summary -->
-        <div>
-          <!-- Top Header & Badging -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 9999px; font-size: 8px; font-weight: 800; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; text-transform: uppercase; letter-spacing: 0.5px;">
-              <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10b981;"></span>
-              AUDIT COMPLETE
-            </span>
-            <span style="font-size: 8px; font-family: monospace; font-weight: 700; color: #94a3b8;">
-              DOC-ID: ${docRef}
-            </span>
-          </div>
-
-          <!-- Main Title Group -->
-          <div style="margin-bottom: 10px;">
-            <h1 style="font-size: 22px; font-weight: 900; color: #0f172a; letter-spacing: -0.3px; line-height: 1.15; text-transform: uppercase; margin: 0 0 6px 0;">
-              QUALITY EXCELLENCE<br />
-              <span style="color: #047857;">VERIFICATION REPORT</span>
-            </h1>
-            <div style="height: 3px; width: 60px; background: #059669; border-radius: 9999px;"></div>
-          </div>
-
-          <!-- Subtitle & Location -->
-          <div style="margin-bottom: 12px;">
-            <h3 style="font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase; margin: 0 0 2px 0;">
-              ${projectName.toUpperCase()} DEVELOPMENT
-            </h3>
-            <p style="font-size: 7.5px; color: #64748b; margin: 0;">
-              Weekly Structural Quality Control, Surveillance &amp; Materials Conformance Audit
-            </p>
-          </div>
-
-          <!-- Key Metadata Grid (2x2) -->
-          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9; font-size: 8px; margin-bottom: 12px;">
-            <div>
-              <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Reporting Period</p>
-              <p style="font-weight: 700; color: #1e293b; margin: 0;">${startDateStr} – ${endDateStr}</p>
+        <!-- Bottom White Panel (~237mm height) -->
+        <div style="flex: 1; width: 100%; background: #ffffff; padding: 12mm 16mm 10mm 16mm; display: flex; flex-direction: column; justify-content: space-between;">
+          <!-- Top Section: Header & Metadata Grid -->
+          <div>
+            <!-- Top Header & Badging -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 9999px; font-size: 8px; font-weight: 800; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; text-transform: uppercase; letter-spacing: 0.5px;">
+                <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10b981;"></span>
+                AUDIT COMPLETE
+              </span>
+              <span style="font-size: 8px; font-family: monospace; font-weight: 700; color: #94a3b8;">
+                DOC-ID: ${docRef}
+              </span>
             </div>
-            <div>
-              <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Structure Level</p>
-              <p style="font-weight: 700; color: #1e293b; margin: 0;">${selectedLevel}</p>
-            </div>
-            <div>
-              <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Inspection Status</p>
-              <p style="font-weight: 700; color: ${openFindingsCount > 0 ? "#dc2626" : "#16a34a"}; margin: 0;">${inspectionStatusText}</p>
-            </div>
-            <div>
-              <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Revision Control</p>
-              <p style="font-weight: 700; color: #1e293b; margin: 0;">${revisionText}</p>
-            </div>
-          </div>
-        </div>
 
-        <!-- Bottom Section: Authorization Card & Legal Footer -->
-        <div>
-          <!-- Authorization & Sign-off Card -->
-          <div style="border: 1px solid #e2e8f0; border-left: 6px solid #047857; border-radius: 8px; padding: 12px 16px; background: #ffffff; position: relative; box-shadow: 0 1px 3px rgba(0,0,0,0.02);">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <!-- Main Title Group -->
+            <div style="margin-bottom: 10px;">
+              <h1 style="font-size: 22px; font-weight: 900; color: #0f172a; letter-spacing: -0.3px; line-height: 1.15; text-transform: uppercase; margin: 0 0 6px 0;">
+                QUALITY EXCELLENCE<br />
+                <span style="color: #047857;">VERIFICATION REPORT</span>
+              </h1>
+              <div style="height: 3px; width: 60px; background: #059669; border-radius: 9999px;"></div>
+            </div>
+
+            <!-- Subtitle & Location -->
+            <div style="margin-bottom: 12px;">
+              <h3 style="font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase; margin: 0 0 2px 0;">
+                ${projectName.toUpperCase()} DEVELOPMENT
+              </h3>
+              <p style="font-size: 7.5px; color: #64748b; margin: 0;">
+                Weekly Structural Quality Control, Surveillance &amp; Materials Conformance Audit
+              </p>
+            </div>
+
+            <!-- Key Metadata Grid (2x2) -->
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9; font-size: 8px; margin-bottom: 12px;">
               <div>
-                <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 2px 0;">
-                  Authorization &amp; Compliance Sign-Off
-                </p>
-                <h4 style="font-size: 15px; font-weight: 900; color: #0f172a; margin: 0 0 2px 0;">
-                  ${compilerName}
-                </h4>
-                <p style="font-size: 8px; font-weight: 800; color: #047857; text-transform: uppercase; margin: 0;">
-                  ${compilerRole}
-                </p>
+                <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Reporting Period</p>
+                <p style="font-weight: 700; color: #1e293b; margin: 0;">${startDateStr} – ${endDateStr}</p>
               </div>
-              
-              <!-- Stamp / Verification Badge Indicator -->
-              <div style="display: flex; align-items: center; gap: 8px;">
-                ${
-                  signatureUrl
-                    ? `<img src="${signatureUrl}" style="max-height: 38px; max-width: 100px; object-fit: contain;" alt="Signature" />`
-                    : ""
-                }
-                <div style="width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(5, 150, 105, 0.4); display: flex; align-items: center; justify-content: center; font-size: 7px; font-weight: 900; color: #065f46; text-transform: uppercase; text-align: center; line-height: 1.15; background: #ecfdf5;">
-                  VERIFIED<br />QA/QC
+              <div>
+                <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Structure Level</p>
+                <p style="font-weight: 700; color: #1e293b; margin: 0;">${selectedLevel}</p>
+              </div>
+              <div>
+                <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Inspection Status</p>
+                <p style="font-weight: 700; color: ${openFindingsCount > 0 ? "#dc2626" : "#16a34a"}; margin: 0;">${inspectionStatusText}</p>
+              </div>
+              <div>
+                <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Revision Control</p>
+                <p style="font-weight: 700; color: #1e293b; margin: 0;">${revisionText}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Section: Authorization Card & Legal Footer -->
+          <div>
+            <!-- Authorization & Sign-off Card -->
+            <div style="border: 1px solid #e2e8f0; border-left: 6px solid #047857; border-radius: 8px; padding: 12px 16px; background: #ffffff; position: relative; box-shadow: 0 1px 3px rgba(0,0,0,0.02);">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                  <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 2px 0;">
+                    Authorization &amp; Compliance Sign-Off
+                  </p>
+                  <h4 style="font-size: 15px; font-weight: 900; color: #0f172a; margin: 0 0 2px 0;">
+                    ${compilerName}
+                  </h4>
+                  <p style="font-size: 8px; font-weight: 800; color: #047857; text-transform: uppercase; margin: 0;">
+                    ${compilerRole}
+                  </p>
+                </div>
+                
+                <!-- Stamp / Verification Badge Indicator -->
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  ${
+                    signatureUrl
+                      ? `<img src="${signatureUrl}" style="max-height: 38px; max-width: 100px; object-fit: contain;" alt="Signature" />`
+                      : ""
+                  }
+                  <div style="width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(5, 150, 105, 0.4); display: flex; align-items: center; justify-content: center; font-size: 7px; font-weight: 900; color: #065f46; text-transform: uppercase; text-align: center; line-height: 1.15; background: #ecfdf5;">
+                    VERIFIED<br />QA/QC
+                  </div>
                 </div>
               </div>
+
+              <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; font-size: 7.5px; color: #64748b;">
+                <span>Email: <strong style="color: #334155; font-weight: 700;">${compilerEmail}</strong></span>
+                <span>Issued: <strong style="color: #334155; font-weight: 700;">${formatDateYMD(reportDate)}</strong></span>
+              </div>
             </div>
 
-            <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; font-size: 7.5px; color: #64748b;">
-              <span>Email: <strong style="color: #334155; font-weight: 700;">${compilerEmail}</strong></span>
-              <span>Issued: <strong style="color: #334155; font-weight: 700;">${formatDateYMD(reportDate)}</strong></span>
+            <!-- Legal Footer -->
+            <div style="padding-top: 8px; margin-top: 8px; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; font-size: 7px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
+              <span>CONFIDENTIAL | PREPARED FOR CLIENT &amp; SUPERVISING CONSULTANT</span>
+              <span>PAGE ${slidesHtml.length + 1} OF ${slidesHtml.length + 1}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+  } else {
+    slidesHtml.push(`
+      <div class="pdf-sheet" style="padding: 0; display: flex; flex-direction: row; height: 210mm; overflow: hidden; position: relative;">
+        <!-- Left Dark Emerald Panel (~30% width) -->
+        <div style="width: 30%; background: #091a18; color: #ffffff; padding: 28mm 12mm 16mm 14mm; display: flex; flex-direction: column; justify-content: space-between;">
+          <div>
+            <!-- Company Brand -->
+            <div style="margin-bottom: 24px;">
+              <div style="display: flex; align-items: flex-end; gap: 2px; margin-bottom: 6px; justify-content: center;">
+                ${
+                  companyLogo
+                    ? `<img src="${companyLogo}" style="max-height: 150px; max-width: 200px; object-fit: contain;" alt="${companyName}" />`
+                    : `
+                  <div style="display: flex; gap: 3px; align-items: flex-end; height: 24px;">
+                    <span style="width: 4.5px; height: 12px; background: #c28b5e; border-radius: 1px;"></span>
+                    <span style="width: 4.5px; height: 22px; background: #c28b5e; border-radius: 1px;"></span>
+                    <span style="width: 4.5px; height: 16px; background: #c28b5e; border-radius: 1px;"></span>
+                  </div>
+                `
+                }
+              </div>
+              <div style="font-size: 13px; text-align: center; font-weight: 700; color: #FFFFFF; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 5px;">
+                ${companyLegalName.toUpperCase()}
+              </div>
+            </div>
+
+            <!-- ISO Accreditation Box -->
+            <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 14px;">
+              <div style="font-size: 7px; font-weight: 800; color: #10b981; text-transform: uppercase; letter-spacing: 0.8px;">
+                QUALITY MANAGEMENT SYSTEM
+              </div>
+              <div style="font-size: 15px; font-weight: 900; color: #ffffff; margin: 4px 0 2px 0;">
+                ISO 9001:2015
+              </div>
+              <div style="font-size: 7px; color: #94a3b8; line-height: 1.4;">
+                Civil Engineering &amp; Quality Compliance Verified
+              </div>
             </div>
           </div>
 
-          <!-- Legal Footer -->
-          <div style="padding-top: 8px; margin-top: 8px; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; font-size: 7px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
-            <span>CONFIDENTIAL | PREPARED FOR CLIENT &amp; SUPERVISING CONSULTANT</span>
-            <span>PAGE ${slidesHtml.length + 1} OF ${slidesHtml.length + 1}</span>
+          <div style="font-size: 6.5px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">
+            JQMS ENTERPRISE COMPLIANCE FRAMEWORK
+          </div>
+        </div>
+
+        <!-- Right White Panel (~70% width) -->
+        <div style="width: 70%; background: #ffffff; padding: 16mm 16mm 12mm 16mm; display: flex; flex-direction: column; justify-content: space-between;">
+          
+          <!-- Top Section: Header & Metadata Grid & Scope Summary -->
+          <div>
+            <!-- Top Header & Badging -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 9999px; font-size: 8px; font-weight: 800; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; text-transform: uppercase; letter-spacing: 0.5px;">
+                <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10b981;"></span>
+                AUDIT COMPLETE
+              </span>
+              <span style="font-size: 8px; font-family: monospace; font-weight: 700; color: #94a3b8;">
+                DOC-ID: ${docRef}
+              </span>
+            </div>
+
+            <!-- Main Title Group -->
+            <div style="margin-bottom: 10px;">
+              <h1 style="font-size: 22px; font-weight: 900; color: #0f172a; letter-spacing: -0.3px; line-height: 1.15; text-transform: uppercase; margin: 0 0 6px 0;">
+                QUALITY EXCELLENCE<br />
+                <span style="color: #047857;">VERIFICATION REPORT</span>
+              </h1>
+              <div style="height: 3px; width: 60px; background: #059669; border-radius: 9999px;"></div>
+            </div>
+
+            <!-- Subtitle & Location -->
+            <div style="margin-bottom: 12px;">
+              <h3 style="font-size: 11px; font-weight: 800; color: #1e293b; text-transform: uppercase; margin: 0 0 2px 0;">
+                ${projectName.toUpperCase()} DEVELOPMENT
+              </h3>
+              <p style="font-size: 7.5px; color: #64748b; margin: 0;">
+                Weekly Structural Quality Control, Surveillance &amp; Materials Conformance Audit
+              </p>
+            </div>
+
+            <!-- Key Metadata Grid (2x2) -->
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9; font-size: 8px; margin-bottom: 12px;">
+              <div>
+                <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Reporting Period</p>
+                <p style="font-weight: 700; color: #1e293b; margin: 0;">${startDateStr} – ${endDateStr}</p>
+              </div>
+              <div>
+                <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Structure Level</p>
+                <p style="font-weight: 700; color: #1e293b; margin: 0;">${selectedLevel}</p>
+              </div>
+              <div>
+                <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Inspection Status</p>
+                <p style="font-weight: 700; color: ${openFindingsCount > 0 ? "#dc2626" : "#16a34a"}; margin: 0;">${inspectionStatusText}</p>
+              </div>
+              <div>
+                <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 2px 0;">Revision Control</p>
+                <p style="font-weight: 700; color: #1e293b; margin: 0;">${revisionText}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Section: Authorization Card & Legal Footer -->
+          <div>
+            <!-- Authorization & Sign-off Card -->
+            <div style="border: 1px solid #e2e8f0; border-left: 6px solid #047857; border-radius: 8px; padding: 12px 16px; background: #ffffff; position: relative; box-shadow: 0 1px 3px rgba(0,0,0,0.02);">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                  <p style="font-size: 6.8px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.8px; margin: 0 0 2px 0;">
+                    Authorization &amp; Compliance Sign-Off
+                  </p>
+                  <h4 style="font-size: 15px; font-weight: 900; color: #0f172a; margin: 0 0 2px 0;">
+                    ${compilerName}
+                  </h4>
+                  <p style="font-size: 8px; font-weight: 800; color: #047857; text-transform: uppercase; margin: 0;">
+                    ${compilerRole}
+                  </p>
+                </div>
+                
+                <!-- Stamp / Verification Badge Indicator -->
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  ${
+                    signatureUrl
+                      ? `<img src="${signatureUrl}" style="max-height: 38px; max-width: 100px; object-fit: contain;" alt="Signature" />`
+                      : ""
+                  }
+                  <div style="width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(5, 150, 105, 0.4); display: flex; align-items: center; justify-content: center; font-size: 7px; font-weight: 900; color: #065f46; text-transform: uppercase; text-align: center; line-height: 1.15; background: #ecfdf5;">
+                    VERIFIED<br />QA/QC
+                  </div>
+                </div>
+              </div>
+
+              <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; font-size: 7.5px; color: #64748b;">
+                <span>Email: <strong style="color: #334155; font-weight: 700;">${compilerEmail}</strong></span>
+                <span>Issued: <strong style="color: #334155; font-weight: 700;">${formatDateYMD(reportDate)}</strong></span>
+              </div>
+            </div>
+
+            <!-- Legal Footer -->
+            <div style="padding-top: 8px; margin-top: 8px; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; font-size: 7px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">
+              <span>CONFIDENTIAL | PREPARED FOR CLIENT &amp; SUPERVISING CONSULTANT</span>
+              <span>PAGE ${slidesHtml.length + 1} OF ${slidesHtml.length + 1}</span>
+            </div>
           </div>
         </div>
 
       </div>
-    </div>
-  `);
+    `);
+  }
 
   // Custom CSS for pixel-perfect executive print design matching the exact screenshots
   const customCss = `
     @page {
-      size: A4 landscape !important;
+      size: ${isPortrait ? "A4 portrait" : "A4 landscape"} !important;
       margin: 0 !important;
     }
 
     @media print {
       html, body {
-        width: 297mm !important;
-        height: 210mm !important;
+        width: ${isPortrait ? "210mm" : "297mm"} !important;
+        height: ${isPortrait ? "297mm" : "210mm"} !important;
         margin: 0 !important;
         padding: 0 !important;
         background: #ffffff !important;
@@ -4436,9 +4679,10 @@ export function generateWeeklyReportPDF(
     }
 
     .pdf-sheet {
-      width: 297mm !important;
-      height: 210mm !important;
-      max-height: 210mm !important;
+      width: ${isPortrait ? "210mm" : "297mm"} !important;
+      height: ${isPortrait ? "297mm" : "210mm"} !important;
+      min-height: ${isPortrait ? "297mm" : "210mm"} !important;
+      max-height: ${isPortrait ? "297mm" : "210mm"} !important;
       page-break-after: always !important;
       break-after: page !important;
       page-break-inside: avoid !important;
@@ -4447,7 +4691,7 @@ export function generateWeeklyReportPDF(
       flex-direction: column;
       justify-content: space-between;
       box-sizing: border-box;
-      padding: 7mm 12mm 5mm 12mm;
+      padding: ${isPortrait ? "8mm 10mm 6mm 10mm" : "7mm 12mm 5mm 12mm"};
       position: relative;
       background: #ffffff;
       overflow: hidden;
@@ -4565,7 +4809,7 @@ export function generateWeeklyReportPDF(
   const html = slidesHtml.join("\n");
 
   openPrintWindow(
-    `${docRef} - QA/QC Weekly Surveillance Report (Landscape Slide Deck)`,
+    `${docRef} - QA/QC Weekly Surveillance Report (${isPortrait ? "Portrait Dossier" : "Landscape Slide Deck"})`,
     html,
     customCss,
   );

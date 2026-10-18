@@ -27,6 +27,8 @@ export const DEFAULT_COMPANY_STANDARDS: string[] = [
   "BS 4449 Carbon Steel Bars for the Reinforcement of Concrete",
 ];
 
+import { DEFAULT_THEME_PALETTE, applyCompanyTheme } from "@/lib/theme";
+
 export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   ncrPrefix: "NCR",
   rfiPrefix: "RFI",
@@ -45,6 +47,7 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
     notifyCubeFailure: true,
     notifyPTP: true,
   },
+  themePalette: DEFAULT_THEME_PALETTE,
 };
 
 export type FormModuleType =
@@ -170,6 +173,7 @@ export function getCompanySettings(
       ...(company?.settings?.notifications || {}),
     },
     smtpServer: company?.settings?.smtpServer || undefined,
+    themePalette: company?.settings?.themePalette || DEFAULT_THEME_PALETTE,
   };
 }
 
@@ -363,6 +367,9 @@ export function useCompany(): UseCompanyReturn {
           setActiveCompanyId(comp.id);
           setLiveCompany(comp);
           setCompany(comp);
+          if (comp.settings?.themePalette) {
+            applyCompanyTheme(comp.settings.themePalette);
+          }
         } else {
           // If no company exists in DB at all, construct default
           const defaultComp: Company = {
@@ -384,6 +391,9 @@ export function useCompany(): UseCompanyReturn {
           setActiveCompanyId(targetId);
           setLiveCompany(defaultComp);
           setCompany(defaultComp);
+          if (defaultComp.settings?.themePalette) {
+            applyCompanyTheme(defaultComp.settings.themePalette);
+          }
         }
         setIsLoading(false);
       } catch (err: any) {
@@ -402,6 +412,9 @@ export function useCompany(): UseCompanyReturn {
       if (comp) {
         setLiveCompany(comp);
         setCompany(comp);
+        if (comp.settings?.themePalette) {
+          applyCompanyTheme(comp.settings.themePalette);
+        }
       }
     });
 
@@ -424,6 +437,9 @@ export function useCompany(): UseCompanyReturn {
       if (comp) {
         setLiveCompany(comp);
         setCompany(comp);
+        if (comp.settings?.themePalette) {
+          applyCompanyTheme(comp.settings.themePalette);
+        }
       }
     } catch (err: any) {
       setError(err?.message || "Failed to refresh company.");
@@ -490,7 +506,15 @@ export function useCompany(): UseCompanyReturn {
             incomingSettings.smtpServer !== undefined
               ? incomingSettings.smtpServer
               : currentSettings.smtpServer,
+          themePalette:
+            incomingSettings.themePalette !== undefined
+              ? incomingSettings.themePalette
+              : currentSettings.themePalette || DEFAULT_THEME_PALETTE,
         };
+
+        if (mergedSettings.themePalette) {
+          applyCompanyTheme(mergedSettings.themePalette);
+        }
 
         const merged: Company = {
           id: targetId,

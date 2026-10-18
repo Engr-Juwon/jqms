@@ -55,6 +55,10 @@ const UsersManagement = lazyPage(
   () => import("./pages/UsersManagement"),
   "UsersManagement",
 );
+const ProjectAssignmentsPage = lazyPage(
+  () => import("./pages/ProjectAssignmentsPage"),
+  "ProjectAssignmentsPage",
+);
 const TradeManagement = lazyPage(
   () => import("./pages/TradeManagement"),
   "TradeManagement",
@@ -312,6 +316,12 @@ export const App: React.FC = () => {
               <Route path="projects/create" element={<ProjectCreate />} />
               <Route path="projects/:id/edit" element={<ProjectEdit />} />
               <Route path="users" element={<UsersManagement />} />
+              <Route path="assignments" element={<ProjectAssignmentsPage />} />
+              <Route path="users/assignments" element={<ProjectAssignmentsPage />} />
+              <Route path="projects/assignments" element={<ProjectAssignmentsPage />} />
+              <Route path="projects/assign" element={<ProjectAssignmentsPage />} />
+              <Route path="assign" element={<ProjectAssignmentsPage />} />
+              <Route path="assign-users" element={<ProjectAssignmentsPage />} />
               <Route path="trades" element={<TradeManagement />} />
               <Route path="inspections" element={<InspectionManagement />} />
               <Route path="audit" element={<AuditTrail />} />
@@ -696,6 +706,9 @@ export const App: React.FC = () => {
               <Route path="rams" element={<MethodStatementsPage />} />
               <Route path="settings" element={<ProjectEdit />} />
               <Route path="edit" element={<ProjectEdit />} />
+              <Route path="assignments" element={<ProjectAssignmentsPage />} />
+              <Route path="team" element={<ProjectAssignmentsPage />} />
+              <Route path="staff" element={<ProjectAssignmentsPage />} />
               <Route path="profile" element={<ProfilePage />} />
             </Route>
 

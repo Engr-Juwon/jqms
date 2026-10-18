@@ -331,7 +331,7 @@ export const ChatPage: React.FC = () => {
   const isChannelAdmin = useMemo(() => {
     if (!selectedChannel || !currentUser) return false;
     if (
-      ["SUPER_ADMIN", "QUALITY_DIRECTOR", "QUALITY_MANAGER", "PROJECT_MANAGER"].includes(
+      ["SUPER_ADMIN", "QUALITY_DIRECTOR", "QUALITY_MANAGER", "QAQC_MANAGER", "PROJECT_MANAGER"].includes(
         currentUser.role,
       )
     ) {

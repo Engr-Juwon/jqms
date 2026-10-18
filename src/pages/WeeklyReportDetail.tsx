@@ -1937,6 +1937,7 @@ export const WeeklyReportDetail: React.FC = () => {
           "QUALITY_DIRECTOR",
           "EXECUTIVE_MANAGEMENT",
           "QUALITY_MANAGER",
+          "QAQC_MANAGER",
           "SENIOR_QAQC_ENGINEER",
           "QAQC_ENGINEER",
         ].includes(currentUser.role));
@@ -2005,7 +2006,7 @@ export const WeeklyReportDetail: React.FC = () => {
       (typeof report.preparedBy === "object" ? report.preparedBy?.name : "");
     const isLevel5 =
       currentUser?.role &&
-      ["SUPER_ADMIN", "QUALITY_DIRECTOR", "EXECUTIVE_MANAGEMENT"].includes(
+      ["SUPER_ADMIN", "QUALITY_DIRECTOR", "EXECUTIVE_MANAGEMENT", "QUALITY_MANAGER", "QAQC_MANAGER"].includes(
         currentUser.role,
       );
 

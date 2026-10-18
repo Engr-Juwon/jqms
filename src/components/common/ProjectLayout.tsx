@@ -12,6 +12,8 @@ import { PageLoadingFallback } from "./PageLoadingFallback";
 import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
 import { useOnboardingStore } from "@/stores/useOnboardingStore";
 
+import { AICopilotDrawer } from "@/components/ai/AICopilotDrawer";
+
 export const ProjectLayout: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const location = useLocation();
@@ -35,7 +37,7 @@ export const ProjectLayout: React.FC = () => {
   }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-indigo-500 selection:text-white transition-colors duration-200">
+    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-brand-500 selection:text-white transition-colors duration-200">
       <Sidebar />
       <div className="flex-1 flex flex-col h-screen min-w-0 max-w-full overflow-hidden">
         <Header className="shrink-0 sticky top-0 z-40" />
@@ -62,6 +64,7 @@ export const ProjectLayout: React.FC = () => {
           {!isChatPage && <Footer variant="project" />}
         </main>
         {!isChatPage && <FloatingPlannerReminder />}
+        {!isChatPage && <AICopilotDrawer />}
         {!isChatPage && <MobileBottomNav />}
       </div>
       {/* Onboarding Tour Overlay — hidden on mobile */}

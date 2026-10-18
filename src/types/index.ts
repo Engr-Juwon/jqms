@@ -7,6 +7,7 @@ export type UserRole =
   | "QUALITY_DIRECTOR"
   | "EXECUTIVE_MANAGEMENT"
   | "QUALITY_MANAGER"
+  | "QAQC_MANAGER"
 
   // Quality Management & Audit (Level 4)
   | "PROJECT_MANAGER"
@@ -51,7 +52,7 @@ export const ROLE_LEVELS: Record<UserRole, number> = {
   QUALITY_DIRECTOR: 5,
   EXECUTIVE_MANAGEMENT: 5,
   QUALITY_MANAGER: 5,
-
+  QAQC_MANAGER: 5,
   // Level 4: Senior Project Management, Quality Authority & QAQC Lead Engineers
   PROJECT_MANAGER: 4,
   DEPUTY_QUALITY_MANAGER: 4,
@@ -93,6 +94,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   QUALITY_DIRECTOR: "Director of Quality & Governance",
   EXECUTIVE_MANAGEMENT: "Executive Management",
   QUALITY_MANAGER: "Quality Manager",
+  QAQC_MANAGER: "QA/QC Manager",
 
   DEPUTY_QUALITY_MANAGER: "Deputy Quality Manager",
   LEAD_QUALITY_AUDITOR: "Lead Quality Auditor",
@@ -174,6 +176,17 @@ export interface CompanySMTPServerConfig {
   defaultSenderName?: string;
 }
 
+export interface CompanyThemePalette {
+  presetId?: string;
+  presetName?: string;
+  primaryColor: string; // e.g. #0284c7
+  accentColor?: string; // e.g. #f59e0b
+  secondaryColor?: string; // e.g. #0f172a
+  radius?: "none" | "sm" | "md" | "lg" | "full";
+  modePreference?: "system" | "dark" | "light";
+  customHex?: boolean;
+}
+
 // ─── COMPANY ───
 export interface CompanySettings {
   ncrPrefix?: string;
@@ -194,6 +207,7 @@ export interface CompanySettings {
     notifyPTP?: boolean;
   };
   smtpServer?: CompanySMTPServerConfig;
+  themePalette?: CompanyThemePalette;
 }
 
 export interface EmailCommunicationLog {

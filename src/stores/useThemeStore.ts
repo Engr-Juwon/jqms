@@ -1,11 +1,19 @@
 import { create } from 'zustand';
+import { CompanyThemePalette } from '@/types';
+import {
+  applyCompanyTheme,
+  getStoredCompanyTheme,
+  DEFAULT_THEME_PALETTE,
+} from '@/lib/theme';
 
 export type ThemeMode = 'dark' | 'light';
 
 interface ThemeState {
   theme: ThemeMode;
+  palette: CompanyThemePalette;
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
+  setCompanyPalette: (palette: Partial<CompanyThemePalette>) => void;
 }
 
 const getInitialTheme = (): ThemeMode => {
@@ -42,6 +50,7 @@ if (typeof window !== 'undefined') {
 
 export const useThemeStore = create<ThemeState>((set, get) => ({
   theme: getInitialTheme(),
+  palette: getStoredCompanyTheme(),
 
   setTheme: (theme: ThemeMode) => {
     try {
@@ -58,4 +67,11 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     const next: ThemeMode = current === 'dark' ? 'light' : 'dark';
     get().setTheme(next);
   },
+
+  setCompanyPalette: (palette: Partial<CompanyThemePalette>) => {
+    const merged = { ...get().palette, ...palette };
+    applyCompanyTheme(merged);
+    set({ palette: merged });
+  },
 }));
+

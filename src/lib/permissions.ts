@@ -64,6 +64,7 @@ export function isQAQCEngineerRole(role?: UserRole): boolean {
     role === "SENIOR_QAQC_ENGINEER" ||
     role === "QAQC_ENGINEER" ||
     role === "QUALITY_MANAGER" ||
+    role === "QAQC_MANAGER" ||
     role === "DEPUTY_QUALITY_MANAGER"
   );
 }
@@ -128,6 +129,7 @@ export function isQAQCUser(
     "QUALITY_DIRECTOR",
     "EXECUTIVE_MANAGEMENT",
     "QUALITY_MANAGER",
+    "QAQC_MANAGER",
     "DEPUTY_QUALITY_MANAGER",
     "LEAD_QUALITY_AUDITOR",
     "QUALITY_AUDITOR",
@@ -203,32 +205,34 @@ export function isStaffAssignedToProject(
   const targetProjId = project?.id || projectId;
   if (!targetProjId) return false;
 
-  // 2. Project Roster Check (Master Source of Truth for QA/QC, Site Staff & External Stakeholders)
-  const hasAssignedStaffArray =
-    (project?.assignedStaff && Array.isArray(project.assignedStaff)) ||
-    (project?.assignedStaffIds && Array.isArray(project.assignedStaffIds));
-
-  if (hasAssignedStaffArray) {
-    const isExplicitlyAssigned =
-      Boolean(project?.assignedStaff?.includes(user.uid)) ||
-      Boolean(project?.assignedStaffIds?.includes(user.uid));
-
-    return isExplicitlyAssigned;
+  // 2. Check explicit exclusion
+  if (
+    project?.excludedStaffIds &&
+    Array.isArray(project.excludedStaffIds) &&
+    project.excludedStaffIds.includes(user.uid)
+  ) {
+    return false;
   }
 
-  // 3. Fallback only if project has no assignedStaff roster configured:
+  // 3. Project Roster Check
+  const inProjectRoster =
+    Boolean(project?.assignedStaff?.includes(user.uid)) ||
+    Boolean(project?.assignedStaffIds?.includes(user.uid));
+
+  if (inProjectRoster) {
+    return true;
+  }
+
+  // 4. User Profile Project Access / ProjectIds Check
   if (
     user.projectAccess &&
     typeof user.projectAccess === "object" &&
-    user.projectAccess[targetProjId] === true
+    (user.projectAccess[targetProjId] === true || user.projectAccess["*"] === true)
   ) {
     return true;
   }
   if (user.projectIds && Array.isArray(user.projectIds)) {
-    if (user.projectIds.includes("*") && isGlobalManagerRole(user.role)) {
-      return true;
-    }
-    if (user.projectIds.includes(targetProjId)) {
+    if (user.projectIds.includes("*") || user.projectIds.includes(targetProjId)) {
       return true;
     }
   }
@@ -278,6 +282,7 @@ export function isUserEligibleForStakeholderRole(
     const qaqcRoles: UserRole[] = [
       "QAQC_ENGINEER",
       "SENIOR_QAQC_ENGINEER",
+      "QAQC_MANAGER",
       "QAQC_INSPECTOR",
       "QUALITY_MANAGER",
       "QUALITY_DIRECTOR",
@@ -486,7 +491,14 @@ export function canAccessRoute(
   }
 
   if (normalized.startsWith("/company/users")) {
-    return lvl >= 4;
+    return lvl >= 3 || isQAQC;
+  }
+
+  if (
+    normalized.startsWith("/company/assignments") ||
+    normalized.startsWith("/company/assign")
+  ) {
+    return lvl >= 3 || isQAQC;
   }
 
   if (normalized.startsWith("/company/settings")) {

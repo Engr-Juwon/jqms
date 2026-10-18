@@ -9,13 +9,15 @@ import { PageLoadingFallback } from "./PageLoadingFallback";
 import { useNavigationStore } from "@/stores/useNavigationStore";
 import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
 
+import { AICopilotDrawer } from "@/components/ai/AICopilotDrawer";
+
 export const CompanyLayout: React.FC = () => {
   const isNavigating = useNavigationStore((s) => s.isNavigating);
   const location = useLocation();
   const isChatPage = location.pathname.includes("/chat");
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-indigo-500 selection:text-white transition-colors duration-200">
+    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-brand-500 selection:text-white transition-colors duration-200">
       <Sidebar />
       <div className="flex-1 flex flex-col h-screen min-w-0 max-w-full overflow-hidden">
         <Header className="shrink-0 sticky top-0 z-40" />
@@ -41,6 +43,7 @@ export const CompanyLayout: React.FC = () => {
           </div>
           {!isChatPage && <Footer variant="company" />}
         </main>
+        {!isChatPage && <AICopilotDrawer />}
         {!isChatPage && <MobileBottomNav />}
       </div>
       {/* Onboarding Tour Overlay — hidden on mobile */}

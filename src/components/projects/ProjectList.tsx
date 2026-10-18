@@ -8,6 +8,7 @@ import {
   ArrowRight,
   ShieldCheck,
   Edit3,
+  Users,
 } from "lucide-react";
 import { useProjectStore } from "../../stores/useProjectStore";
 import { Project } from "../../types";
@@ -63,6 +64,17 @@ export const ProjectList: React.FC = () => {
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                     {p.status}
                   </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/company/assignments?projectId=${p.id}`);
+                    }}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                    title="Assign Staff & Personnel Matrix"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                  </button>
                   <button
                     type="button"
                     onClick={(e) => {

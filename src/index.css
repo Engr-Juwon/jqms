@@ -4,11 +4,24 @@
 
 @layer base {
   :root {
+    --color-brand-50: #f0f9ff;
+    --color-brand-100: #e0f2fe;
+    --color-brand-200: #bae6fd;
+    --color-brand-300: #7dd3fc;
+    --color-brand-400: #38bdf8;
+    --color-brand-500: #0284c7;
+    --color-brand-600: #0369a1;
+    --color-brand-700: #075985;
+    --color-brand-800: #0c4a6e;
+    --color-brand-900: #082f49;
+    --color-brand-950: #041c2c;
     --color-brand-primary: #0284c7;
+    --color-brand-accent: #f59e0b;
     --color-brand-secondary: #0f172a;
     --color-surface-dark: #0f172a;
     --color-surface-card: #1e293b;
     --color-surface-border: #334155;
+    --brand-border-radius: 0.5rem;
   }
   
   body {

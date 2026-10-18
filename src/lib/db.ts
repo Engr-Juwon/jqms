@@ -2833,26 +2833,107 @@ export const dbService = {
 
   // --- Users Directory ---
   async getUsers(companyId?: string): Promise<UserProfile[]> {
+    const isDemoUser = (u: any): boolean => {
+      if (!u) return true;
+      const demoUids = [
+        "usr-superadmin",
+        "usr-qdir",
+        "usr-qm",
+        "usr-pm",
+        "usr-sqa",
+        "usr-mat",
+        "usr-insp-1",
+        "usr-insp-2",
+        "usr-consultant",
+        "usr-contractor",
+      ];
+      if (demoUids.includes(u.uid) || demoUids.includes(u.id)) return true;
+      if (typeof u.email === "string" && u.email.endsWith("@apexinfra.com")) return true;
+      return false;
+    };
+
     try {
-      const constraints: QueryConstraint[] = [];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
+      // 1. Fetch live directly from Firestore users collection
+      const snap = await getDocs(collection(firestore, "users"));
+      const firestoreUsers = snap.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            ...data,
+            uid: data.uid || d.id,
+            id: d.id,
+          } as unknown as UserProfile;
+        })
+        .filter((u) => !isDemoUser(u));
 
-      const q =
-        constraints.length > 0
-          ? query(collection(firestore, "users"), ...constraints)
-          : collection(firestore, "users");
+      // 2. Read local cache and filter out any leftover demo accounts
+      const cached = getCache<UserProfile[]>(
+        `jqms_users_${companyId || "all"}`,
+        [],
+      ).filter((u) => !isDemoUser(u));
 
-      const snap = await getDocs(q);
-      const list = snap.docs.map(
-        (d) => ({ ...d.data(), uid: d.id }) as UserProfile,
-      );
-      if (list.length > 0) {
-        setCache(`jqms_users_${companyId || "all"}`, list);
-      }
-      return list;
+      const userMap = new Map<string, UserProfile>();
+
+      // Cached users
+      cached.forEach((u) => {
+        if (u.uid) userMap.set(u.uid, u);
+      });
+
+      // Live Firestore users (highest authority)
+      firestoreUsers.forEach((u) => {
+        if (u.uid) userMap.set(u.uid, u);
+      });
+
+      // Include current logged-in user if saved in session storage
+      try {
+        const stored = localStorage.getItem("jqms_current_user");
+        if (stored) {
+          const authUser = JSON.parse(stored) as UserProfile;
+          if (authUser && authUser.uid && !isDemoUser(authUser)) {
+            if (!userMap.has(authUser.uid)) {
+              userMap.set(authUser.uid, authUser);
+            }
+          }
+        }
+      } catch {}
+
+      const allRealUsers = Array.from(userMap.values());
+
+      // If companyId filter is provided, include users matching companyId, global access, or empty companyId
+      const filtered = companyId
+        ? allRealUsers.filter(
+            (u) =>
+              !u.companyId ||
+              u.companyId === "" ||
+              u.companyId === companyId ||
+              u.projectIds?.includes("*") ||
+              u.role === "SUPER_ADMIN",
+          )
+        : allRealUsers;
+
+      setCache(`jqms_users_${companyId || "all"}`, filtered);
+      setCache(`jqms_users_all`, allRealUsers);
+      return filtered;
     } catch (e) {
       console.warn("Firestore getUsers warning, reading local cache:", e);
-      return getCache<UserProfile[]>(`jqms_users_${companyId || "all"}`, []);
+      const cached = getCache<UserProfile[]>(
+        `jqms_users_${companyId || "all"}`,
+        [],
+      ).filter((u) => !isDemoUser(u));
+
+      try {
+        const stored = localStorage.getItem("jqms_current_user");
+        if (stored) {
+          const authUser = JSON.parse(stored) as UserProfile;
+          if (authUser && authUser.uid && !isDemoUser(authUser)) {
+            if (!cached.some((u) => u.uid === authUser.uid)) {
+              cached.unshift(authUser);
+            }
+          }
+        }
+      } catch {}
+
+      return cached;
     }
   },
 
@@ -2865,11 +2946,143 @@ export const dbService = {
     else list.push(cleaned);
     setCache(cacheKey, list);
 
+    // Also update global users cache
+    const allCache = getCache<UserProfile[]>("jqms_users_all", []);
+    const allIdx = allCache.findIndex((u) => u.uid === cleaned.uid);
+    if (allIdx >= 0) allCache[allIdx] = cleaned;
+    else allCache.push(cleaned);
+    setCache("jqms_users_all", allCache);
+
     try {
       await setDoc(doc(firestore, "users", cleaned.uid), cleaned, { merge: true });
     } catch (e) {
       console.warn("Firestore saveUser error:", e);
     }
+  },
+
+  /**
+   * Standard enterprise assignment of a user across multiple projects.
+   * Updates both the user's projectIds/projectAccess and every project's assignedStaff roster.
+   */
+  async assignUserToProjects(
+    userId: string,
+    targetProjectIds: string[],
+    companyId?: string,
+  ): Promise<{ user: UserProfile; updatedProjects: Project[] }> {
+    const effectiveCompId = companyId || "comp-apex-civil";
+
+    // 1. Retrieve user
+    const allUsers = await this.getUsers(effectiveCompId);
+    const user = allUsers.find((u) => u.uid === userId);
+    if (!user) throw new Error(`User with ID ${userId} not found`);
+
+    // 2. Compute updated user projectIds and projectAccess
+    const isGlobal = targetProjectIds.includes("*");
+    const updatedProjectIds = isGlobal ? ["*"] : targetProjectIds;
+    const updatedProjectAccess: Record<string, boolean> = {};
+    if (isGlobal) {
+      updatedProjectAccess["*"] = true;
+    } else {
+      targetProjectIds.forEach((pid) => {
+        updatedProjectAccess[pid] = true;
+      });
+    }
+
+    const updatedUser: UserProfile = {
+      ...user,
+      projectIds: updatedProjectIds,
+      projectAccess: updatedProjectAccess,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.saveUser(updatedUser);
+
+    // 3. Update all projects in the company so project.assignedStaff / assignedStaffIds reflects this user
+    const allProjects = await this.getProjects(effectiveCompId);
+    const updatedProjects: Project[] = [];
+
+    for (const proj of allProjects) {
+      let staff = proj.assignedStaff || proj.assignedStaffIds || [];
+      if (!Array.isArray(staff)) staff = [];
+
+      const shouldBeAssigned = isGlobal || targetProjectIds.includes(proj.id);
+      const currentlyAssigned = staff.includes(userId);
+
+      if (shouldBeAssigned && !currentlyAssigned) {
+        const nextStaff = [...staff, userId];
+        const updatedProj: Project = {
+          ...proj,
+          assignedStaff: nextStaff,
+          assignedStaffIds: nextStaff,
+        };
+        await this.saveProject(updatedProj);
+        updatedProjects.push(updatedProj);
+      } else if (!shouldBeAssigned && currentlyAssigned) {
+        const nextStaff = staff.filter((uid) => uid !== userId);
+        const updatedProj: Project = {
+          ...proj,
+          assignedStaff: nextStaff,
+          assignedStaffIds: nextStaff,
+        };
+        await this.saveProject(updatedProj);
+        updatedProjects.push(updatedProj);
+      }
+    }
+
+    return { user: updatedUser, updatedProjects };
+  },
+
+  /**
+   * Standard enterprise assignment of multiple staff members to a single project.
+   * Updates project.assignedStaff and synchronizes user.projectIds for affected users.
+   */
+  async assignStaffToProject(
+    projectId: string,
+    staffUids: string[],
+    excludedStaffIds: string[] = [],
+    companyId?: string,
+  ): Promise<Project> {
+    const effectiveCompId = companyId || "comp-apex-civil";
+    const allProjects = await this.getProjects(effectiveCompId);
+    const proj = allProjects.find((p) => p.id === projectId);
+    if (!proj) throw new Error(`Project ${projectId} not found`);
+
+    const updatedProj: Project = {
+      ...proj,
+      assignedStaff: staffUids,
+      assignedStaffIds: staffUids,
+      excludedStaffIds,
+    };
+    await this.saveProject(updatedProj);
+
+    // Also update individual users' projectIds/projectAccess
+    const allUsers = await this.getUsers(effectiveCompId);
+    for (const u of allUsers) {
+      if (u.role === "SUPER_ADMIN" || u.projectIds?.includes("*")) continue;
+      const shouldHaveAccess = staffUids.includes(u.uid);
+      const currentProjects = u.projectIds || [];
+      const hasCurrent = currentProjects.includes(projectId);
+
+      if (shouldHaveAccess && !hasCurrent) {
+        const nextPids = [...currentProjects, projectId];
+        await this.saveUser({
+          ...u,
+          projectIds: nextPids,
+          projectAccess: { ...(u.projectAccess || {}), [projectId]: true },
+        });
+      } else if (!shouldHaveAccess && hasCurrent) {
+        const nextPids = currentProjects.filter((id) => id !== projectId);
+        const nextAccess = { ...(u.projectAccess || {}) };
+        delete nextAccess[projectId];
+        await this.saveUser({
+          ...u,
+          projectIds: nextPids,
+          projectAccess: nextAccess,
+        });
+      }
+    }
+
+    return updatedProj;
   },
 
   // --- Weekly QA/QC Executive Reports (Multi-Tier Redundant Store) ---
@@ -3842,7 +4055,7 @@ export const dbService = {
       email: u.email,
       isAdmin:
         u.uid === creatorId ||
-        ["SUPER_ADMIN", "QUALITY_DIRECTOR", "PROJECT_MANAGER", "QUALITY_MANAGER"].includes(
+        ["SUPER_ADMIN", "QUALITY_DIRECTOR", "PROJECT_MANAGER", "QUALITY_MANAGER", "QAQC_MANAGER"].includes(
           u.role,
         ),
       joinedAt: now,

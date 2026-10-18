@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
   Save,
@@ -43,9 +43,17 @@ export const ProjectEdit: React.FC = () => {
   const currentCompId =
     currentUser?.companyId || company?.id || "comp-apex-civil";
 
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState<"details" | "matrix" | "levels">(
-    "details",
+    tabParam === "matrix" ? "matrix" : tabParam === "levels" ? "levels" : "details",
   );
+
+  useEffect(() => {
+    if (tabParam === "matrix" || tabParam === "levels" || tabParam === "details") {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

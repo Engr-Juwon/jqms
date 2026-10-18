@@ -21,11 +21,22 @@ import {
   AlertCircle,
   Server,
   Send,
+  Palette,
+  Check,
+  RotateCcw,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useCompany } from "@/lib/companyHelper";
 import { writeAudit } from "@/lib/audit";
+import {
+  THEME_PRESETS,
+  DEFAULT_THEME_PALETTE,
+  applyCompanyTheme,
+  ThemePreset,
+} from "@/lib/theme";
+import { CompanyThemePalette } from "@/types";
+import { useThemeStore } from "@/stores/useThemeStore";
 
 export const Settings: React.FC = () => {
   const { currentUser } = useAuthStore();
@@ -114,6 +125,74 @@ export const Settings: React.FC = () => {
   const [defaultSenderName, setDefaultSenderName] = useState(
     dbSettings.smtpServer?.defaultSenderName || dbName || "Jay-QMS Notifications"
   );
+
+  // Corporate Theme & Color Palette Configuration
+  const [selectedPresetId, setSelectedPresetId] = useState<string>(
+    dbSettings.themePalette?.presetId || DEFAULT_THEME_PALETTE.presetId || "apex-civil-blue",
+  );
+  const [primaryColor, setPrimaryColor] = useState<string>(
+    dbSettings.themePalette?.primaryColor || DEFAULT_THEME_PALETTE.primaryColor,
+  );
+  const [accentColor, setAccentColor] = useState<string>(
+    dbSettings.themePalette?.accentColor || DEFAULT_THEME_PALETTE.accentColor || "#f59e0b",
+  );
+  const [customHex, setCustomHex] = useState<boolean>(
+    dbSettings.themePalette?.customHex ?? false,
+  );
+  const [borderRadius, setBorderRadius] = useState<"none" | "sm" | "md" | "lg" | "full">(
+    dbSettings.themePalette?.radius || "md",
+  );
+
+  // Live preview handler
+  const handleSelectPreset = (preset: ThemePreset) => {
+    setSelectedPresetId(preset.id);
+    setPrimaryColor(preset.primary);
+    setAccentColor(preset.accent);
+    setCustomHex(false);
+    // Apply immediately to DOM for live instant preview
+    applyCompanyTheme({
+      presetId: preset.id,
+      presetName: preset.name,
+      primaryColor: preset.primary,
+      accentColor: preset.accent,
+      radius: borderRadius,
+      customHex: false,
+    });
+  };
+
+  const handleCustomPrimaryChange = (hex: string) => {
+    setPrimaryColor(hex);
+    setCustomHex(true);
+    setSelectedPresetId("custom");
+    applyCompanyTheme({
+      presetId: "custom",
+      presetName: "Custom Brand Palette",
+      primaryColor: hex,
+      accentColor,
+      radius: borderRadius,
+      customHex: true,
+    });
+  };
+
+  const handleCustomAccentChange = (hex: string) => {
+    setAccentColor(hex);
+    applyCompanyTheme({
+      presetId: selectedPresetId,
+      primaryColor,
+      accentColor: hex,
+      radius: borderRadius,
+      customHex,
+    });
+  };
+
+  const handleResetDefaultPalette = () => {
+    setSelectedPresetId(DEFAULT_THEME_PALETTE.presetId || "apex-civil-blue");
+    setPrimaryColor(DEFAULT_THEME_PALETTE.primaryColor);
+    setAccentColor(DEFAULT_THEME_PALETTE.accentColor || "#f59e0b");
+    setCustomHex(false);
+    setBorderRadius("md");
+    applyCompanyTheme(DEFAULT_THEME_PALETTE);
+  };
 
   // Quick Preset Handlers
   const applySmtpPreset = (preset: "m365" | "gmail" | "cpanel" | "ses") => {
@@ -217,6 +296,20 @@ export const Settings: React.FC = () => {
           if (company.settings.notifications.notifyPTP !== undefined)
             setNotifyPTP(company.settings.notifications.notifyPTP);
         }
+
+        if (company.settings.themePalette) {
+          if (company.settings.themePalette.presetId)
+            setSelectedPresetId(company.settings.themePalette.presetId);
+          if (company.settings.themePalette.primaryColor)
+            setPrimaryColor(company.settings.themePalette.primaryColor);
+          if (company.settings.themePalette.accentColor)
+            setAccentColor(company.settings.themePalette.accentColor);
+          if (company.settings.themePalette.customHex !== undefined)
+            setCustomHex(company.settings.themePalette.customHex);
+          if (company.settings.themePalette.radius)
+            setBorderRadius(company.settings.themePalette.radius);
+          applyCompanyTheme(company.settings.themePalette);
+        }
       }
     }
   }, [company]);
@@ -304,6 +397,16 @@ export const Settings: React.FC = () => {
             imapHost: imapHost.trim() || undefined,
             imapPort: Number(imapPort) || 993,
             defaultSenderName: defaultSenderName.trim() || undefined,
+          },
+          themePalette: {
+            presetId: selectedPresetId,
+            presetName:
+              THEME_PRESETS.find((p) => p.id === selectedPresetId)?.name ||
+              (customHex ? "Custom Brand Palette" : "Civil Navy & Electric Blue"),
+            primaryColor,
+            accentColor,
+            radius: borderRadius,
+            customHex,
           },
         },
       };
@@ -517,7 +620,238 @@ export const Settings: React.FC = () => {
           </div>
         </div>
 
-        {/* Section 2: Contact Details & Head Office Address */}
+        {/* Section 2: Corporate Brand Identity & Dynamic Color Palette */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-6 shadow-sm dark:shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 gap-2">
+            <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-sm">
+              <Palette className="w-5 h-5 text-brand-600 dark:text-brand-400" />
+              <span>Corporate Color Palette & System Theme</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                Live Dynamic CSS Theming
+              </span>
+              <button
+                type="button"
+                onClick={handleResetDefaultPalette}
+                className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition"
+                title="Reset to default Civil Navy Blue palette"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset Default</span>
+              </button>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-600 dark:text-slate-400 -mt-2">
+            Choose an industry-curated civil engineering theme or define your corporate primary & accent HEX codes. Changes apply instantly across the sidebar, navigation, buttons, registers, tags, and submittals.
+          </p>
+
+          {/* Industry Preset Palettes */}
+          <div className="space-y-3">
+            <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+              1. Curated Construction & Civil Presets
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {THEME_PRESETS.map((preset) => {
+                const isSelected = selectedPresetId === preset.id && !customHex;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleSelectPreset(preset)}
+                    className={`p-3.5 rounded-xl border text-left transition relative flex flex-col justify-between gap-3 group ${
+                      isSelected
+                        ? "border-brand-500 bg-brand-50/40 dark:bg-brand-950/30 ring-2 ring-brand-500/30 shadow-md"
+                        : "border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:border-slate-300 dark:hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center gap-2">
+                        {/* Swatch chips */}
+                        <div className="flex items-center -space-x-1">
+                          <span
+                            className="w-5 h-5 rounded-full ring-2 ring-white dark:ring-slate-900 shadow-sm"
+                            style={{ backgroundColor: preset.primary }}
+                          />
+                          <span
+                            className="w-4 h-4 rounded-full ring-2 ring-white dark:ring-slate-900 shadow-sm"
+                            style={{ backgroundColor: preset.accent }}
+                          />
+                        </div>
+                        <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                          {preset.category}
+                        </span>
+                      </div>
+
+                      {isSelected && (
+                        <div className="w-5 h-5 rounded-full bg-brand-600 text-white flex items-center justify-center shrink-0">
+                          <Check className="w-3 h-3 stroke-[3]" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-400 transition">
+                        {preset.name}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">
+                        {preset.description}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Custom Hex Color Pickers */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                2. Custom Corporate Hex Colors
+              </label>
+              {customHex && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  Custom Colors Active
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {/* Primary Hex Picker */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
+                  Primary Brand Color (Navigation, Buttons & Badges)
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 shrink-0 shadow-inner">
+                    <input
+                      type="color"
+                      value={primaryColor}
+                      onChange={(e) => handleCustomPrimaryChange(e.target.value)}
+                      className="absolute -top-2 -left-2 w-16 h-16 cursor-pointer border-0 p-0"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={primaryColor}
+                    onChange={(e) => handleCustomPrimaryChange(e.target.value)}
+                    placeholder="#0284c7"
+                    maxLength={7}
+                    className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white text-xs font-mono font-semibold uppercase focus:border-brand-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Accent Hex Picker */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
+                  Secondary Accent Color (Alerts, Highlights & Stars)
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 shrink-0 shadow-inner">
+                    <input
+                      type="color"
+                      value={accentColor}
+                      onChange={(e) => handleCustomAccentChange(e.target.value)}
+                      className="absolute -top-2 -left-2 w-16 h-16 cursor-pointer border-0 p-0"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={accentColor}
+                    onChange={(e) => handleCustomAccentChange(e.target.value)}
+                    placeholder="#f59e0b"
+                    maxLength={7}
+                    className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white text-xs font-mono font-semibold uppercase focus:border-brand-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Corner Radius Style */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
+                  Component Corner Radius
+                </label>
+                <select
+                  value={borderRadius}
+                  onChange={(e) => {
+                    const r = e.target.value as "none" | "sm" | "md" | "lg" | "full";
+                    setBorderRadius(r);
+                    applyCompanyTheme({
+                      presetId: selectedPresetId,
+                      primaryColor,
+                      accentColor,
+                      radius: r,
+                      customHex,
+                    });
+                  }}
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white text-xs font-semibold focus:border-brand-500 focus:outline-none"
+                >
+                  <option value="none">Square (0px - Brutalist Industrial)</option>
+                  <option value="sm">Subtle (4px - Technical Crisp)</option>
+                  <option value="md">Standard (8px - Modern Civil Default)</option>
+                  <option value="lg">Soft (12px - Friendly Executive)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Preview Swatch Canvas */}
+          <div className="p-4 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-brand-500" />
+                Live UI Components Preview (Instant Rendering)
+              </span>
+              <span className="font-mono text-[11px] text-brand-600 dark:text-brand-400 font-bold">
+                {primaryColor.toUpperCase()}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              {/* Primary button */}
+              <button
+                type="button"
+                className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 transition"
+              >
+                Primary Action Button
+              </button>
+
+              {/* Secondary button */}
+              <button
+                type="button"
+                className="px-4 py-2 rounded-xl bg-brand-500/10 hover:bg-brand-500/20 text-brand-600 dark:text-brand-400 border border-brand-500/30 text-xs font-bold transition"
+              >
+                Outline Brand Button
+              </button>
+
+              {/* Status Badge */}
+              <span className="px-2.5 py-1 rounded-full bg-brand-500/10 text-brand-700 dark:text-brand-300 border border-brand-500/20 text-xs font-bold">
+                ISO 9001 Approved
+              </span>
+
+              {/* Accent Chip */}
+              <span
+                className="px-2.5 py-1 rounded-full text-white text-xs font-bold shadow-xs"
+                style={{ backgroundColor: accentColor }}
+              >
+                Accent Highlight
+              </span>
+
+              {/* Submittal sample */}
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-mono">
+                <span className="w-2 h-2 rounded-full bg-brand-500" />
+                <span className="text-slate-700 dark:text-slate-300 font-bold">
+                  NCR-2026-001
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Section 3: Contact Details & Head Office Address */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4 shadow-sm dark:shadow-xl">
           <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800 text-slate-900 dark:text-white font-bold text-sm">
             <MapPin className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -1004,7 +1338,7 @@ export const Settings: React.FC = () => {
             <button
               type="submit"
               disabled={isSaving}
-              className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-500/20 transition active:scale-95"
+              className="flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md shadow-brand-500/20 transition active:scale-95"
             >
               <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
               <span>{isSaving ? "Saving..." : "Save SMTP Settings"}</span>
@@ -1017,7 +1351,7 @@ export const Settings: React.FC = () => {
           <button
             type="submit"
             disabled={isSaving}
-            className="flex items-center gap-2 px-8 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-lg shadow-indigo-500/25 transition"
+            className="flex items-center gap-2 px-8 py-3.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-lg shadow-brand-500/25 transition active:scale-95"
           >
             <Save className={`w-4 h-4 ${isSaving ? "animate-spin" : ""}`} />
             <span>

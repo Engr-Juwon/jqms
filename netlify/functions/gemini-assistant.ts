@@ -212,72 +212,61 @@ Always populate all fields with realistic, high-standard civil engineering detai
     currentParts.push({ text: prompt });
     contents.push({ role: "user", parts: currentParts });
 
-    // Call Google Gemini REST API (v1beta endpoint supports gemini-2.5-flash / gemini-1.5-flash)
-    // We try gemini-2.5-flash first with fallback
-    const model = "gemini-2.5-flash";
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    // Call Google Gemini REST API using modern supported models
+    const candidateModels = [
+      "gemini-3.8-flash",
+      "gemini-3.5-flash",
+      "gemini-flash-latest",
+      "gemini-2.5-flash",
+    ];
 
-    const geminiResponse = await fetch(geminiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents,
-        systemInstruction: {
-          parts: [{ text: systemInstruction }],
-        },
-        generationConfig: {
-          temperature: 0.2, // Low temperature for high technical precision
-          maxOutputTokens: 2048,
-        },
-      }),
-    });
+    let lastError: string = "";
+    let data: any = null;
+    let selectedModel = "";
 
-    if (!geminiResponse.ok) {
-      const errText = await geminiResponse.text();
-      console.error("Gemini API error:", geminiResponse.status, errText);
-
-      // Fallback to gemini-1.5-flash if 2.5 is not accessible
-      const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-      const fallbackRes = await fetch(fallbackUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents,
-          systemInstruction: {
-            parts: [{ text: systemInstruction }],
-          },
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 2048,
-          },
-        }),
-      });
-
-      if (!fallbackRes.ok) {
-        const fallbackErr = await fallbackRes.text();
-        return {
-          statusCode: fallbackRes.status,
-          headers: CORS_HEADERS,
+    for (const model of candidateModels) {
+      try {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const geminiResponse = await fetch(geminiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            error: "Gemini API rejected request.",
-            details: fallbackErr,
+            contents,
+            systemInstruction: {
+              parts: [{ text: systemInstruction }],
+            },
+            generationConfig: {
+              temperature: 0.2, // Low temperature for high technical precision
+              maxOutputTokens: 2048,
+            },
           }),
-        };
+        });
+
+        if (geminiResponse.ok) {
+          data = await geminiResponse.json();
+          selectedModel = model;
+          break;
+        } else {
+          lastError = await geminiResponse.text();
+          console.warn(`Model ${model} failed (${geminiResponse.status}):`, lastError);
+        }
+      } catch (err: any) {
+        lastError = err?.message || String(err);
+        console.warn(`Model ${model} fetch exception:`, lastError);
       }
+    }
 
-      const fallbackData = await fallbackRes.json();
-      const text =
-        fallbackData?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        "No response generated.";
-
+    if (!data) {
       return {
-        statusCode: 200,
+        statusCode: 502,
         headers: CORS_HEADERS,
-        body: JSON.stringify({ text, model: "gemini-1.5-flash" }),
+        body: JSON.stringify({
+          error: "Gemini API rejected request.",
+          details: lastError,
+        }),
       };
     }
 
-    const data = await geminiResponse.json();
     const replyText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "No response generated.";
@@ -287,7 +276,7 @@ Always populate all fields with realistic, high-standard civil engineering detai
       headers: CORS_HEADERS,
       body: JSON.stringify({
         text: replyText,
-        model,
+        model: selectedModel,
         usage: data?.usageMetadata,
       }),
     };

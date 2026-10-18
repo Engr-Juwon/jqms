@@ -32,6 +32,7 @@ import { askGeminiCopilot, AIChatMessage, AIActionProposal } from "@/lib/aiServi
 import { dbService } from "@/lib/db";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
+import { CopilotMarkdown } from "./CopilotMarkdown";
 import {
   NonConformanceReport,
   DailySiteLog,
@@ -695,8 +696,12 @@ How can I assist your site operations or technical audit today?`,
                     )}
 
                     {/* Text content */}
-                    <div className="whitespace-pre-wrap leading-relaxed select-text font-sans">
-                      {msg.text}
+                    <div className="select-text font-sans leading-relaxed">
+                      {isUser ? (
+                        <div className="whitespace-pre-wrap">{msg.text}</div>
+                      ) : (
+                        <CopilotMarkdown content={msg.text} />
+                      )}
                     </div>
 
                     {/* Action Execution Proposal Card */}

@@ -87,11 +87,15 @@ export const AICopilotDrawer: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
 
-  const [messages, setMessages] = useState<AIChatMessage[]>([
-    {
-      id: "welcome",
-      role: "model",
-      text: `Hello ${currentUser?.fullName?.split(" ")[0] || "Engineer"}! I am your **Jay-QMS Civil Engineering Copilot**.\n\nI have full authorized agency to **draft and create**:
+  const userFirst = currentUser?.fullName?.split(" ")[0] || "Engineer";
+  const storageKey = currentUser?.uid
+    ? `jqms_copilot_chat_${currentUser.uid}_${activeProject?.id || "global"}`
+    : "jqms_copilot_chat_guest";
+
+  const getInitialWelcomeMessage = (userName?: string): AIChatMessage => ({
+    id: "welcome",
+    role: "model",
+    text: `Hello ${userName || "Engineer"}! I am your **Jay-QMS Civil Engineering Copilot**.\n\nI have full authorized agency to **draft and create**:
 - 🚨 **NCRs (Non-Conformance Reports)** with ISO 9001 root cause & containment
 - 📅 **Daily Site Logs** (weather, manpower, work activities)
 - 📝 **Contractual Site Instructions (SI)** with remediation deadlines
@@ -100,9 +104,52 @@ export const AICopilotDrawer: React.FC = () => {
 - 📊 **Weekly Quality Progress Reports**
 
 How can I assist your site operations or technical audit today?`,
-      timestamp: Date.now(),
-    },
-  ]);
+    timestamp: Date.now(),
+  });
+
+  const [messages, setMessages] = useState<AIChatMessage[]>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed loading saved chat history:", e);
+    }
+    return [getInitialWelcomeMessage(userFirst)];
+  });
+
+  // Reload history whenever user or project changes
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed loading user chat history:", e);
+    }
+    setMessages([getInitialWelcomeMessage(userFirst)]);
+  }, [storageKey]);
+
+  // Persist messages whenever they update
+  useEffect(() => {
+    try {
+      if (messages.length > 0) {
+        localStorage.setItem(storageKey, JSON.stringify(messages));
+      }
+    } catch (e) {
+      console.warn("Failed saving user chat history:", e);
+    }
+  }, [messages, storageKey]);
+
   const [imageAttachment, setImageAttachment] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -535,16 +582,31 @@ How can I assist your site operations or technical audit today?`,
   };
 
   const handleClearHistory = () => {
-    if (confirm("Reset AI conversation history?")) {
-      setMessages([
-        {
-          id: "welcome",
-          role: "model",
-          text: `Chat reset. Ready for your next technical query or civil QA/QC audit question.`,
-          timestamp: Date.now(),
-        },
-      ]);
+    if (
+      window.confirm(
+        "Are you sure you want to delete your entire AI chat history? This will clear all saved messages for this project."
+      )
+    ) {
+      const fresh = [getInitialWelcomeMessage(userFirst)];
+      setMessages(fresh);
+      try {
+        localStorage.removeItem(storageKey);
+      } catch (e) {
+        console.warn("Failed removing chat history from localStorage:", e);
+      }
+      toast.success("Chat history deleted.");
     }
+  };
+
+  const handleDeleteMessage = (msgId: string) => {
+    setMessages((prev) => {
+      const updated = prev.filter((m) => m.id !== msgId);
+      if (updated.length === 0) {
+        return [getInitialWelcomeMessage(userFirst)];
+      }
+      return updated;
+    });
+    toast.success("Message removed");
   };
 
   return (
@@ -786,21 +848,34 @@ How can I assist your site operations or technical audit today?`,
                         })}
                       </span>
 
-                      {!isUser && (
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(msg.id, msg.text)}
-                          className="flex items-center gap-1 hover:text-brand-600 dark:hover:text-brand-400 transition"
-                          title="Copy text"
-                        >
-                          {copiedId === msg.id ? (
-                            <Check className="w-3 h-3 text-emerald-500" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>{copiedId === msg.id ? "Copied" : "Copy"}</span>
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {msg.id !== "welcome" && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMessage(msg.id)}
+                            className="flex items-center gap-1 opacity-70 hover:opacity-100 hover:text-red-500 transition"
+                            title="Delete this message"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+
+                        {!isUser && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(msg.id, msg.text)}
+                            className="flex items-center gap-1 hover:text-brand-600 dark:hover:text-brand-400 transition"
+                            title="Copy text"
+                          >
+                            {copiedId === msg.id ? (
+                              <Check className="w-3 h-3 text-emerald-500" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                            <span>{copiedId === msg.id ? "Copied" : "Copy"}</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
 

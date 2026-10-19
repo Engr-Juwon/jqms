@@ -4,7 +4,7 @@ import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getDatabase } from 'firebase/database';
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyAmOFkhYwjt0IiQzSmtTPkVKuY55bEHB-k",
   authDomain: "benchmark-jescode-2e842.firebaseapp.com",
   databaseURL: "https://benchmark-jescode-2e842-default-rtdb.firebaseio.com",

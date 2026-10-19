@@ -1,5 +1,13 @@
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { auth } from "@/firebase";
+import { initializeApp, getApps } from "firebase/app";
+import { GoogleAuthProvider, signInWithPopup, getAuth } from "firebase/auth";
+import { firebaseConfig } from "@/firebase";
+
+function getSecondarySyncAuth() {
+  const secondaryName = "GoogleWorkspaceSync";
+  const existing = getApps().find((a) => a.name === secondaryName);
+  const secondaryApp = existing || initializeApp(firebaseConfig, secondaryName);
+  return getAuth(secondaryApp);
+}
 
 /**
  * Google Products & Workspace Synchronization Service for Jay-QMS
@@ -85,7 +93,8 @@ export async function connectGoogleAccount(): Promise<{ email: string; token: st
   provider.addScope("https://www.googleapis.com/auth/spreadsheets");
   provider.addScope("https://www.googleapis.com/auth/drive.file");
 
-  const result = await signInWithPopup(auth, provider);
+  const syncAuth = getSecondarySyncAuth();
+  const result = await signInWithPopup(syncAuth, provider);
   const credential = GoogleAuthProvider.credentialFromResult(result);
   const token = credential?.accessToken || "";
   const email = result.user.email || "";
@@ -104,6 +113,12 @@ export async function connectGoogleAccount(): Promise<{ email: string; token: st
  * Disconnects Google Workspace account
  */
 export function disconnectGoogleAccount(): void {
+  try {
+    const syncAuth = getSecondarySyncAuth();
+    syncAuth.signOut();
+  } catch (e) {
+    // ignore
+  }
   const cfg = getGoogleWorkspaceConfig();
   delete cfg.accessToken;
   delete cfg.connectedEmail;

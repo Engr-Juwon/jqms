@@ -34,6 +34,7 @@ import {
 import { Project } from "@/types";
 import { dbService } from "@/lib/db";
 import { toast } from "react-hot-toast";
+import { GoogleIcon } from "@/components/icons/GoogleIcon";
 
 interface GoogleWorkspaceSyncModalProps {
   isOpen: boolean;
@@ -72,7 +73,19 @@ export const GoogleWorkspaceSyncModal: React.FC<GoogleWorkspaceSyncModalProps> =
       toast.success(`Connected to Google Workspace as ${res.email}!`);
     } catch (err: any) {
       console.error("Google connection failure:", err);
-      toast.error(err?.message || "Google sign-in was canceled or failed.");
+      const code = err?.code || "";
+      if (code === "auth/unauthorized-domain") {
+        toast.error(
+          "Netlify domain is not authorized in Firebase. Please add your Netlify site domain in Firebase Console -> Authentication -> Settings -> Authorized Domains.",
+          { duration: 6000 }
+        );
+      } else if (code === "auth/popup-blocked") {
+        toast.error("Google sign-in popup was blocked by your browser. Please allow popups for this site.", { duration: 5000 });
+      } else if (code === "auth/popup-closed-by-user") {
+        toast("Sign-in window closed.", { icon: "ℹ️" });
+      } else {
+        toast.error(err?.message || "Google sign-in was canceled or failed.");
+      }
     } finally {
       setIsConnecting(false);
     }
@@ -390,10 +403,10 @@ Site Instructions (SI) issued through Jay-QMS carry mandatory contractual compli
                   type="button"
                   onClick={handleConnectGoogle}
                   disabled={isConnecting}
-                  className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md shadow-blue-500/20 active:scale-95 transition flex items-center justify-center gap-2"
+                  className="w-full py-2.5 px-3 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-800 dark:text-white font-semibold text-xs border border-slate-300 dark:border-slate-700 shadow-xs active:scale-95 transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
                 >
-                  <LogIn className="w-4 h-4" />
-                  <span>{isConnecting ? "Connecting..." : "Sign in with Google"}</span>
+                  <GoogleIcon className="w-4 h-4" />
+                  <span>{isConnecting ? "Connecting to Google..." : "Sign in with Google"}</span>
                 </button>
               </div>
             )}

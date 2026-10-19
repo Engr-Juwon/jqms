@@ -38,6 +38,7 @@ import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { CopilotMarkdown } from "./CopilotMarkdown";
 import { GoogleWorkspaceSyncModal } from "./GoogleWorkspaceSyncModal";
+import { GoogleIcon } from "@/components/icons/GoogleIcon";
 import {
   syncToGoogleCalendar,
   exportToGoogleSheets,
@@ -685,18 +686,20 @@ How can I assist your site operations or technical audit today?`,
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-full bg-brand-600 hover:bg-brand-500 text-white shadow-2xl shadow-brand-500/40 hover:scale-105 active:scale-95 transition-all group"
+          className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 flex items-center gap-2 p-3 sm:px-4 sm:py-2.5 rounded-full bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white shadow-xl shadow-brand-600/30 hover:shadow-2xl hover:scale-105 active:scale-95 transition-all group border border-white/20 backdrop-blur-md"
           title="Open Jay-QMS Civil QA/QC AI Copilot"
+          aria-label="Open Jay-QMS AI Copilot"
         >
-          <div className="relative">
+          <div className="relative flex items-center justify-center">
             <Bot className="w-5 h-5 text-white animate-pulse" />
-            <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-brand-600" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-brand-700 animate-ping" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-brand-700" />
           </div>
-          <span className="text-xs font-bold tracking-wide">
-            Jay-QMS AI Copilot
+          <span className="hidden sm:inline text-xs font-bold tracking-tight">
+            Jay-QMS Copilot
           </span>
-          <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-mono uppercase tracking-wider font-extrabold">
-            Actions Enabled
+          <span className="hidden md:inline px-1.5 py-0.5 rounded-full bg-white/20 text-[9px] font-mono uppercase tracking-wider font-extrabold">
+            Actions
           </span>
         </button>
       )}
@@ -704,14 +707,19 @@ How can I assist your site operations or technical audit today?`,
       {/* Slide-out / Modal Drawer */}
       {isOpen && (
         <div
-          className={`fixed bottom-4 right-4 z-50 flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl transition-all duration-300 overflow-hidden ${
+          className={`fixed z-50 flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl transition-all duration-300 overflow-hidden ${
             isExpanded
-              ? "w-[calc(100vw-2rem)] md:w-[680px] h-[calc(100vh-2rem)] md:h-[750px]"
-              : "w-[calc(100vw-2rem)] sm:w-[440px] h-[600px] max-h-[calc(100vh-2rem)]"
+              ? "inset-x-0 bottom-0 sm:inset-auto sm:bottom-4 sm:right-4 w-full sm:w-[calc(100vw-2rem)] md:w-[680px] h-[92vh] sm:h-[calc(100vh-2rem)] md:h-[750px] rounded-t-3xl sm:rounded-3xl"
+              : "inset-x-0 bottom-0 sm:inset-auto sm:bottom-4 sm:right-4 w-full sm:w-[440px] h-[85vh] sm:h-[600px] max-h-[100vh] sm:max-h-[calc(100vh-2rem)] rounded-t-3xl sm:rounded-3xl"
           }`}
         >
+          {/* Mobile Drag Indicator */}
+          <div className="sm:hidden w-full flex justify-center pt-2 pb-0.5 bg-gradient-to-r from-brand-600 to-brand-700">
+            <div className="w-10 h-1 rounded-full bg-white/40" />
+          </div>
+
           {/* Header */}
-          <div className="px-4 py-3.5 bg-gradient-to-r from-brand-600 to-brand-700 text-white flex items-center justify-between shrink-0 select-none shadow-md">
+          <div className="px-4 py-3 bg-gradient-to-r from-brand-600 to-brand-700 text-white flex items-center justify-between shrink-0 select-none shadow-md">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 rounded-xl bg-white/15 flex items-center justify-center shrink-0 border border-white/20">
                 <Sparkles className="w-4 h-4 text-amber-300" />
@@ -735,11 +743,14 @@ How can I assist your site operations or technical audit today?`,
               <button
                 type="button"
                 onClick={() => setIsGoogleModalOpen(true)}
-                className="px-2 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[10px] font-bold tracking-tight transition flex items-center gap-1.5 border border-white/20 shadow-xs mr-0.5"
+                className="relative p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition flex items-center justify-center border border-white/20 shadow-xs mr-0.5 active:scale-95"
                 title="Google Workspace & Products Sync Hub"
+                aria-label="Google Workspace & Products Sync Hub"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
-                <span>Google Sync</span>
+                <div className="w-4 h-4 rounded-full bg-white flex items-center justify-center p-0.5 shadow-xs">
+                  <GoogleIcon className="w-3.5 h-3.5" />
+                </div>
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-1 ring-brand-700 animate-pulse" />
               </button>
 
               <button

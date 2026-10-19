@@ -34,12 +34,15 @@ import {
   History,
   Plus,
   MessageSquare,
+  Database,
+  FlaskConical,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useCompany } from "@/lib/companyHelper";
 import { getUserSigningTitle } from "@/lib/permissions";
 import { askGeminiCopilot, AIChatMessage, AIActionProposal } from "@/lib/aiService";
+import { buildProjectDatabaseContext } from "@/lib/aiProjectContextService";
 import {
   saveAICopilotSession,
   getAICopilotSessions,
@@ -70,14 +73,29 @@ import {
 
 const QUICK_PROMPTS = [
   {
-    icon: AlertTriangle,
-    title: "Draft & Log NCR",
-    prompt: "Create an NCR for honeycombing defect discovered on Grid B-3 Level 2 Column C4 following formwork stripping.",
+    icon: Database,
+    title: "Audit Open NCRs",
+    prompt: "Scan our project database and summarize all open and under-review NCRs, including root causes, severity levels, and grid locations.",
+  },
+  {
+    icon: FlaskConical,
+    title: "Cube Strength Audit",
+    prompt: "Audit our concrete cube compressive test results from the database. List recent 7d and 28d strength breaks and highlight any non-compliant failures.",
   },
   {
     icon: CalendarCheck,
-    title: "Generate Daily Site Log",
-    prompt: "Log today's site activity: 14 men working on Grid C slab formwork and steel fixing. Weather clear and sunny. No major delays.",
+    title: "Pending Permits to Pour",
+    prompt: "What permits to pour (PTP) are currently active, approved, or awaiting clearance signatures in our project database?",
+  },
+  {
+    icon: FileText,
+    title: "Latest Site Diary & Logs",
+    prompt: "Retrieve the latest recorded daily site logs, weather conditions, total manpower counts, and any recorded delays from the project database.",
+  },
+  {
+    icon: AlertTriangle,
+    title: "Draft & Log NCR",
+    prompt: "Create an NCR for honeycombing defect discovered on Grid B-3 Level 2 Column C4 following formwork stripping.",
   },
   {
     icon: FileText,
@@ -85,29 +103,14 @@ const QUICK_PROMPTS = [
     prompt: "Issue a Site Instruction to the Main Contractor to rectify insufficient rebar cover (measured 15mm vs required 35mm) on Level 1 retaining wall before concrete pour.",
   },
   {
-    icon: ClipboardList,
-    title: "Record Site Observation",
-    prompt: "Record a QA/QC site observation regarding inadequate curing burlap coverage on yesterday's ground slab pour.",
-  },
-  {
     icon: Boxes,
-    title: "Register Structural Element",
-    prompt: "Register a new structural element: Column COL-L2-B3 on Level 2, Grid B-3 with C35/45 concrete and 2.8 m3 design volume.",
+    title: "Structural Elements BIM",
+    prompt: "List our registered structural elements for this project by level, concrete grade, and volume.",
   },
   {
     icon: BookOpen,
     title: "Compile Weekly Report",
-    prompt: "Compile a weekly quality summary report highlighting 3 passed cube tests, 1 minor NCR closed, and zero HSE incidents.",
-  },
-  {
-    icon: Calendar,
-    title: "Sync Google Calendar",
-    prompt: "Schedule a formal pre-pour concrete inspection for Level 2 slab on Google Calendar with checklist.",
-  },
-  {
-    icon: Table,
-    title: "Sync Google Sheets",
-    prompt: "Export current project NCR register and containment matrix to Google Sheets.",
+    prompt: "Compile a weekly quality summary report highlighting passed cube tests, closed NCRs, and site progress based on our live database.",
   },
 ];
 
@@ -125,22 +128,27 @@ export const AICopilotDrawer: React.FC = () => {
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
 
   const userFirst = currentUser?.fullName?.split(" ")[0] || "Engineer";
+  const userRoleTitle = getUserSigningTitle(currentUser);
   const storageKey = currentUser?.uid
     ? `jqms_copilot_chat_${currentUser.uid}_${activeProject?.id || "global"}`
     : "jqms_copilot_chat_guest";
 
-  const getInitialWelcomeMessage = (userName?: string): AIChatMessage => ({
+  const getInitialWelcomeMessage = (userName?: string, projName?: string, roleName?: string): AIChatMessage => ({
     id: "welcome",
     role: "model",
-    text: `Hello ${userName || "Engineer"}! I am your **Jay-QMS Civil Engineering Copilot**.\n\nI have full authorized agency to **draft and create**:
-- 🚨 **NCRs (Non-Conformance Reports)** with ISO 9001 root cause & containment
-- 📅 **Daily Site Logs** (weather, manpower, work activities)
-- 📝 **Contractual Site Instructions (SI)** with remediation deadlines
-- 👁️ **Site Observations / Comments**
-- 🧱 **Structural Elements** (BIM / Civil schedule)
-- 📊 **Weekly Quality Progress Reports**
+    text: `Hello ${userName || "Engineer"}! I am your **Jay-QMS Civil Engineering Copilot**.
 
-How can I assist your site operations or technical audit today?`,
+I have **direct, live read access to all project database records** for **${projName || activeProject?.name || "your active project"}**, strictly filtered and authorized for your role (**${roleName || userRoleTitle}**).
+
+You can ask me to:
+- 🔍 **Live Database Queries**: *"What NCRs are currently open?"*, *"Show me cube tests awaiting 28-day break"*, *"What permits to pour are pending signatures?"*, *"Summarize yesterday's daily site log"*
+- 🚨 **Draft & Log NCRs** with ISO 9001 root cause & containment
+- 📅 **Generate Daily Site Logs** (weather, manpower, work activities)
+- 📝 **Issue Contractual Site Instructions (SI)** with remediation deadlines
+- 🧱 **Inspect or Register Structural Elements** (BIM spatial twin)
+- 📊 **Compile Weekly Quality Progress Reports**
+
+How can I assist your site operations, quality audit, or database queries today?`,
     timestamp: Date.now(),
   });
 
@@ -156,7 +164,7 @@ How can I assist your site operations or technical audit today?`,
     } catch (e) {
       console.warn("Failed loading saved chat history:", e);
     }
-    return [getInitialWelcomeMessage(userFirst)];
+    return [getInitialWelcomeMessage(userFirst, activeProject?.name, userRoleTitle)];
   });
 
   // Reload history whenever user or project changes
@@ -173,7 +181,7 @@ How can I assist your site operations or technical audit today?`,
     } catch (e) {
       console.warn("Failed loading user chat history:", e);
     }
-    setMessages([getInitialWelcomeMessage(userFirst)]);
+    setMessages([getInitialWelcomeMessage(userFirst, activeProject?.name, userRoleTitle)]);
   }, [storageKey]);
 
   // Multi-Device Cloud Sessions
@@ -246,7 +254,7 @@ How can I assist your site operations or technical audit today?`,
     if (currentUser?.uid) {
       localStorage.setItem(`jqms_active_session_${currentUser.uid}`, newId);
     }
-    const fresh = [getInitialWelcomeMessage(userFirst)];
+    const fresh = [getInitialWelcomeMessage(userFirst, activeProject?.name, userRoleTitle)];
     setMessages(fresh);
     setShowPastSessions(false);
     toast.success("Started new conversation session");
@@ -259,7 +267,7 @@ How can I assist your site operations or technical audit today?`,
     if (currentUser?.uid) {
       localStorage.setItem(`jqms_active_session_${currentUser.uid}`, session.id);
     }
-    setMessages(session.messages || [getInitialWelcomeMessage(userFirst)]);
+    setMessages(session.messages || [getInitialWelcomeMessage(userFirst, activeProject?.name, userRoleTitle)]);
     setShowPastSessions(false);
     toast.success(`Loaded "${session.title}"`);
     setTimeout(() => scrollToBottom(), 150);
@@ -413,6 +421,22 @@ How can I assist your site operations or technical audit today?`,
       });
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
+      // Dynamically compile live project database context authorized for user's role
+      let projectDataSummary = "";
+      if (activeProject?.id) {
+        try {
+          projectDataSummary = await buildProjectDatabaseContext({
+            projectId: activeProject.id,
+            companyId: activeProject.companyId || companyId || undefined,
+            user: currentUser,
+            activeProject,
+            userPrompt: textToSend,
+          });
+        } catch (dbErr) {
+          console.warn("Could not compile live project database snapshot:", dbErr);
+        }
+      }
+
       const response = await askGeminiCopilot({
         prompt: textToSend,
         imageBase64: attachedImg || undefined,
@@ -421,13 +445,15 @@ How can I assist your site operations or technical audit today?`,
           projectName: activeProject?.name || "Civil Works Project",
           projectCode: activeProject?.code || "PRJ",
           standards: standards || [],
-          roleTitle: getUserSigningTitle(currentUser),
+          roleTitle: userRoleTitle,
           userName: currentUser?.fullName || "Site Engineer",
+          userRole: currentUser?.role || "ENGINEER",
           currentModule: "Civil QA/QC Platform",
           currentDateTime: now.toISOString(),
           currentDateFormatted,
           currentTimeFormatted,
           timezone,
+          projectDataSummary,
         },
       });
 
@@ -835,7 +861,7 @@ How can I assist your site operations or technical audit today?`,
         "Are you sure you want to delete your entire AI chat history? This will clear all saved messages for this project."
       )
     ) {
-      const fresh = [getInitialWelcomeMessage(userFirst)];
+      const fresh = [getInitialWelcomeMessage(userFirst, activeProject?.name, userRoleTitle)];
       setMessages(fresh);
       try {
         localStorage.removeItem(storageKey);
@@ -910,9 +936,14 @@ How can I assist your site operations or technical audit today?`,
                     AUTONOMOUS
                   </span>
                 </div>
-                <p className="text-[10px] text-white/80 truncate">
-                  {activeProject?.name || "Civil Engineering Quality Platform"}
-                </p>
+                <div className="flex items-center gap-1.5 text-[10px] text-white/85 truncate">
+                  <span className="truncate">{activeProject?.name || "Civil Quality Platform"}</span>
+                  <span className="text-white/40">•</span>
+                  <span className="inline-flex items-center gap-1 text-[9px] bg-emerald-500/25 text-emerald-100 border border-emerald-400/40 px-1.5 py-0.2 rounded-full font-medium shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Live DB: {userRoleTitle}</span>
+                  </span>
+                </div>
               </div>
             </div>
 

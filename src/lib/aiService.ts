@@ -40,6 +40,8 @@ export interface AskAIOptions {
     currentDateFormatted?: string;
     currentTimeFormatted?: string;
     timezone?: string;
+    userRole?: string;
+    projectDataSummary?: string;
   };
   taskType?: "chat" | "ncr_draft" | "weekly_summary" | "spec_lookup" | "photo_defect_analysis";
   imageBase64?: string;

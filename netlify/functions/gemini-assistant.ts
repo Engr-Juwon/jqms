@@ -38,13 +38,15 @@ export const handler: Handler = async (event: HandlerEvent) => {
     };
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const rawKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || "";
+  const apiKey = rawKey.replace(/^["']|["']$/g, "").trim();
+
   if (!apiKey) {
     return {
       statusCode: 500,
       headers: CORS_HEADERS,
       body: JSON.stringify({
-        error: "GEMINI_API_KEY is not configured in Netlify environment variables.",
+        error: "GEMINI_API_KEY is not detected in the current Netlify deployment. If you recently added the environment variable, you must go to Netlify -> Deploys -> 'Trigger deploy' -> 'Clear cache and deploy site' to activate it.",
       }),
     };
   }

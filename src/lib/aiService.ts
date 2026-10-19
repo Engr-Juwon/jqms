@@ -36,6 +36,10 @@ export interface AskAIOptions {
     roleTitle?: string;
     userName?: string;
     currentModule?: string;
+    currentDateTime?: string;
+    currentDateFormatted?: string;
+    currentTimeFormatted?: string;
+    timezone?: string;
   };
   taskType?: "chat" | "ncr_draft" | "weekly_summary" | "spec_lookup" | "photo_defect_analysis";
   imageBase64?: string;

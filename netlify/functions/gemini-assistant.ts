@@ -15,6 +15,10 @@ interface AssistantRequest {
     roleTitle?: string;
     userName?: string;
     currentModule?: string;
+    currentDateTime?: string;
+    currentDateFormatted?: string;
+    currentTimeFormatted?: string;
+    timezone?: string;
   };
   taskType?: "chat" | "ncr_draft" | "weekly_summary" | "spec_lookup" | "photo_defect_analysis";
   imageBase64?: string; // Optional image for defect analysis
@@ -73,12 +77,22 @@ export const handler: Handler = async (event: HandlerEvent) => {
       "BS 8110 Structural Use of Concrete",
     ]).join(", ");
 
+    const liveDateStr = context?.currentDateFormatted || new Date().toDateString();
+    const liveTimeStr = context?.currentTimeFormatted || new Date().toLocaleTimeString();
+    const liveTimezone = context?.timezone || "UTC";
+    const liveIso = context?.currentDateTime || new Date().toISOString();
+
     const systemInstruction = `You are "Jay-QMS Copilot", an elite Civil Engineering & QA/QC Quality Director and Technical Auditor built into the Jay-QMS platform.
 Project Context:
 - Active Project: ${context?.projectName || "Civil Infrastructure Works"} (${context?.projectCode || "PRJ"})
 - User: ${context?.userName || "Site Engineer"} (Role: ${context?.roleTitle || "QA/QC Engineer"})
 - Governed Engineering Standards: ${standardsText}
 - Active Module: ${context?.currentModule || "General Quality & Engineering"}
+- Live System Date & Time: ${liveDateStr} at ${liveTimeStr} (${liveTimezone})
+- Exact Timestamp: ${liveIso}
+
+TEMPORAL & CLOCK ACCESS:
+You have direct, real-time access to the user's live device clock, date, time, and timezone. When the user asks about the current date, day of the week, time, or uses temporal references like "today", "yesterday", "tomorrow", "this morning", "this week", or "scheduled pour date", use the live date and time provided above. NEVER state that you do not have clock access or cannot read the date.
 
 Your core mandates:
 1. Ground your answers strictly in international civil engineering codes (British Standards BS/BS EN, ASTM, ACI, Eurocodes, ISO 9001).

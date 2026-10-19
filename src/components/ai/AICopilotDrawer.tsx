@@ -27,6 +27,10 @@ import {
   Table,
   Mail,
   FolderOpen,
+  RotateCw,
+  Reply,
+  Edit3,
+  CornerDownLeft,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
@@ -176,6 +180,7 @@ How can I assist your site operations or technical audit today?`,
 
   const [imageAttachment, setImageAttachment] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<{ id: string; role: "user" | "model"; text: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -217,21 +222,73 @@ How can I assist your site operations or technical audit today?`,
     reader.readAsDataURL(file);
   };
 
-  const handleSend = async (customPrompt?: string) => {
-    const textToSend = customPrompt || input.trim();
-    if (!textToSend && !imageAttachment) return;
+  const handleReply = (msg: AIChatMessage) => {
+    setReplyingTo({
+      id: msg.id,
+      role: msg.role,
+      text: msg.text,
+    });
+    inputRef.current?.focus();
+  };
+
+  const handleEditPrompt = (text: string) => {
+    setInput(text);
+    inputRef.current?.focus();
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 180)}px`;
+    }
+  };
+
+  const handleRetryPrompt = (text: string, imageBase64?: string) => {
+    handleSend(text, imageBase64);
+  };
+
+  const handleRegenerateFromModel = (modelMsgId: string) => {
+    const idx = messages.findIndex((m) => m.id === modelMsgId);
+    if (idx <= 0) return;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        handleSend(messages[i].text, messages[i].imageBase64);
+        return;
+      }
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    e.target.style.height = "auto";
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
+  };
+
+  const handleSend = async (customPrompt?: string, customImage?: string) => {
+    let textToSend = customPrompt !== undefined ? customPrompt.trim() : input.trim();
+    const attachedImg = customImage !== undefined ? customImage : imageAttachment;
+
+    if (!textToSend && !attachedImg) return;
+
+    if (replyingTo && customPrompt === undefined) {
+      const shortSnippet =
+        replyingTo.text.length > 140
+          ? replyingTo.text.slice(0, 140) + "..."
+          : replyingTo.text;
+      textToSend = `> Replying to ${replyingTo.role === "user" ? "user prompt" : "Copilot"}: "${shortSnippet}"\n\n${textToSend}`;
+      setReplyingTo(null);
+    }
 
     const userMsg: AIChatMessage = {
       id: "user-" + Date.now(),
       role: "user",
       text: textToSend,
       timestamp: Date.now(),
-      imageBase64: imageAttachment || undefined,
+      imageBase64: attachedImg || undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
-    const attachedImg = imageAttachment;
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+    }
     setImageAttachment(null);
     setIsLoading(true);
 
@@ -242,6 +299,20 @@ How can I assist your site operations or technical audit today?`,
           role: m.role,
           text: m.text,
         }));
+
+      const now = new Date();
+      const currentDateFormatted = now.toLocaleDateString("en-GB", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+      const currentTimeFormatted = now.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
       const response = await askGeminiCopilot({
         prompt: textToSend,
@@ -254,6 +325,10 @@ How can I assist your site operations or technical audit today?`,
           roleTitle: getUserSigningTitle(currentUser),
           userName: currentUser?.fullName || "Site Engineer",
           currentModule: "Civil QA/QC Platform",
+          currentDateTime: now.toISOString(),
+          currentDateFormatted,
+          currentTimeFormatted,
+          timezone,
         },
       });
 
@@ -646,10 +721,13 @@ How can I assist your site operations or technical audit today?`,
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Send on Ctrl+Enter or Cmd+Enter
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleSend();
+      return;
     }
+    // Enter alone naturally creates a new line/paragraph!
   };
 
   const handleClearHistory = () => {
@@ -1024,31 +1102,95 @@ How can I assist your site operations or technical audit today?`,
                         })}
                       </span>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Copy button (both user and model) */}
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(msg.id, msg.text)}
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition ${
+                            isUser
+                              ? "hover:bg-white/20 text-white/80 hover:text-white"
+                              : "hover:bg-slate-200 dark:hover:bg-slate-700/60 hover:text-brand-600 dark:hover:text-brand-400"
+                          }`}
+                          title={isUser ? "Copy prompt" : "Copy response"}
+                        >
+                          {copiedId === msg.id ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                          <span>{copiedId === msg.id ? "Copied" : "Copy"}</span>
+                        </button>
+
+                        {/* Reply to message (both user and model) */}
+                        <button
+                          type="button"
+                          onClick={() => handleReply(msg)}
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition ${
+                            isUser
+                              ? "hover:bg-white/20 text-white/80 hover:text-white"
+                              : "hover:bg-slate-200 dark:hover:bg-slate-700/60 hover:text-brand-600 dark:hover:text-brand-400"
+                          }`}
+                          title="Reply to message"
+                        >
+                          <Reply className="w-3 h-3" />
+                          <span>Reply</span>
+                        </button>
+
+                        {/* User-only: Edit Prompt */}
+                        {isUser && (
+                          <button
+                            type="button"
+                            onClick={() => handleEditPrompt(msg.text)}
+                            className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-white/20 text-white/80 hover:text-white transition"
+                            title="Edit prompt in input box"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                        )}
+
+                        {/* User-only: Retry prompt */}
+                        {isUser && (
+                          <button
+                            type="button"
+                            onClick={() => handleRetryPrompt(msg.text, msg.imageBase64)}
+                            disabled={isLoading}
+                            className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-white/20 text-white/80 hover:text-white transition disabled:opacity-40"
+                            title="Resend this prompt"
+                          >
+                            <RotateCw className="w-3 h-3" />
+                            <span>Retry</span>
+                          </button>
+                        )}
+
+                        {/* Model-only: Regenerate / Retry response */}
+                        {!isUser && msg.id !== "welcome" && (
+                          <button
+                            type="button"
+                            onClick={() => handleRegenerateFromModel(msg.id)}
+                            disabled={isLoading}
+                            className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700/60 hover:text-brand-600 dark:hover:text-brand-400 transition disabled:opacity-40"
+                            title="Regenerate this response"
+                          >
+                            <RotateCw className="w-3 h-3" />
+                            <span>Retry</span>
+                          </button>
+                        )}
+
+                        {/* Delete message */}
                         {msg.id !== "welcome" && (
                           <button
                             type="button"
                             onClick={() => handleDeleteMessage(msg.id)}
-                            className="flex items-center gap-1 opacity-70 hover:opacity-100 hover:text-red-500 transition"
+                            className={`flex items-center gap-1 p-0.5 rounded transition ${
+                              isUser
+                                ? "hover:bg-white/20 text-white/60 hover:text-red-300"
+                                : "hover:bg-slate-200 dark:hover:bg-slate-700/60 text-slate-400 hover:text-red-500"
+                            }`}
                             title="Delete this message"
                           >
                             <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-
-                        {!isUser && (
-                          <button
-                            type="button"
-                            onClick={() => handleCopy(msg.id, msg.text)}
-                            className="flex items-center gap-1 hover:text-brand-600 dark:hover:text-brand-400 transition"
-                            title="Copy text"
-                          >
-                            {copiedId === msg.id ? (
-                              <Check className="w-3 h-3 text-emerald-500" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                            <span>{copiedId === msg.id ? "Copied" : "Copy"}</span>
                           </button>
                         )}
                       </div>
@@ -1103,6 +1245,31 @@ How can I assist your site operations or technical audit today?`,
             </div>
           )}
 
+          {/* Replying Context Banner */}
+          {replyingTo && (
+            <div className="px-3.5 py-2 bg-brand-50 dark:bg-brand-950/60 border-t border-brand-200 dark:border-brand-900/60 flex items-center justify-between text-xs animate-in slide-in-from-bottom-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Reply className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 shrink-0" />
+                <div className="truncate text-[11px]">
+                  <span className="font-bold text-brand-700 dark:text-brand-300 mr-1.5">
+                    Replying to {replyingTo.role === "user" ? "your prompt" : "Copilot"}:
+                  </span>
+                  <span className="text-slate-600 dark:text-slate-400 italic">
+                    "{replyingTo.text.length > 70 ? replyingTo.text.slice(0, 70) + "..." : replyingTo.text}"
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyingTo(null)}
+                className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-brand-100 dark:hover:bg-brand-900/40 transition shrink-0 ml-2"
+                title="Cancel reply"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Input Box */}
           <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shrink-0">
             <div className="flex items-end gap-2 bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 rounded-2xl p-2 focus-within:border-brand-500 focus-within:bg-white dark:focus-within:bg-slate-900 transition">
@@ -1125,11 +1292,11 @@ How can I assist your site operations or technical audit today?`,
               <textarea
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask technical question or say 'Create an NCR for honeycombing...'"
+                placeholder="Ask technical question, enter defect notes, or say 'Create an NCR...'"
                 rows={1}
-                className="flex-1 bg-transparent border-0 outline-none resize-none text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 max-h-28 py-1.5 scrollbar-none"
+                className="flex-1 bg-transparent border-0 outline-none resize-none text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 min-h-[36px] max-h-40 py-2 scrollbar-thin"
               />
 
               <button
@@ -1137,14 +1304,22 @@ How can I assist your site operations or technical audit today?`,
                 onClick={() => handleSend()}
                 disabled={(!input.trim() && !imageAttachment) || isLoading}
                 className="p-2 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white shadow-md shadow-brand-500/25 transition active:scale-95 shrink-0"
-                title="Send to Gemini Copilot"
+                title="Send to Gemini Copilot (or press Ctrl+Enter)"
               >
                 <Send className="w-4 h-4" />
               </button>
             </div>
             <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 px-1 pt-1.5">
-              <span>Shift + Enter for new line</span>
-              <span>Autonomous Action Mode Ready</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="font-medium text-slate-600 dark:text-slate-400">Enter ↵ for new line</span>
+                <span>•</span>
+                <span className="flex items-center gap-0.5 font-semibold text-brand-600 dark:text-brand-400">
+                  <CornerDownLeft className="w-2.5 h-2.5" /> Ctrl+Enter to send
+                </span>
+              </div>
+              <span className="hidden sm:inline font-mono text-[9px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-bold">
+                Actions Ready
+              </span>
             </div>
           </div>
         </div>

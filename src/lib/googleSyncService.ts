@@ -1,3 +1,6 @@
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { auth } from "@/firebase";
+
 /**
  * Google Products & Workspace Synchronization Service for Jay-QMS
  * Connects Jay-QMS Copilot and data registers directly with:
@@ -37,6 +40,7 @@ export interface GoogleSheetsInput {
 
 export interface GoogleWorkspaceConfig {
   connectedEmail?: string;
+  accessToken?: string;
   driveFolderUrl?: string;
   driveFolderId?: string;
   sheetsSpreadsheetUrl?: string;
@@ -73,6 +77,40 @@ export function saveGoogleWorkspaceConfig(config: GoogleWorkspaceConfig): void {
 }
 
 /**
+ * Connects user's real Google Account using Firebase Google Auth with Workspace Scopes
+ */
+export async function connectGoogleAccount(): Promise<{ email: string; token: string }> {
+  const provider = new GoogleAuthProvider();
+  provider.addScope("https://www.googleapis.com/auth/calendar.events");
+  provider.addScope("https://www.googleapis.com/auth/spreadsheets");
+  provider.addScope("https://www.googleapis.com/auth/drive.file");
+
+  const result = await signInWithPopup(auth, provider);
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  const token = credential?.accessToken || "";
+  const email = result.user.email || "";
+
+  const updatedConfig: GoogleWorkspaceConfig = {
+    ...getGoogleWorkspaceConfig(),
+    connectedEmail: email,
+    accessToken: token,
+    lastSyncTimestamp: Date.now(),
+  };
+  saveGoogleWorkspaceConfig(updatedConfig);
+  return { email, token };
+}
+
+/**
+ * Disconnects Google Workspace account
+ */
+export function disconnectGoogleAccount(): void {
+  const cfg = getGoogleWorkspaceConfig();
+  delete cfg.accessToken;
+  delete cfg.connectedEmail;
+  saveGoogleWorkspaceConfig(cfg);
+}
+
+/**
  * Formats a Date to Google Calendar URL string format (YYYYMMDDTHHmmssZ or YYYYMMDD)
  */
 function formatGoogleCalendarDate(date: Date, allDay = false): string {
@@ -93,9 +131,101 @@ function formatGoogleCalendarDate(date: Date, allDay = false): string {
 }
 
 /**
- * Generates an instant Google Calendar synchronization link and opens it
+ * Direct Google Calendar API: creates an event in the user's primary calendar
  */
-export function syncToGoogleCalendar(event: GoogleCalendarEventInput): string {
+export async function directCreateGoogleCalendarEvent(
+  token: string,
+  event: GoogleCalendarEventInput
+): Promise<string> {
+  const startDate = event.startDateTime ? new Date(event.startDateTime) : new Date();
+  const endDate = event.endDateTime
+    ? new Date(event.endDateTime)
+    : new Date(startDate.getTime() + 60 * 60 * 1000);
+
+  const body = {
+    summary: event.title,
+    description: event.description || "Created via Jay-QMS Technical Copilot",
+    location: event.location || "Project Site",
+    start: {
+      dateTime: startDate.toISOString(),
+    },
+    end: {
+      dateTime: endDate.toISOString(),
+    },
+  };
+
+  const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.error?.message || "Google Calendar API request failed");
+  }
+
+  const data = await res.json();
+  return data.htmlLink || "https://calendar.google.com";
+}
+
+/**
+ * Direct Google Sheets API: creates a real Google Spreadsheet populated with headers and rows
+ */
+export async function directCreateGoogleSheet(
+  token: string,
+  sheet: GoogleSheetsInput
+): Promise<string> {
+  // 1. Create spreadsheet
+  const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      properties: { title: sheet.title },
+    }),
+  });
+
+  if (!createRes.ok) {
+    const err = await createRes.json().catch(() => null);
+    throw new Error(err?.error?.message || "Google Sheets creation failed");
+  }
+
+  const spreadsheet = await createRes.json();
+  const spreadsheetId = spreadsheet.spreadsheetId;
+
+  // 2. Populate values
+  const values = [sheet.headers, ...sheet.rows];
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:append?valueInputOption=USER_ENTERED`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ values }),
+    }
+  );
+
+  return (
+    spreadsheet.spreadsheetUrl ||
+    `https://docs.google.com/spreadsheets/d/${spreadsheetId}`
+  );
+}
+
+/**
+ * Generates an instant Google Calendar synchronization link and opens it safely
+ */
+export function syncToGoogleCalendar(
+  event: GoogleCalendarEventInput,
+  targetWindow?: Window | null
+): string {
   const startDate = event.startDateTime ? new Date(event.startDateTime) : new Date();
   const endDate = event.endDateTime
     ? new Date(event.endDateTime)
@@ -118,14 +248,18 @@ export function syncToGoogleCalendar(event: GoogleCalendarEventInput): string {
   }
 
   const url = `https://calendar.google.com/calendar/render?${params.toString()}`;
-  window.open(url, "_blank", "noopener,noreferrer");
+  if (targetWindow && !targetWindow.closed) {
+    targetWindow.location.href = url;
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
   return url;
 }
 
 /**
- * Generates a Gmail compose URL and opens it
+ * Generates a Gmail compose URL and opens it safely
  */
-export function sendViaGmail(email: GmailComposeInput): string {
+export function sendViaGmail(email: GmailComposeInput, targetWindow?: Window | null): string {
   const params = new URLSearchParams({
     view: "cm",
     fs: "1",
@@ -137,15 +271,21 @@ export function sendViaGmail(email: GmailComposeInput): string {
   if (email.cc) params.set("cc", email.cc);
 
   const url = `https://mail.google.com/mail/?${params.toString()}`;
-  window.open(url, "_blank", "noopener,noreferrer");
+  if (targetWindow && !targetWindow.closed) {
+    targetWindow.location.href = url;
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
   return url;
 }
 
 /**
- * Prepares and opens a fresh Google Doc (docs.new), copying the content to the clipboard
- * for instant paste into Google Docs.
+ * Formats a document, copies to clipboard, and opens Google Docs
  */
-export async function exportToGoogleDocs(doc: GoogleDocsInput): Promise<string> {
+export async function exportToGoogleDocs(
+  doc: GoogleDocsInput,
+  targetWindow?: Window | null
+): Promise<string> {
   const header = `Jay-QMS Engineering Document: ${doc.title}\nDate: ${new Date().toLocaleDateString()}\n----------------------------------------\n\n`;
   const fullText = header + doc.content;
 
@@ -156,17 +296,23 @@ export async function exportToGoogleDocs(doc: GoogleDocsInput): Promise<string> 
   }
 
   const url = "https://docs.new";
-  window.open(url, "_blank", "noopener,noreferrer");
+  if (targetWindow && !targetWindow.closed) {
+    targetWindow.location.href = url;
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
   return url;
 }
 
 /**
- * Converts a structured table into CSV and opens Google Sheets (sheets.new)
+ * Converts a structured table into CSV and opens Google Sheets safely
  */
-export async function exportToGoogleSheets(sheet: GoogleSheetsInput): Promise<string> {
+export async function exportToGoogleSheets(
+  sheet: GoogleSheetsInput,
+  targetWindow?: Window | null
+): Promise<string> {
   const csvLines: string[] = [];
 
-  // Escape CSV value
   const escapeCell = (val: string | number) => {
     const s = String(val ?? "");
     if (s.includes(",") || s.includes('"') || s.includes("\n")) {
@@ -201,16 +347,24 @@ export async function exportToGoogleSheets(sheet: GoogleSheetsInput): Promise<st
   URL.revokeObjectURL(downloadUrl);
 
   const sheetsUrl = "https://sheets.new";
-  window.open(sheetsUrl, "_blank", "noopener,noreferrer");
+  if (targetWindow && !targetWindow.closed) {
+    targetWindow.location.href = sheetsUrl;
+  } else {
+    window.open(sheetsUrl, "_blank", "noopener,noreferrer");
+  }
   return sheetsUrl;
 }
 
 /**
  * Opens Google Drive project archive folder or search
  */
-export function openGoogleDrive(projectName?: string, folderUrl?: string): string {
+export function openGoogleDrive(projectName?: string, folderUrl?: string, targetWindow?: Window | null): string {
   if (folderUrl && folderUrl.startsWith("http")) {
-    window.open(folderUrl, "_blank", "noopener,noreferrer");
+    if (targetWindow && !targetWindow.closed) {
+      targetWindow.location.href = folderUrl;
+    } else {
+      window.open(folderUrl, "_blank", "noopener,noreferrer");
+    }
     return folderUrl;
   }
 
@@ -219,6 +373,10 @@ export function openGoogleDrive(projectName?: string, folderUrl?: string): strin
     ? `https://drive.google.com/drive/search?q=${query}`
     : "https://drive.google.com/drive/my-drive";
 
-  window.open(url, "_blank", "noopener,noreferrer");
+  if (targetWindow && !targetWindow.closed) {
+    targetWindow.location.href = url;
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
   return url;
 }

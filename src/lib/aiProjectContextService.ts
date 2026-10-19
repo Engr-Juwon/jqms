@@ -331,6 +331,106 @@ ITP Plans (${itps.length}):\n${itpSummary || "None registered."}`);
     sections.push(`[WEEKLY QUALITY REPORTS - ${weekly.length} Records]:\n${weeklySummary}`);
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Section: RELATIONAL TRACEABILITY & CROSS-ENTITY CORRELATIONS
+  // Explicitly binds Foreign Keys across structural assets, pours, tests & defects
+  // ═══════════════════════════════════════════════════════════════════════
+  const relationalSections: string[] = [];
+
+  // 1. Permit to Pour (PTP) -> Concrete Cube Samples Linkage
+  if (canPTP && ptps.length > 0) {
+    const ptpLinks = ptps.slice(0, 15).map((p) => {
+      const pRef = (p.ptpNumber || p.id).toLowerCase();
+      const pEl = (p.elementName || "").toLowerCase();
+      const linkedCubes = cubes.filter((c) => {
+        const cPourRef = (c.pourReference || "").toLowerCase();
+        const cEl = (c.elementName || "").toLowerCase();
+        return (cPourRef && (cPourRef === pRef || pRef.includes(cPourRef))) || (pEl && cEl && pEl === cEl);
+      });
+
+      const cubeInfo = linkedCubes.length > 0
+        ? linkedCubes.map((c) => {
+            const d28 = c.tests?.day28?.averageStrength ?? c.day28Results?.[0]?.averageStrength ?? "Pending";
+            return `${c.sampleId || c.sampleNumber || c.id} (28d: ${d28} MPa, ${c.status || "PENDING"})`;
+          }).join(", ")
+        : "No cube samples cast/recorded for this pour";
+
+      return `• PTP [${p.ptpNumber || p.id}] -> Member: "${p.elementName}" (${p.levelName}) | Status: ${p.status}\n  └─ Cast Cube Specimens (${linkedCubes.length}): ${cubeInfo}`;
+    });
+    relationalSections.push(`[RELATIONAL LINKAGE: PERMIT-TO-POUR -> CONCRETE CUBES]:\n${ptpLinks.join("\n")}`);
+  }
+
+  // 2. Non-Conformance Reports (NCR) -> Escalated Site Instructions (SI) & Structural Assets
+  if (canNCR && ncrs.length > 0) {
+    const ncrLinks = ncrs.slice(0, 15).map((n) => {
+      const ncrId = n.id;
+      const ncrNo = (n.ncrNumber || "").toLowerCase();
+      const linkedSIs = instructions.filter((s) => {
+        const sNcrId = s.ncrId;
+        const sNcrNo = (s.ncrNumber || "").toLowerCase();
+        const sDirective = (s.instructionText || s.issueSummary || "").toLowerCase();
+        return (sNcrId && sNcrId === ncrId) || (sNcrNo && ncrNo && sNcrNo === ncrNo) || (ncrNo && sDirective.includes(ncrNo));
+      });
+
+      const siInfo = linkedSIs.length > 0
+        ? linkedSIs.map((s) => `${s.instructionNumber || s.id} ("${s.title || s.subject}", Recipient: ${s.contractorName || "Contractor"}, Status: ${s.status}, Deadline: ${s.complianceDeadline})`).join(", ")
+        : "None (Resolved within NCR cycle, not escalated to formal contractual SI)";
+
+      return `• NCR [${n.ncrNumber || n.id}] "${n.title}" [Severity: ${n.severity} | Status: ${n.status}]\n  ├── Affected Asset: ${n.elementName || "Site Member"} (Level: ${n.locationLevel || n.levelName || "Site"}, Grid: ${n.gridAxis || n.gridLine || "N/A"})\n  └── Escalated Site Instruction (SI): ${siInfo}`;
+    });
+    relationalSections.push(`[RELATIONAL LINKAGE: NCR -> SITE INSTRUCTIONS & AFFECTED ASSETS]:\n${ncrLinks.join("\n")}`);
+  }
+
+  // 3. Structural Elements -> Full QA/QC Lifecycle Dossier (PTPs + Cubes + NCRs)
+  if (canElements && elements.length > 0) {
+    const memberDossiers = elements.slice(0, 15).map((e) => {
+      const eName = (e.elementName || e.name || "").toLowerCase();
+      const relPTPs = ptps.filter((p) => p.elementName && p.elementName.toLowerCase() === eName);
+      const relCubes = cubes.filter((c) => c.elementName && c.elementName.toLowerCase() === eName);
+      const relNCRs = ncrs.filter((n) => n.elementName && n.elementName.toLowerCase() === eName);
+      const relInsps = inspections.filter((i) => i.elementName && i.elementName.toLowerCase() === eName);
+
+      const ptpStr = relPTPs.map((p) => `${p.ptpNumber} (${p.status})`).join(", ") || "None issued";
+      const cubeStr = relCubes.map((c) => {
+        const d28 = c.tests?.day28?.averageStrength ?? c.day28Results?.[0]?.averageStrength ?? "Pending";
+        return `${c.sampleId || c.id} [28d: ${d28} MPa, ${c.status}]`;
+      }).join(", ") || "None cast";
+      const ncrStr = relNCRs.map((n) => `${n.ncrNumber} [${n.severity}: ${n.status}]`).join(", ") || "CLEAN (Zero non-conformances)";
+      const inspStr = relInsps.map((i) => `${i.inspectionNumber} (${i.status})`).join(", ") || "None scheduled";
+
+      return `• Structural Member "${e.elementName || e.name || e.id}" [Type: ${e.elementType} | Level: ${e.levelName || "Site"} | Grid: ${e.grid || "N/A"} | Vol: ${e.calculatedVolume || e.volume || 0} m³ | Status: ${e.status}]
+  ├── Pre-Pour Clearance: ${ptpStr}
+  ├── Work Inspections (WIR): ${inspStr}
+  ├── Concrete Compressive Tests: ${cubeStr}
+  └── Defect Ledger (NCRs): ${ncrStr}`;
+    });
+    relationalSections.push(`[RELATIONAL DOSSIER: STRUCTURAL ASSETS LIFECYCLE]:\n${memberDossiers.join("\n")}`);
+  }
+
+  // 4. Material Approval (MAR) -> Material Inspection (MIR) Linkage
+  if (canSubmittals && mars.length > 0) {
+    const marLinks = mars.slice(0, 10).map((m) => {
+      const mId = m.id;
+      const mNo = (m.marNumber || "").toLowerCase();
+      const linkedMIRs = mirs.filter((i) => {
+        const iMarId = i.marId;
+        const iMarNo = (i.marNumber || "").toLowerCase();
+        return (iMarId && iMarId === mId) || (iMarNo && mNo && iMarNo === mNo);
+      });
+
+      const mirInfo = linkedMIRs.length > 0
+        ? linkedMIRs.map((r) => `${r.mirNumber || r.id} (Delivery Note: ${r.deliveryNumber || "N/A"}, Status: ${r.status})`).join(", ")
+        : "No delivery inspections logged against this MAR yet";
+
+      return `• MAR [${m.marNumber || m.id}] "${m.title}" (Vendor: ${m.supplierVendor}, Status: ${m.status})\n  └─ Receiving Inspections (MIR): ${mirInfo}`;
+    });
+    relationalSections.push(`[RELATIONAL LINKAGE: MATERIAL SUBMITTALS (MAR) -> MATERIAL INSPECTIONS (MIR)]:\n${marLinks.join("\n")}`);
+  }
+
+  if (relationalSections.length > 0) {
+    sections.push(`=== CROSS-ENTITY RELATIONAL INTELLIGENCE & CORRELATIONS ===\n\n${relationalSections.join("\n\n")}`);
+  }
+
   const finalSummary = sections.join("\n\n");
   contextCache.set(cacheKey, { summary: finalSummary, timestamp: Date.now() });
   return finalSummary;

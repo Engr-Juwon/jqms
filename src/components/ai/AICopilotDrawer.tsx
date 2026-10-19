@@ -31,12 +31,21 @@ import {
   Reply,
   Edit3,
   CornerDownLeft,
+  History,
+  Plus,
+  MessageSquare,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useCompany } from "@/lib/companyHelper";
 import { getUserSigningTitle } from "@/lib/permissions";
 import { askGeminiCopilot, AIChatMessage, AIActionProposal } from "@/lib/aiService";
+import {
+  saveAICopilotSession,
+  getAICopilotSessions,
+  deleteAICopilotSession,
+  AICopilotSession,
+} from "@/lib/aiSessionService";
 import { dbService } from "@/lib/db";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
@@ -167,7 +176,35 @@ How can I assist your site operations or technical audit today?`,
     setMessages([getInitialWelcomeMessage(userFirst)]);
   }, [storageKey]);
 
-  // Persist messages whenever they update
+  // Multi-Device Cloud Sessions
+  const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
+    return localStorage.getItem(`jqms_active_session_${currentUser?.uid || "guest"}`) || `sess-${Date.now()}`;
+  });
+  const [pastSessions, setPastSessions] = useState<AICopilotSession[]>([]);
+  const [showPastSessions, setShowPastSessions] = useState(false);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+
+  // Load cloud sessions when drawer opens or user/project changes
+  const loadSessions = async () => {
+    if (!currentUser?.uid) return;
+    setIsLoadingSessions(true);
+    try {
+      const sess = await getAICopilotSessions(currentUser.uid, activeProject?.id);
+      setPastSessions(sess);
+    } catch (e) {
+      console.warn("Failed loading sessions:", e);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && currentUser?.uid) {
+      loadSessions();
+    }
+  }, [isOpen, currentUser?.uid, activeProject?.id]);
+
+  // Sync active session to cloud whenever messages update
   useEffect(() => {
     try {
       if (messages.length > 0) {
@@ -176,7 +213,69 @@ How can I assist your site operations or technical audit today?`,
     } catch (e) {
       console.warn("Failed saving user chat history:", e);
     }
-  }, [messages, storageKey]);
+
+    // Cloud Firestore Sync across all devices
+    if (currentUser?.uid && messages.length > 1) {
+      const firstUserPrompt = messages.find((m) => m.role === "user")?.text;
+      const title = firstUserPrompt
+        ? firstUserPrompt.length > 40
+          ? firstUserPrompt.slice(0, 40) + "..."
+          : firstUserPrompt
+        : "QA/QC Inspection Session";
+
+      const sessionObj: AICopilotSession = {
+        id: currentSessionId,
+        userId: currentUser.uid,
+        projectId: activeProject?.id || "global",
+        projectName: activeProject?.name || "Civil Works",
+        title,
+        messages,
+        createdAt: messages[0]?.timestamp || Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      saveAICopilotSession(sessionObj);
+      localStorage.setItem(`jqms_active_session_${currentUser.uid}`, currentSessionId);
+    }
+  }, [messages, storageKey, currentSessionId, currentUser?.uid, activeProject?.id]);
+
+  // Handler to start a brand new conversation
+  const handleStartNewChat = () => {
+    const newId = `sess-${Date.now()}`;
+    setCurrentSessionId(newId);
+    if (currentUser?.uid) {
+      localStorage.setItem(`jqms_active_session_${currentUser.uid}`, newId);
+    }
+    const fresh = [getInitialWelcomeMessage(userFirst)];
+    setMessages(fresh);
+    setShowPastSessions(false);
+    toast.success("Started new conversation session");
+    setTimeout(() => inputRef.current?.focus(), 150);
+  };
+
+  // Handler to resume a past session
+  const handleSelectSession = (session: AICopilotSession) => {
+    setCurrentSessionId(session.id);
+    if (currentUser?.uid) {
+      localStorage.setItem(`jqms_active_session_${currentUser.uid}`, session.id);
+    }
+    setMessages(session.messages || [getInitialWelcomeMessage(userFirst)]);
+    setShowPastSessions(false);
+    toast.success(`Loaded "${session.title}"`);
+    setTimeout(() => scrollToBottom(), 150);
+  };
+
+  // Handler to delete a past session
+  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    if (!window.confirm("Delete this conversation session?")) return;
+    await deleteAICopilotSession(sessionId);
+    setPastSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    if (currentSessionId === sessionId) {
+      handleStartNewChat();
+    }
+    toast.success("Conversation deleted");
+  };
 
   const [imageAttachment, setImageAttachment] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -818,6 +917,39 @@ How can I assist your site operations or technical audit today?`,
             </div>
 
             <div className="flex items-center gap-1">
+              {/* New Conversation Button */}
+              <button
+                type="button"
+                onClick={handleStartNewChat}
+                className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition flex items-center justify-center border border-white/20 shadow-xs active:scale-95"
+                title="Start New Conversation"
+                aria-label="Start New Conversation"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Past Messages / Session History Menu Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPastSessions(!showPastSessions);
+                  if (!showPastSessions) loadSessions();
+                }}
+                className={`relative p-1.5 rounded-lg transition flex items-center justify-center border border-white/20 shadow-xs active:scale-95 ${
+                  showPastSessions ? "bg-white text-brand-700 font-bold" : "bg-white/15 hover:bg-white/25 text-white"
+                }`}
+                title="Past Conversations & Cloud Sync"
+                aria-label="Past Conversations Menu"
+              >
+                <History className="w-3.5 h-3.5" />
+                {pastSessions.length > 0 && (
+                  <span className="absolute -top-1 -right-1 px-1 min-w-[14px] h-3.5 rounded-full bg-emerald-400 text-slate-900 text-[8px] font-black flex items-center justify-center font-mono">
+                    {pastSessions.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Google Sync Button */}
               <button
                 type="button"
                 onClick={() => setIsGoogleModalOpen(true)}
@@ -835,7 +967,7 @@ How can I assist your site operations or technical audit today?`,
                 type="button"
                 onClick={handleClearHistory}
                 className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition"
-                title="Clear conversation"
+                title="Clear current conversation"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -864,8 +996,85 @@ How can I assist your site operations or technical audit today?`,
             </div>
           </div>
 
+          {/* Past Conversations Cloud Menu Overlay */}
+          {showPastSessions && (
+            <div className="p-3 bg-slate-50 dark:bg-slate-950/95 border-b border-slate-200 dark:border-slate-800 space-y-2 shrink-0 max-h-72 overflow-y-auto scrollbar-thin animate-in slide-in-from-top-2">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                  <span>Cloud Synced Conversations</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleStartNewChat}
+                  className="px-2 py-0.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-[10px] font-bold flex items-center gap-1 shadow-xs transition"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>New Chat</span>
+                </button>
+              </div>
+
+              {isLoadingSessions ? (
+                <div className="py-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500" />
+                  <span>Syncing with Cloud...</span>
+                </div>
+              ) : pastSessions.length === 0 ? (
+                <div className="py-4 text-center text-xs text-slate-400 space-y-1">
+                  <p>No past cloud conversations found yet.</p>
+                  <p className="text-[10px] text-slate-500">
+                    New conversations auto-sync across all your phones, tablets & laptops.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {pastSessions.map((sess) => {
+                    const isActive = sess.id === currentSessionId;
+                    return (
+                      <div
+                        key={sess.id}
+                        onClick={() => handleSelectSession(sess)}
+                        className={`w-full p-2.5 rounded-xl text-left border transition flex items-center justify-between group cursor-pointer ${
+                          isActive
+                            ? "bg-brand-50/80 dark:bg-brand-950/60 border-brand-300 dark:border-brand-800 text-brand-900 dark:text-white"
+                            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800/80 hover:border-brand-400 text-slate-700 dark:text-slate-200"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 pr-2">
+                          <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${isActive ? "text-brand-600" : "text-slate-400"}`} />
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold truncate leading-tight">
+                              {sess.title}
+                            </div>
+                            <div className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1.5 pt-0.5">
+                              <span>{new Date(sess.updatedAt).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                              <span>•</span>
+                              <span>{sess.messages?.length || 0} msgs</span>
+                              {isActive && (
+                                <span className="text-emerald-500 font-bold ml-1">● Active</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteSession(e, sess.id)}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/50 transition shrink-0"
+                          title="Delete session"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Quick Technical Prompts */}
-          {messages.length === 1 && (
+          {messages.length === 1 && !showPastSessions && (
             <div className="p-3 bg-slate-50 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800 space-y-2 shrink-0">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block px-1">
                 Direct Creation Shortcuts:

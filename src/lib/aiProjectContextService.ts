@@ -135,7 +135,7 @@ export async function buildProjectDatabaseContext(
   const activePTPCount = ptps.filter((p) => p.status === "APPROVED" || p.status === "PENDING_APPROVAL" || p.status === "ISSUED").length;
   const pendingInspCount = inspections.filter((i) => i.status === "SCHEDULED" || i.status === "SUBMITTED" || i.status === "PENDING_REVIEW").length;
   const failedCubeCount = cubes.filter((c) => c.status === "FAIL" || c.overallStatus === "FAIL").length;
-  const openPunchCount = punches.filter((p) => p.stageStatus !== "CLOSED" && p.stageStatus !== "APPROVED").length;
+  const openPunchCount = punches.filter((p) => p.stageStatus === "DRAFT" || p.stageStatus === "ISSUED" || p.stageStatus === "RECTIFIED").length;
 
   sections.push(`
 DATABASE ENTITY COUNTS FOR ACTIVE PROJECT:
@@ -190,8 +190,8 @@ DATABASE ENTITY COUNTS FOR ACTIVE PROJECT:
     sections.push(`[CONCRETE CUBE TESTING]: Zero cube samples recorded.`);
   } else {
     const cubeLines = cubes.slice(0, 25).map((c) => {
-      const d7 = c.tests?.day7?.averageStrength ?? c.day7Results?.[0]?.strengthMpa ?? "N/A";
-      const d28 = c.tests?.day28?.averageStrength ?? c.day28Results?.[0]?.strengthMpa ?? "N/A";
+      const d7 = c.tests?.day7?.averageStrength ?? c.day7Results?.[0]?.averageStrength ?? "N/A";
+      const d28 = c.tests?.day28?.averageStrength ?? c.day28Results?.[0]?.averageStrength ?? "N/A";
       const gradeStr = c.concreteGrade || c.targetStrength || `${c.target28DayStrengthNmm2 || ""}`;
       return `• [${c.sampleId || c.sampleNumber || c.id}] Element: ${c.elementName || "Pour"} (${c.levelName || ""}) | Cast: ${c.castDate || "N/A"} | Grade: ${gradeStr} | Slump: ${c.slumpMm || "N/A"}mm | 7d: ${d7} MPa | 28d: ${d28} MPa | Status: ${c.status || c.overallStatus || "PENDING"} | PTP Ref: ${c.pourReference || "N/A"}`;
     });
@@ -210,7 +210,7 @@ DATABASE ENTITY COUNTS FOR ACTIVE PROJECT:
       return `• [${s.testNumber || s.id}] Bar Dia: Ø${dia}mm | Grade: ${s.steelGrade || "Grade 500B"} | Heat #: ${s.heatNumber || "N/A"} | Yield: ${yieldStr} MPa | Tensile: ${tenStr} MPa | Result: ${res}`;
     });
     const bbsLines = schedules.slice(0, 10).map((b) => {
-      return `• [${b.scheduleNumber || b.id}] "${b.title}" | Level: ${b.levelName || "Site"} | Weight: ${b.summary?.totalWeightKg || 0} kg | Status: ${b.status || "DRAFT"}`;
+      return `• [${b.scheduleNumber || b.id}] "${b.title}" | Level: ${b.levelName || "Site"} | Weight: ${b.summary?.totalCutWeightKg || 0} kg | Status: ${b.status || "DRAFT"}`;
     });
     sections.push(`[STEEL REBAR TESTS & BBS]:\nTests (${steels.length}):\n${steelLines.join("\n") || "No steel mill tests logged."}\nBar Cutting Schedules (${schedules.length}):\n${bbsLines.join("\n") || "No BBS logged."}`);
   }

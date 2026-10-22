@@ -322,6 +322,7 @@ export interface ProjectLevel {
   precedenceSourceLevelName?: string;
   workPackages?: WorkPackage[];
   workPackageId?: string;
+  workPackageName?: string;
   createdAt?: number | string;
 }
 export type Level = ProjectLevel;
@@ -447,6 +448,7 @@ export interface StructuralElement {
   thickness?: number; // in meters (slab/wall thickness)
   diameter?: number; // in meters (circular column diameter)
   columnShape?: "rectangular" | "circular" | "inclined";
+  columnOrientation?: "HORIZONTAL" | "VERTICAL" | "NORTH" | "SOUTH" | "EAST" | "WEST";
   slabShape?: "rectangular" | "circular" | "semi_circular" | "circular_segment" | "circular_sector" | "curved_cantilever" | "trapezoidal_cantilever" | "cad_area";
   beamShape?: "straight" | "curved" | "tapered";
   wallShape?: "straight" | "curved";

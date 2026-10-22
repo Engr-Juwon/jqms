@@ -25,6 +25,7 @@ import {
   getOrCalculateVolume,
   getOrCalculateFormworkArea,
   getOrCalculateElementArea,
+  calculateElementElevations,
 } from "@/lib/elementCalculations";
 import { ElementCard } from "@/components/registry/ElementCard";
 import { ElementFilters } from "@/components/registry/ElementFilters";
@@ -33,6 +34,10 @@ import { ElementModal } from "@/components/registry/ElementModal";
 import { BulkElementGenerator } from "@/components/registry/BulkElementGenerator";
 import { ElementViewer } from "@/components/registry/ElementViewer";
 import { ElementQRTagsModal } from "@/components/registry/ElementQRTagsModal";
+import { ElementHealthModal } from "@/components/registry/ElementHealthModal";
+import { BulkElementEditModal } from "@/components/registry/BulkElementEditModal";
+import { ElementSpreadsheetView } from "@/components/registry/ElementSpreadsheetView";
+import { auditStructuralElements } from "@/lib/elementDiagnostics";
 import { BIMDimensionNav } from "@/components/bim/BIMDimensionNav";
 import {
   exportElementSchedulePDF,
@@ -54,6 +59,7 @@ import {
   Trash2,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
   ShieldCheck,
   HardHat,
   ArrowUpRight,
@@ -68,6 +74,9 @@ import {
   ShieldAlert,
   BarChart3,
   Filter,
+  Activity,
+  SlidersHorizontal,
+  Ruler,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 
@@ -93,16 +102,19 @@ export const ElementRegistry: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // View Mode: Cards or Table
-  const [viewMode, setViewMode] = useState<"CARDS" | "TABLE">("TABLE");
+  const [viewMode, setViewMode] = useState<"CARDS" | "TABLE" | "SPREADSHEET">("TABLE");
 
   // Modals
   const [showElementModal, setShowElementModal] = useState(false);
   const [editingElement, setEditingElement] =
     useState<StructuralElement | null>(null);
   const [showBulkGen, setShowBulkGen] = useState(false);
+  const [showHealthModal, setShowHealthModal] = useState(false);
+  const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [viewerEl, setViewerEl] = useState<StructuralElement | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrModalElements, setQrModalElements] = useState<StructuralElement[]>([]);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   // Filters
   const [search, setSearch] = useState("");
@@ -129,9 +141,22 @@ export const ElementRegistry: React.FC = () => {
   const [bulkPkgId, setBulkPkgId] = useState("");
   const [bulkLevelId, setBulkLevelId] = useState("");
 
-  // Pagination
+  // Table Sorting (Default: arranged by name ascending, e.g. P01 before P02)
+  const [sortField, setSortField] = useState<"name" | "type" | "level" | "elevation" | "grid" | "volume" | "status">("name");
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
+
+  const handleSort = (field: "name" | "type" | "level" | "elevation" | "grid" | "volume" | "status") => {
+    if (sortField === field) {
+      setSortAsc((prev) => !prev);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  };
+
+  // Pagination (Dynamic page sizes: 20, 50, 100, 250, All)
   const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 20;
+  const [itemsPerPage, setItemsPerPage] = useState<number>(20);
 
   const isQAQC = isQAQCUser(currentUser) || hasMinRole(currentUser?.role, 2) || !currentUser;
   const isLvl2 = hasMinRole(currentUser?.role, 2);
@@ -386,32 +411,55 @@ export const ElementRegistry: React.FC = () => {
     };
   }, [elements, ncrMap]);
 
-  // Natural String Sorting
-  const naturalCompare = (a: string, b: string): number => {
-    const re = /(\d+)|(\D+)/g;
-    const aParts = a.match(re) || [];
-    const bParts = b.match(re) || [];
-
-    for (let i = 0; i < Math.min(aParts.length, bParts.length); i++) {
-      const aPart = aParts[i];
-      const bPart = bParts[i];
-      const aNum = parseInt(aPart, 10);
-      const bNum = parseInt(bPart, 10);
-
-      if (!isNaN(aNum) && !isNaN(bNum)) {
-        if (aNum !== bNum) return aNum - bNum;
-      } else {
-        const cmp = aPart.localeCompare(bPart);
-        if (cmp !== 0) return cmp;
+  // Level to Package mapping (levels determine work packages automatically)
+  const levelPkgMap = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    levels.forEach((lvl) => {
+      if (lvl.workPackageId) {
+        const pkg = packages.find((p) => p.id === lvl.workPackageId);
+        map.set(lvl.id, {
+          id: lvl.workPackageId,
+          name: pkg?.name || lvl.workPackageName || "Work Package",
+        });
       }
-    }
-    return aParts.length - bParts.length;
+    });
+    return map;
+  }, [levels, packages]);
+
+  // Enriched elements: elements inherit work package directly from their level
+  const enrichedElements = useMemo(() => {
+    return elements.map((el) => {
+      const lvlPkg = el.levelId ? levelPkgMap.get(el.levelId) : undefined;
+      return {
+        ...el,
+        workPackageId: lvlPkg?.id || el.workPackageId,
+        workPackageName: lvlPkg?.name || el.workPackageName,
+      };
+    });
+  }, [elements, levelPkgMap]);
+
+  const selectedLevelObj = useMemo(() => {
+    return levels.find((l) => l.id === filterLevel);
+  }, [levels, filterLevel]);
+
+  // Automated Structural Health Diagnostic Audit
+  const elementAudit = useMemo(() => {
+    return auditStructuralElements(enrichedElements, levels, packages, ncrs);
+  }, [enrichedElements, levels, packages, ncrs]);
+  const auditIssuesCount = elementAudit.issues.length;
+
+  // Natural Alphanumeric String Sorting (e.g. P01 before P02, P2 before P10)
+  const naturalCompare = (a: string, b: string): number => {
+    return (a || "").trim().localeCompare((b || "").trim(), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
   };
 
   // Filtered elements
   const filteredElements = useMemo(() => {
     const q = search.toLowerCase().trim();
-    return elements
+    return enrichedElements
       .filter((el) => {
         const levelName =
           levelNameMap.get(el.levelId || "") || el.level || el.levelName || "";
@@ -479,40 +527,69 @@ export const ElementRegistry: React.FC = () => {
         return true;
       })
       .sort((a, b) => {
-        const typeCompare = (a.elementType || "").localeCompare(
-          b.elementType || "",
-        );
-        if (typeCompare !== 0) return typeCompare;
+        let cmp = 0;
+        if (sortField === "name") {
+          const nameA = a.elementName || a.name || "";
+          const nameB = b.elementName || b.name || "";
+          cmp = naturalCompare(nameA, nameB);
+        } else if (sortField === "type") {
+          cmp = (a.elementType || "").localeCompare(b.elementType || "");
+        } else if (sortField === "level") {
+          const lA = levelNameMap.get(a.levelId || "") || a.levelName || "";
+          const lB = levelNameMap.get(b.levelId || "") || b.levelName || "";
+          cmp = naturalCompare(lA, lB);
+        } else if (sortField === "elevation") {
+          const eA = a.elevation !== undefined ? a.elevation : -9999;
+          const eB = b.elevation !== undefined ? b.elevation : -9999;
+          cmp = eA - eB;
+        } else if (sortField === "grid") {
+          const gA = a.grid || a.gridAxis || "";
+          const gB = b.grid || b.gridAxis || "";
+          cmp = naturalCompare(gA, gB);
+        } else if (sortField === "volume") {
+          const vA = getOrCalculateVolume(a);
+          const vB = getOrCalculateVolume(b);
+          cmp = vA - vB;
+        } else if (sortField === "status") {
+          cmp = (a.status || "").localeCompare(b.status || "");
+        }
 
-        const nameCompare = naturalCompare(
-          a.elementName || "",
-          b.elementName || "",
-        );
-        if (nameCompare !== 0) return nameCompare;
+        if (cmp !== 0) {
+          return sortAsc ? cmp : -cmp;
+        }
+
+        // Secondary tie-breaker: natural alphanumeric name order (P01 before P02)
+        const nameA = a.elementName || a.name || "";
+        const nameB = b.elementName || b.name || "";
+        const secondary = naturalCompare(nameA, nameB);
+        if (secondary !== 0) return secondary;
 
         const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         return timeA - timeB;
       });
   }, [
-    elements,
+    enrichedElements,
     search,
     filterLevel,
     filterStatus,
     filterType,
     filterPackage,
     quickFilter,
+    sortField,
+    sortAsc,
     ncrMap,
     levelNameMap,
   ]);
 
   // Paginated Elements
   const paginatedElements = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredElements.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredElements, currentPage]);
+    if (itemsPerPage >= 999999) return filteredElements;
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredElements.slice(start, start + itemsPerPage);
+  }, [filteredElements, currentPage, itemsPerPage]);
 
-  const totalPages = Math.ceil(filteredElements.length / ITEMS_PER_PAGE);
+  const totalPages = Math.max(1, Math.ceil(filteredElements.length / itemsPerPage));
 
   useEffect(() => {
     setCurrentPage(1);
@@ -544,11 +621,19 @@ export const ElementRegistry: React.FC = () => {
     });
   }, [paginatedElements]);
 
+  const selectAllFiltered = useCallback(() => {
+    setSelectedIds(new Set(filteredElements.map((e) => e.id)));
+  }, [filteredElements]);
+
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
   const isAllPageSelected =
     paginatedElements.length > 0 &&
     paginatedElements.every((e) => selectedIds.has(e.id));
+
+  const isAllFilteredSelected =
+    filteredElements.length > 0 &&
+    filteredElements.every((e) => selectedIds.has(e.id));
 
   // Element CRUD Handlers
   const handleSaveElement = async (
@@ -569,7 +654,13 @@ export const ElementRegistry: React.FC = () => {
       const fmwk = getOrCalculateFormworkArea(payload);
       const vol = getOrCalculateVolume(payload);
       const area = getOrCalculateElementArea(payload);
-      const payloadWithTakeoffs: Partial<StructuralElement> = {
+      const lvlPkg = payload.levelId ? levelPkgMap.get(payload.levelId) : undefined;
+    const finalWorkPkgId = lvlPkg?.id || payload.workPackageId;
+    const finalWorkPkgName = lvlPkg?.name || payload.workPackageName;
+
+    const payloadWithTakeoffs: Partial<StructuralElement> = {
+      workPackageId: finalWorkPkgId,
+      workPackageName: finalWorkPkgName,
         ...payload,
         calculatedFormworkArea: payload.calculatedFormworkArea || fmwk,
         calculatedVolume: payload.calculatedVolume || vol,
@@ -869,35 +960,204 @@ export const ElementRegistry: React.FC = () => {
     toast.success(`Active Stage set to: ${lvlName}`);
   };
 
-  // Pagination Bar
+  // Reset and synchronize elevations for all elements on a specific level
+  const handleResetLevelElevations = async (targetLevelId: string) => {
+    if (!isQAQC) {
+      toast.error("Unauthorized: Only QA/QC personnel can calibrate element elevations.");
+      return;
+    }
+    const lvl = levels.find((l) => l.id === targetLevelId);
+    if (!lvl) {
+      toast.error("Please select a valid floor level.");
+      return;
+    }
+
+    const targetElements = elements.filter((e) => e.levelId === targetLevelId);
+    if (targetElements.length === 0) {
+      toast.error(`No elements registered on level "${lvl.name}".`);
+      return;
+    }
+
+    const datumFormatted = lvl.elevation >= 0 ? `+${lvl.elevation}` : `${lvl.elevation}`;
+    const confirmed = window.confirm(
+      `Calibrate elevations for all ${targetElements.length} elements on "${lvl.name}" to level datum (${datumFormatted}m)?\n\n` +
+      `✓ All elements will have their base elevations reset to ${datumFormatted}m.\n` +
+      `✓ Any individual element offsets (elevationOffset) will be automatically preserved.\n` +
+      `✓ Element top/bottom levels and 3D heights will be updated perfectly.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const updatedElements = targetElements.map((el) => {
+        const elevs = calculateElementElevations(el, lvl.elevation);
+        return {
+          ...el,
+          elevation: elevs.elevation,
+          topElevation: elevs.topElevation,
+          bottomElevation: elevs.bottomElevation,
+          gridZ: elevs.gridZ,
+          elevationOffset: elevs.elevationOffset,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser?.uid,
+          updatedByName: currentUser?.fullName || "QA/QC User",
+        };
+      });
+
+      const updateMap = new Map(updatedElements.map((u) => [u.id, u]));
+
+      // Optimistic in-place update
+      setElements((prev) => prev.map((e) => updateMap.get(e.id) || e));
+
+      await Promise.all(updatedElements.map((el) => dbService.saveElement(el)));
+      toast.success(
+        `✨ Successfully reset ${updatedElements.length} element elevations to datum ${datumFormatted}m!`,
+        { icon: "📐", duration: 4000 }
+      );
+      loadData(true);
+    } catch (err) {
+      console.error("Failed to reset elevations:", err);
+      toast.error("Failed to reset element elevations.");
+    }
+  };
+
+  // Reset and synchronize elevations for all elements across all levels
+  const handleResetAllLevelsElevations = async () => {
+    if (!isQAQC) {
+      toast.error("Unauthorized: Only QA/QC personnel can calibrate element elevations.");
+      return;
+    }
+    if (levels.length === 0 || elements.length === 0) {
+      toast.error("No levels or elements available.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Reset and synchronize elevations for all ${elements.length} elements across all ${levels.length} floor levels?\n\n` +
+      `Each element will be calibrated to its parent level datum while strictly preserving individual elevation offsets.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const lvlMap = new Map(levels.map((l) => [l.id, l]));
+      const updatedElements = elements
+        .filter((e) => e.levelId && lvlMap.has(e.levelId))
+        .map((el) => {
+          const lvl = lvlMap.get(el.levelId)!;
+          const elevs = calculateElementElevations(el, lvl.elevation);
+          return {
+            ...el,
+            elevation: elevs.elevation,
+            topElevation: elevs.topElevation,
+            bottomElevation: elevs.bottomElevation,
+            gridZ: elevs.gridZ,
+            elevationOffset: elevs.elevationOffset,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser?.uid,
+            updatedByName: currentUser?.fullName || "QA/QC User",
+          };
+        });
+
+      const updateMap = new Map(updatedElements.map((u) => [u.id, u]));
+      setElements((prev) => prev.map((e) => updateMap.get(e.id) || e));
+
+      await Promise.all(updatedElements.map((el) => dbService.saveElement(el)));
+      toast.success(
+        `✨ Calibrated ${updatedElements.length} elements across all levels!`,
+        { icon: "📐", duration: 4000 }
+      );
+      loadData(true);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to reset all elevations.");
+    }
+  };
+
+  // Enhanced Pagination Bar with Dynamic Page Sizes (20, 50, 100, 250, All)
   const renderPagination = () => {
-    if (totalPages <= 1) return null;
+    if (filteredElements.length === 0) return null;
+    const isAll = itemsPerPage >= 999999;
+    const startIdx = isAll ? 1 : (currentPage - 1) * itemsPerPage + 1;
+    const endIdx = isAll ? filteredElements.length : Math.min(currentPage * itemsPerPage, filteredElements.length);
+
     return (
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 rounded-2xl shadow-sm">
-        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-          Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{" "}
-          {Math.min(currentPage * ITEMS_PER_PAGE, filteredElements.length)} of{" "}
-          {filteredElements.length} elements
-        </span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800 transition bg-slate-50 dark:bg-slate-950"
-          >
-            Prev
-          </button>
-          <span className="text-xs font-bold text-slate-900 dark:text-white px-2">
-            Page {currentPage} of {totalPages}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-2xl shadow-sm">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            Showing {startIdx} to {endIdx} of {filteredElements.length} elements
           </span>
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800 transition bg-slate-50 dark:bg-slate-950"
-          >
-            Next
-          </button>
+          <div className="flex items-center gap-1 text-xs">
+            <span className="text-slate-400 dark:text-slate-500 text-[11px] font-semibold">Per page:</span>
+            {[20, 50, 100, 250].map((size) => (
+              <button
+                key={size}
+                type="button"
+                onClick={() => {
+                  setItemsPerPage(size);
+                  setCurrentPage(1);
+                }}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold transition ${
+                  itemsPerPage === size
+                    ? "bg-brand-600 text-white shadow-xs"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                {size}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setItemsPerPage(999999);
+                setCurrentPage(1);
+              }}
+              className={`px-2 py-0.5 rounded text-[11px] font-bold transition ${
+                isAll
+                  ? "bg-brand-600 text-white shadow-xs"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              All
+            </button>
+          </div>
         </div>
+
+        {!isAll && totalPages > 1 && (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setCurrentPage(1)}
+              disabled={currentPage === 1}
+              className="px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition bg-slate-50 dark:bg-slate-950 cursor-pointer disabled:cursor-not-allowed"
+              title="First Page"
+            >
+              &laquo;
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition bg-slate-50 dark:bg-slate-950 cursor-pointer disabled:cursor-not-allowed"
+            >
+              Prev
+            </button>
+            <span className="text-xs font-bold text-slate-900 dark:text-white px-2">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition bg-slate-50 dark:bg-slate-950 cursor-pointer disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+            <button
+              onClick={() => setCurrentPage(totalPages)}
+              disabled={currentPage === totalPages}
+              className="px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition bg-slate-50 dark:bg-slate-950 cursor-pointer disabled:cursor-not-allowed"
+              title="Last Page"
+            >
+              &raquo;
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -936,271 +1196,284 @@ export const ElementRegistry: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300 min-h-screen pb-12">
-      {/* ═══ HEADER ═══ */}
-      <div className="sticky top-0 z-30 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur-md py-3 -mt-3 pb-4 border-b border-slate-200/80 dark:border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors">
+      {/* ═══ CLEAN SIMPLIFIED HEADER ═══ */}
+      <div className="sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md py-3 -mt-3 pb-3 border-b border-slate-200/80 dark:border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors">
         <div>
-          <div className="flex items-center gap-2 text-brand-600 dark:text-brand-400 font-mono text-xs uppercase tracking-wider mb-1 font-black">
-            <Box className="w-4 h-4" />
-            <span>Structural Asset Registry &amp; 3D Twin</span>
+          <div className="flex items-center gap-2 text-xs font-mono font-bold text-brand-600 dark:text-brand-400 uppercase tracking-wider mb-0.5">
+            <Box className="w-3.5 h-3.5" />
+            <span>Structural Asset Registry</span>
+            {filterLevel !== "ALL" && (
+              <span className="px-1.5 py-0.2 bg-brand-500/10 text-brand-600 dark:text-brand-400 rounded text-[10px]">
+                {levelNameMap.get(filterLevel) || filterLevel}
+              </span>
+            )}
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
-            Element Register &amp; Spatial BIM Twin
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            Element Registry
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            3D WebGL element models, 2D grid plan coordinates, concrete volume
-            takeoff, and inspection passports
-          </p>
         </div>
 
-        {/* Primary Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Schedule PDF / CSV Export */}
-          <div className="flex items-center rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 shadow-sm">
-            <button
-              onClick={() =>
-                exportElementSchedulePDF(
-                  filteredElements,
-                  activeProject || {},
-                  company || {},
-                  { levelNameMap },
-                )
-              }
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition"
-              title="Export Vector Landscape PDF Schedule"
-            >
-              <FileText className="w-3.5 h-3.5 text-rose-500" />
-              <span>PDF Schedule</span>
-            </button>
-            <div className="w-[1px] h-4 bg-slate-200 dark:border-slate-800 bg-slate-200 dark:bg-slate-800 mx-0.5" />
-            <button
-              onClick={() =>
-                exportElementScheduleCSV(
-                  filteredElements,
-                  activeProject || {},
-                  levelNameMap,
-                )
-              }
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition"
-              title="Export CSV Schedule for Quantity Surveying"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
-              <span>CSV</span>
-            </button>
-          </div>
-
-          {/* QR Asset Tags Sticker Sheet Print */}
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Element Doctor Audit Button */}
           <button
-            onClick={() => {
-              const targetEls =
-                selectedIds.size > 0
-                  ? elements.filter((e) => selectedIds.has(e.id))
-                  : filteredElements;
-              if (targetEls.length === 0) {
-                toast.error("No elements to print QR tags for.");
-                return;
-              }
-              setQrModalElements(targetEls);
-              setShowQRModal(true);
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-xs font-bold shadow-sm transition"
-            title="Print Scannable Adhesive QR Asset Tags"
+            onClick={() => setShowHealthModal(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
+              auditIssuesCount > 0
+                ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+            }`}
+            title="Structural Health Doctor & Auto-Fix Scanner"
           >
-            <QrCode className="w-4 h-4 text-brand-400 dark:text-brand-600" />
-            <span>
-              Print QR Tags
-              {selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
-            </span>
+            <Activity className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+            <span>Doctor</span>
+            {auditIssuesCount > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-black">
+                {auditIssuesCount}
+              </span>
+            )}
           </button>
 
-          {isQAQC && (
-            <>
-              <button
-                onClick={() => {
-                  setEditingElement(null);
-                  setShowElementModal(true);
-                }}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-lg shadow-brand-500/20 transition"
+          {/* Export & Tools Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold transition shadow-sm"
+            >
+              <span>Export &amp; Tools</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+            {showExportMenu && (
+              <div
+                className="absolute right-0 mt-1.5 w-56 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl py-1.5 z-50 text-xs font-medium divide-y divide-slate-100 dark:divide-slate-800"
+                onClick={() => setShowExportMenu(false)}
               >
-                <Plus className="w-4 h-4" />
-                <span>Register Element</span>
-              </button>
+                <div className="py-1">
+                  <button
+                    onClick={() =>
+                      exportElementSchedulePDF(
+                        filteredElements,
+                        activeProject || {},
+                        company || {},
+                        { levelNameMap }
+                      )
+                    }
+                    className="w-full px-3.5 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-2"
+                  >
+                    <FileText className="w-4 h-4 text-rose-500" />
+                    <span>Export PDF Schedule</span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      exportElementScheduleCSV(
+                        filteredElements,
+                        activeProject || {},
+                        levelNameMap
+                      )
+                    }
+                    className="w-full px-3.5 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-2"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+                    <span>Export CSV Schedule</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const targetEls =
+                        selectedIds.size > 0
+                          ? elements.filter((e) => selectedIds.has(e.id))
+                          : filteredElements;
+                      if (targetEls.length === 0) {
+                        toast.error("No elements to print QR tags for.");
+                        return;
+                      }
+                      setQrModalElements(targetEls);
+                      setShowQRModal(true);
+                    }}
+                    className="w-full px-3.5 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-2"
+                  >
+                    <QrCode className="w-4 h-4 text-brand-500" />
+                    <span>Print QR Sticker Tags</span>
+                  </button>
+                </div>
+                {isQAQC && (
+                  <div className="py-1">
+                    <button
+                      onClick={() => setShowBulkGen(true)}
+                      className="w-full px-3.5 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-2"
+                    >
+                      <Copy className="w-4 h-4 text-indigo-500" />
+                      <span>Bulk Element Generator</span>
+                    </button>
+                    {filterLevel !== "ALL" && (
+                      <button
+                        onClick={() => handleResetLevelElevations(filterLevel)}
+                        className="w-full px-3.5 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-2"
+                      >
+                        <Ruler className="w-4 h-4 text-sky-500" />
+                        <span>Reset Elevations ({levelNameMap.get(filterLevel) || "Floor"})</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={handleResetAllLevelsElevations}
+                      className="w-full px-3.5 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-2"
+                    >
+                      <Ruler className="w-4 h-4 text-indigo-500" />
+                      <span>Reset Elevations (All Floors)</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
-              <button
-                onClick={() => setShowBulkGen(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold shadow-sm transition"
-              >
-                <Copy className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-                <span>Bulk Generate</span>
-              </button>
-            </>
+          {/* Primary Register Button */}
+          {isQAQC && (
+            <button
+              onClick={() => {
+                setEditingElement(null);
+                setShowElementModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Register</span>
+            </button>
           )}
         </div>
       </div>
 
-      {/* ═══ BIM DIMENSION NAVIGATION BAR ═══ */}
-      <BIMDimensionNav
-        activeDimension="7D"
-        counts={{
-          elements: elements.length,
-          levels: levels.length,
-          packages: packages.length,
-          gridlines: gridlines.length,
-        }}
-      />
-
-      {/* ═══ LEVEL PROGRESS HORIZON & TAKEOFF ANALYTICS ═══ */}
-      <div className="bg-white dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 text-slate-900 dark:text-white rounded-3xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4 transition-colors">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full bg-brand-500/10 dark:bg-brand-500/20 text-brand-600 dark:text-brand-300 text-[10px] font-mono font-bold tracking-wider uppercase border border-brand-500/20 dark:border-brand-500/30">
-                Site Progress Horizon
-              </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                {filterLevel !== "ALL"
-                  ? `Level: ${levelNameMap.get(filterLevel) || filterLevel}`
-                  : "All Project Stages"}
-              </span>
-            </div>
-            <h2 className="text-lg sm:text-xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-              <span>{filteredElements.length} Structural Elements</span>
-              <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
-                ({elements.length} total in registry)
-              </span>
-            </h2>
-          </div>
-
-          {/* Aggregated Numbers */}
-          <div className="flex items-center gap-4 sm:gap-6 flex-wrap">
-            <div className="bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 px-3.5 py-2 rounded-2xl">
-              <div className="text-[10px] font-mono uppercase text-slate-500 dark:text-slate-400 font-semibold flex items-center gap-1.5">
-                <Hammer className="w-3 h-3 text-cyan-600 dark:text-cyan-400" />
-                <span>Cast Concrete</span>
-              </div>
-              <div className="text-base font-black font-mono text-cyan-700 dark:text-cyan-300">
-                {kpiStats.pouredVol.toFixed(1)}{" "}
-                <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
-                  / {kpiStats.totalVol.toFixed(1)} m³
+      {/* ═══ FLOOR LEVEL HORIZONTAL TABS ═══ */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+          <button
+            onClick={() => setFilterLevel("ALL")}
+            className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition border ${
+              filterLevel === "ALL"
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white shadow-sm"
+                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border-slate-200 dark:border-slate-800"
+            }`}
+          >
+            All Floors ({elements.length})
+          </button>
+          {levels.map((lvl) => {
+            const isSelected = filterLevel === lvl.id;
+            const count = elements.filter((e) => e.levelId === lvl.id).length;
+            return (
+              <button
+                key={lvl.id}
+                onClick={() => setFilterLevel(lvl.id)}
+                className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition border flex items-center gap-1.5 ${
+                  isSelected
+                    ? "bg-brand-600 text-white border-brand-600 shadow-sm"
+                    : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border-slate-200 dark:border-slate-800"
+                }`}
+              >
+                <span>{lvl.name}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                    isSelected
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                  }`}
+                >
+                  {count}
                 </span>
-              </div>
-            </div>
+              </button>
+            );
+          })}
+        </div>
 
-            <div className="bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 px-3.5 py-2 rounded-2xl">
-              <div className="text-[10px] font-mono uppercase text-slate-500 dark:text-slate-400 font-semibold flex items-center gap-1.5">
-                <Layers className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                <span>Formwork Contact</span>
-              </div>
-              <div className="text-base font-black font-mono text-emerald-700 dark:text-emerald-300">
-                {kpiStats.totalFmwk.toFixed(1)}{" "}
-                <span className="text-xs font-normal text-slate-500 dark:text-slate-400">m²</span>
-              </div>
+        {/* Selected Floor Info Strip: Elevation & Automatically Inherited Work Package */}
+        {filterLevel !== "ALL" && (
+          <div className="flex items-center justify-between flex-wrap gap-2 px-3 py-2 bg-brand-50/60 dark:bg-brand-950/20 border border-brand-200/60 dark:border-brand-900/40 rounded-xl text-xs">
+            <div className="flex items-center gap-3 text-slate-700 dark:text-slate-300 flex-wrap">
+              <span className="font-bold text-slate-900 dark:text-white">{levelNameMap.get(filterLevel)}</span>
+              {selectedLevelObj?.elevation !== undefined && (
+                <span className="font-mono text-slate-500 text-[11px]">
+                  Elevation: {selectedLevelObj.elevation >= 0 ? `+${selectedLevelObj.elevation}` : selectedLevelObj.elevation}m
+                </span>
+              )}
+              {selectedLevelObj?.workPackageName ? (
+                <span className="flex items-center gap-1 text-indigo-700 dark:text-indigo-400 font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-md border border-indigo-200/50 dark:border-indigo-800/40">
+                  <Briefcase className="w-3 h-3" />
+                  Package: {selectedLevelObj.workPackageName}
+                </span>
+              ) : (
+                <span className="text-slate-400 text-[11px] italic">
+                  Package: Inherited from level
+                </span>
+              )}
             </div>
+            <div className="flex items-center gap-2">
+              {selectedLevelObj?.elevation !== undefined && isQAQC && (
+                <button
+                  type="button"
+                  onClick={() => handleResetLevelElevations(filterLevel)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-brand-300 dark:border-brand-800 text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/40 text-[11px] font-bold shadow-xs transition"
+                  title={`Reset all element elevations on ${selectedLevelObj.name} to level datum (${selectedLevelObj.elevation >= 0 ? `+${selectedLevelObj.elevation}` : selectedLevelObj.elevation}m) preserving individual offsets`}
+                >
+                  <Ruler className="w-3.5 h-3.5 text-brand-500" />
+                  <span>Sync Elevations ({selectedLevelObj.elevation >= 0 ? `+${selectedLevelObj.elevation}` : selectedLevelObj.elevation}m)</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleSetActiveLevel(filterLevel, levelNameMap.get(filterLevel) || "")}
+                className="text-[11px] font-bold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer"
+              >
+                Set as Active Stage
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ═══ COMPACT KPI METRIC BAR ═══ */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs">
+          <div className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider">
+            Total Elements
+          </div>
+          <div className="text-lg font-black font-mono text-slate-900 dark:text-white mt-0.5">
+            {filteredElements.length}
           </div>
         </div>
 
-        {/* Visual Progress Bar */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-slate-600 dark:text-slate-400">
-              Structural Volumetric Casting Completion
-            </span>
-            <span className="font-bold text-brand-600 dark:text-brand-400">{kpiStats.pct}%</span>
+        <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs">
+          <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider">
+            <span>Poured Volume</span>
+            <span className="text-brand-600 font-mono font-bold">{kpiStats.pct}%</span>
           </div>
-          <div className="w-full h-2.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-300 dark:border-slate-700">
-            <div
-              className="h-full bg-gradient-to-r from-brand-500 via-cyan-500 to-emerald-400 rounded-full transition-all duration-500 shadow-sm"
-              style={{ width: `${Math.min(100, Math.max(0, kpiStats.pct))}%` }}
-            />
+          <div className="text-lg font-black font-mono text-slate-900 dark:text-white mt-0.5 truncate">
+            {kpiStats.pouredVol.toFixed(1)}{" "}
+            <span className="text-xs font-normal text-slate-400 font-sans">
+              / {kpiStats.totalVol.toFixed(1)} m³
+            </span>
           </div>
         </div>
 
-        {/* One-Click Quick Filter Chips */}
-        <div className="flex items-center gap-2 pt-1 overflow-x-auto no-scrollbar whitespace-nowrap">
-          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider font-mono mr-1 shrink-0 flex items-center gap-1">
-            <Filter className="w-3 h-3" /> Filter:
-          </span>
+        <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs">
+          <div className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider">
+            Awaiting Casting
+          </div>
+          <div className="text-lg font-black font-mono text-amber-600 dark:text-amber-400 mt-0.5">
+            {kpiStats.awaitingPourCount}
+          </div>
+        </div>
 
-          <button
-            onClick={() => setQuickFilter("ALL")}
-            className={`px-3 py-1 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 border ${
-              quickFilter === "ALL"
-                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white shadow"
-                : "bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700"
-            }`}
-          >
-            <span>All Elements</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-slate-700/50 text-slate-700 dark:text-slate-200">
-              {elements.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setQuickFilter("NCRS")}
-            className={`px-3 py-1 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 border ${
-              quickFilter === "NCRS"
-                ? "bg-rose-500 text-white border-rose-600 dark:border-rose-400 shadow"
-                : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/60 border-rose-200 dark:border-rose-900/60"
-            }`}
-          >
-            <AlertOctagon className="w-3.5 h-3.5" />
-            <span>Defect Hold (NCRs)</span>
-            {kpiStats.ncrCount > 0 && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold">
-                {kpiStats.ncrCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setQuickFilter("AWAITING_POUR")}
-            className={`px-3 py-1 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 border ${
-              quickFilter === "AWAITING_POUR"
-                ? "bg-amber-500 text-white border-amber-600 dark:border-amber-400 shadow"
-                : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 border-amber-200 dark:border-amber-900/60"
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            <span>Awaiting Pour / PTP</span>
-            {kpiStats.awaitingPourCount > 0 && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500 text-white font-bold">
-                {kpiStats.awaitingPourCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setQuickFilter("CURING")}
-            className={`px-3 py-1 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 border ${
-              quickFilter === "CURING"
-                ? "bg-cyan-500 text-white border-cyan-600 dark:border-cyan-400 shadow"
-                : "bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-900/60 border-cyan-200 dark:border-cyan-900/60"
-            }`}
-          >
-            <Hammer className="w-3.5 h-3.5" />
-            <span>In Curing</span>
-            {kpiStats.curingCount > 0 && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-500 text-white font-bold">
-                {kpiStats.curingCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setQuickFilter("APPROVED")}
-            className={`px-3 py-1 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 border ${
-              quickFilter === "APPROVED"
-                ? "bg-emerald-500 text-white border-emerald-600 dark:border-emerald-400 shadow"
-                : "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border-emerald-200 dark:border-emerald-900/60"
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>QA Accepted</span>
-            {kpiStats.approvedCount > 0 && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500 text-white font-bold">
-                {kpiStats.approvedCount}
-              </span>
-            )}
-          </button>
+        <div className={`p-3 rounded-2xl border shadow-xs ${
+          kpiStats.ncrCount > 0
+            ? "bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50"
+            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+        }`}>
+          <div className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider">
+            Defect Holds (NCR)
+          </div>
+          <div className={`text-lg font-black font-mono mt-0.5 ${
+            kpiStats.ncrCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"
+          }`}>
+            {kpiStats.ncrCount}
+          </div>
         </div>
       </div>
 
@@ -1225,7 +1498,40 @@ export const ElementRegistry: React.FC = () => {
           onToggleSelectAll={toggleSelectAllPage}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          totalFilteredCount={filteredElements.length}
+          totalSelectedCount={selectedIds.size}
+          onSelectAllFiltered={selectAllFiltered}
+          onClearSelection={clearSelection}
         />
+
+        {/* Contextual Select All Across Pages Banner */}
+        {isAllPageSelected && filteredElements.length > paginatedElements.length && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-brand-50/90 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-900/60 rounded-xl text-xs text-brand-900 dark:text-brand-200 animate-in fade-in duration-150">
+            <span className="font-medium">
+              {isAllFilteredSelected
+                ? `✓ All ${filteredElements.length} elements in this view are selected.`
+                : `All ${paginatedElements.length} elements on this page are selected.`}
+            </span>
+            {!isAllFilteredSelected ? (
+              <button
+                type="button"
+                onClick={selectAllFiltered}
+                className="font-bold underline text-brand-700 dark:text-brand-300 hover:text-brand-900 dark:hover:text-white cursor-pointer"
+              >
+                Select all {filteredElements.length} elements on{" "}
+                {filterLevel !== "ALL" ? levelNameMap.get(filterLevel) || "this level" : "all levels"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="font-bold underline text-brand-700 dark:text-brand-300 hover:text-brand-900 dark:hover:text-white cursor-pointer"
+              >
+                Clear selection
+              </button>
+            )}
+          </div>
+        )}
 
           {/* Floating Bulk Toolbar */}
           {selectedIds.size > 0 && (
@@ -1244,6 +1550,7 @@ export const ElementRegistry: React.FC = () => {
               levels={levels.map((l) => ({ id: l.id, name: l.name }))}
               packages={packages.map((p) => ({ id: p.id, name: p.name }))}
               onDelete={handleBulkDelete}
+              onOpenBulkEditModal={() => setShowBulkEditModal(true)}
             />
           )}
 
@@ -1267,6 +1574,22 @@ export const ElementRegistry: React.FC = () => {
                 Register your first structural member or use bulk generation.
               </p>
             </div>
+          ) : viewMode === "SPREADSHEET" ? (
+            <div className="space-y-4">
+              {renderPagination()}
+              <ElementSpreadsheetView
+                elements={paginatedElements}
+                levels={levels}
+                packages={packages}
+                gridlines={gridlines}
+                onElementsUpdated={() => loadData(true)}
+                selectedIds={selectedIds}
+                onToggleSelect={toggleSelect}
+                onToggleSelectAll={toggleSelectAllPage}
+                isAllSelected={isAllPageSelected}
+              />
+              {renderPagination()}
+            </div>
           ) : viewMode === "TABLE" ? (
             <div className="space-y-4">
               {renderPagination()}
@@ -1285,12 +1608,81 @@ export const ElementRegistry: React.FC = () => {
                             className="w-4 h-4 rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-brand-600 cursor-pointer"
                           />
                         </th>
-                        <th className="py-3.5 px-4 font-bold">Element Name</th>
-                        <th className="py-3.5 px-4 font-bold">Type</th>
-                        <th className="py-3.5 px-4 font-bold">Level</th>
-                        <th className="py-3.5 px-4 font-bold">Grid Axis</th>
-                        <th className="py-3.5 px-4 font-bold text-right">
-                          Volume (m³)
+                        <th
+                          onClick={() => handleSort("name")}
+                          className="py-3.5 px-4 font-bold cursor-pointer hover:text-slate-900 dark:hover:text-white select-none transition"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span>Element Name</span>
+                            <span className={`text-[10px] ${sortField === "name" ? "text-brand-600 dark:text-brand-400 font-black" : "text-slate-300 dark:text-slate-600"}`}>
+                              {sortField === "name" ? (sortAsc ? "▲" : "▼") : "▲"}
+                            </span>
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleSort("type")}
+                          className="py-3.5 px-4 font-bold cursor-pointer hover:text-slate-900 dark:hover:text-white select-none transition"
+                        >
+                          <div className="flex items-center gap-1">
+                            <span>Type</span>
+                            {sortField === "type" && (
+                              <span className="text-[10px] text-brand-600 dark:text-brand-400 font-black">
+                                {sortAsc ? "▲" : "▼"}
+                              </span>
+                            )}
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleSort("level")}
+                          className="py-3.5 px-4 font-bold cursor-pointer hover:text-slate-900 dark:hover:text-white select-none transition"
+                        >
+                          <div className="flex items-center gap-1">
+                            <span>Level</span>
+                            {sortField === "level" && (
+                              <span className="text-[10px] text-brand-600 dark:text-brand-400 font-black">
+                                {sortAsc ? "▲" : "▼"}
+                              </span>
+                            )}
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleSort("elevation")}
+                          className="py-3.5 px-4 font-bold cursor-pointer hover:text-slate-900 dark:hover:text-white select-none transition"
+                        >
+                          <div className="flex items-center gap-1">
+                            <span>Elevation (m)</span>
+                            {sortField === "elevation" && (
+                              <span className="text-[10px] text-brand-600 dark:text-brand-400 font-black">
+                                {sortAsc ? "▲" : "▼"}
+                              </span>
+                            )}
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleSort("grid")}
+                          className="py-3.5 px-4 font-bold cursor-pointer hover:text-slate-900 dark:hover:text-white select-none transition"
+                        >
+                          <div className="flex items-center gap-1">
+                            <span>Grid Axis</span>
+                            {sortField === "grid" && (
+                              <span className="text-[10px] text-brand-600 dark:text-brand-400 font-bold">
+                                {sortAsc ? "▲" : "▼"}
+                              </span>
+                            )}
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleSort("volume")}
+                          className="py-3.5 px-4 font-bold text-right cursor-pointer hover:text-slate-900 dark:hover:text-white select-none transition"
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            <span>Volume (m³)</span>
+                            {sortField === "volume" && (
+                              <span className="text-[10px] text-brand-600 dark:text-brand-400 font-black">
+                                {sortAsc ? "▲" : "▼"}
+                              </span>
+                            )}
+                          </div>
                         </th>
                         <th className="py-3.5 px-4 font-bold text-right">
                           Formwork (m²)
@@ -1298,7 +1690,19 @@ export const ElementRegistry: React.FC = () => {
                         <th className="py-3.5 px-4 font-bold">
                           Concrete Grade
                         </th>
-                        <th className="py-3.5 px-4 font-bold">Status</th>
+                        <th
+                          onClick={() => handleSort("status")}
+                          className="py-3.5 px-4 font-bold cursor-pointer hover:text-slate-900 dark:hover:text-white select-none transition"
+                        >
+                          <div className="flex items-center gap-1">
+                            <span>Status</span>
+                            {sortField === "status" && (
+                              <span className="text-[10px] text-brand-600 dark:text-brand-400 font-black">
+                                {sortAsc ? "▲" : "▼"}
+                              </span>
+                            )}
+                          </div>
+                        </th>
                         <th className="py-3.5 px-4 font-bold text-center">
                           Actions
                         </th>
@@ -1341,6 +1745,18 @@ export const ElementRegistry: React.FC = () => {
                             {levelNameMap.get(el.levelId || "") ||
                               el.levelName ||
                               "Level"}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-xs">
+                            <span className="font-bold text-slate-800 dark:text-slate-200">
+                              {el.elevation !== undefined && el.elevation !== null
+                                ? `${el.elevation >= 0 ? "+" : ""}${Number(el.elevation).toFixed(2)}m`
+                                : "—"}
+                            </span>
+                            {el.elevationOffset ? (
+                              <span className="block text-[10px] text-sky-600 dark:text-sky-400 font-semibold">
+                                offset: {el.elevationOffset > 0 ? `+${el.elevationOffset}` : el.elevationOffset}m
+                              </span>
+                            ) : null}
                           </td>
                           <td className="py-3 px-4 font-mono text-brand-600 dark:text-brand-400 font-bold">
                             {el.grid || el.gridAxis || "N/A"}
@@ -1556,6 +1972,34 @@ export const ElementRegistry: React.FC = () => {
             levelNameMap.get(viewerEl.levelId || "") || viewerEl.levelName
           }
           onClose={() => setViewerEl(null)}
+        />
+      )}
+
+      {showHealthModal && (
+        <ElementHealthModal
+          isOpen={showHealthModal}
+          onClose={() => setShowHealthModal(false)}
+          elements={elements}
+          levels={levels}
+          packages={packages}
+          ncrs={ncrs}
+          onElementsUpdated={() => loadData(true)}
+        />
+      )}
+
+      {showBulkEditModal && (
+        <BulkElementEditModal
+          isOpen={showBulkEditModal}
+          onClose={() => setShowBulkEditModal(false)}
+          selectedElementIds={Array.from(selectedIds)}
+          elements={elements}
+          levels={levels}
+          packages={packages}
+          ncrs={ncrs}
+          onElementsUpdated={() => {
+            clearSelection();
+            loadData(true);
+          }}
         />
       )}
 

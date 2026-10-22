@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckSquare, X, Building2, Briefcase, Activity, Trash2, ArrowRight } from "lucide-react";
+import { CheckSquare, X, Building2, Briefcase, Activity, Trash2, SlidersHorizontal } from "lucide-react";
 
 interface BulkToolbarProps {
   selectedCount: number;
@@ -16,6 +16,7 @@ interface BulkToolbarProps {
   levels: Array<{ id: string; name: string }>;
   packages: Array<{ id: string; name: string }>;
   onDelete: () => void;
+  onOpenBulkEditModal?: () => void;
 }
 
 const BULK_STATUS_OPTIONS = [
@@ -45,6 +46,7 @@ export const BulkToolbar: React.FC<BulkToolbarProps> = ({
   levels,
   packages,
   onDelete,
+  onOpenBulkEditModal,
 }) => {
   return (
     <div className="bg-white dark:bg-slate-900 border border-brand-500/40 rounded-2xl p-4 shadow-2xl flex flex-wrap items-center justify-between gap-4 animate-in slide-in-from-top duration-200 transition-colors duration-200">
@@ -139,6 +141,17 @@ export const BulkToolbar: React.FC<BulkToolbarProps> = ({
             </button>
           )}
         </div>
+
+        {/* Multi-Property Bulk Edit */}
+        {onOpenBulkEditModal && (
+          <button
+            onClick={onOpenBulkEditModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-xl transition shadow-sm"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span>Multi-Property Edit</span>
+          </button>
+        )}
 
         {/* Bulk Delete */}
         <button

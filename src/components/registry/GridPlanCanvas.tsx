@@ -40,6 +40,8 @@ import {
 import {
   getOrCalculateVolume,
   getOrCalculateFormworkArea,
+  getColumn2DDimensions,
+  getBeam2DDimensions,
 } from "@/lib/elementCalculations";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -161,11 +163,23 @@ export function getFormworkLayerStyle(fmwkArea: number): {
   label: string;
 } {
   if (fmwkArea > 30) {
-    return { fill: "#059669", stroke: "#047857", label: "> 30 m² (High Contact)" };
+    return {
+      fill: "#059669",
+      stroke: "#047857",
+      label: "> 30 m² (High Contact)",
+    };
   } else if (fmwkArea >= 15) {
-    return { fill: "#34d399", stroke: "#10b981", label: "15 – 30 m² (Medium Contact)" };
+    return {
+      fill: "#34d399",
+      stroke: "#10b981",
+      label: "15 – 30 m² (Medium Contact)",
+    };
   } else {
-    return { fill: "#a7f3d0", stroke: "#6ee7b7", label: "< 15 m² (Low Contact)" };
+    return {
+      fill: "#a7f3d0",
+      stroke: "#6ee7b7",
+      label: "< 15 m² (Low Contact)",
+    };
   }
 }
 
@@ -373,7 +387,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
   const [selectedLevelId, setSelectedLevelId] = useState<string>(
     activeProject?.currentLevelId || "ALL",
   );
-  const prevLevelIdRef = useRef<string | undefined>(activeProject?.currentLevelId);
+  const prevLevelIdRef = useRef<string | undefined>(
+    activeProject?.currentLevelId,
+  );
   useEffect(() => {
     if (activeProject?.currentLevelId !== prevLevelIdRef.current) {
       prevLevelIdRef.current = activeProject?.currentLevelId;
@@ -633,7 +649,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
           const statusEntries = [
             { label: "Pending Inspection", color: "#d97706", fill: "#fef3c7" },
             { label: "Rebar in Progress", color: "#4338ca", fill: "#e0e7ff" },
-            { label: "Formwork in Progress", color: "#7e22ce", fill: "#f3e8ff" },
+            {
+              label: "Formwork in Progress",
+              color: "#7e22ce",
+              fill: "#f3e8ff",
+            },
             { label: "Ready for Casting", color: "#ca8a04", fill: "#fef08a" },
             { label: "Rebar Inspected", color: "#2563eb", fill: "#dbeafe" },
             { label: "Concrete Poured", color: "#0891b2", fill: "#cffaff" },
@@ -1040,7 +1060,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
             }`}
             title="Automatically scale labels to remain readable when zoomed out"
           >
-            <Sparkles className={`w-3 h-3 ${autoScaleLabels ? "text-orange-500" : "text-slate-400"}`} />
+            <Sparkles
+              className={`w-3 h-3 ${autoScaleLabels ? "text-orange-500" : "text-slate-400"}`}
+            />
             <span className="hidden sm:inline">Auto-Scale</span>
           </button>
         </div>
@@ -1118,7 +1140,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
             }`}
             title="Toggle 2D Spatial Plan Legend overlay"
           >
-            <Layers className={`w-3.5 h-3.5 ${showLegend ? "text-brand-600 dark:text-brand-400" : "text-slate-400"}`} />
+            <Layers
+              className={`w-3.5 h-3.5 ${showLegend ? "text-brand-600 dark:text-brand-400" : "text-slate-400"}`}
+            />
             <span className="hidden sm:inline">Legend</span>
           </button>
           <button
@@ -1156,12 +1180,28 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
         <svg
           ref={svgRef}
           className="w-full h-full pointer-events-auto"
-          style={{ width: "100%", height: "100%", backgroundColor: currentTheme.canvasBg }}
+          style={{
+            width: "100%",
+            height: "100%",
+            backgroundColor: currentTheme.canvasBg,
+          }}
         >
           {/* Enhanced Drop Shadow for High-Legibility Labels */}
           <defs>
-            <filter id="label-shadow" x="-30%" y="-30%" width="160%" height="160%">
-              <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor={currentTheme.shadowColor} floodOpacity={currentTheme.shadowOpacity} />
+            <filter
+              id="label-shadow"
+              x="-30%"
+              y="-30%"
+              width="160%"
+              height="160%"
+            >
+              <feDropShadow
+                dx="0"
+                dy="1.5"
+                stdDeviation="2"
+                floodColor={currentTheme.shadowColor}
+                floodOpacity={currentTheme.shadowOpacity}
+              />
             </filter>
           </defs>
 
@@ -1489,11 +1529,17 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                 if (riseM <= 0 && radiusM > 0) {
                   const spanM = rw / scaleFactor;
                   if (spanM / 2 < radiusM) {
-                    riseM = radiusM - Math.sqrt(radiusM * radiusM - (spanM / 2) * (spanM / 2));
+                    riseM =
+                      radiusM -
+                      Math.sqrt(radiusM * radiusM - (spanM / 2) * (spanM / 2));
                   }
                 }
-                const risePx = riseM > 0 ? riseM * scaleFactor : Math.min(rh * 0.85, Math.max(12, rw * 0.15));
-                const radiusPx = radiusM > 0 ? radiusM * scaleFactor : Math.max(rw, rh);
+                const risePx =
+                  riseM > 0
+                    ? riseM * scaleFactor
+                    : Math.min(rh * 0.85, Math.max(12, rw * 0.15));
+                const radiusPx =
+                  radiusM > 0 ? radiusM * scaleFactor : Math.max(rw, rh);
 
                 let slabPathD = "";
                 let isCustomPath = false;
@@ -1510,21 +1556,29 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                   const pX4 = rx;
                   const pY4 = ry + rh;
 
-                  const dir = ((el.cantileverDirection || 'TOP') as string).toUpperCase();
-                  const dipPx = Math.min((dir === 'LEFT' || dir === 'RIGHT' ? rw : rh) * 0.85, Math.max(12, risePx));
-                  const bulgePx = Math.min((dir === 'LEFT' || dir === 'RIGHT' ? rw : rh) * 0.85, Math.max(12, risePx));
+                  const dir = (
+                    (el.cantileverDirection || "TOP") as string
+                  ).toUpperCase();
+                  const dipPx = Math.min(
+                    (dir === "LEFT" || dir === "RIGHT" ? rw : rh) * 0.85,
+                    Math.max(12, risePx),
+                  );
+                  const bulgePx = Math.min(
+                    (dir === "LEFT" || dir === "RIGHT" ? rw : rh) * 0.85,
+                    Math.max(12, risePx),
+                  );
 
-                  if (dir === 'TOP' || dir === 'NORTH') {
+                  if (dir === "TOP" || dir === "NORTH") {
                     // Curve is on TOP edge (projects upwards, scoops down towards beam)
                     slabPathD = el.isArcDeduction
                       ? `M ${pX4} ${pY4} L ${pX3} ${pY3} L ${pX2} ${pY2} Q ${pX1 + rw / 2} ${pY1 + dipPx} ${pX1} ${pY1} Z`
                       : `M ${pX4} ${pY4} L ${pX3} ${pY3} L ${pX2} ${pY2} Q ${pX1 + rw / 2} ${pY1 - bulgePx} ${pX1} ${pY1} Z`;
-                  } else if (dir === 'LEFT' || dir === 'WEST') {
+                  } else if (dir === "LEFT" || dir === "WEST") {
                     // Curve is on LEFT edge (projects leftwards, scoops right towards beam)
                     slabPathD = el.isArcDeduction
                       ? `M ${pX2} ${pY1} L ${pX3} ${pY3} L ${pX4} ${pY4} Q ${pX1 + dipPx} ${pY1 + rh / 2} ${pX1} ${pY1} Z`
                       : `M ${pX2} ${pY1} L ${pX3} ${pY3} L ${pX4} ${pY4} Q ${pX1 - bulgePx} ${pY1 + rh / 2} ${pX1} ${pY1} Z`;
-                  } else if (dir === 'RIGHT' || dir === 'EAST') {
+                  } else if (dir === "RIGHT" || dir === "EAST") {
                     // Curve is on RIGHT edge (projects rightwards, scoops left towards beam)
                     slabPathD = el.isArcDeduction
                       ? `M ${pX1} ${pY4} L ${pX1} ${pY1} L ${pX2} ${pY2} Q ${pX2 - dipPx} ${pY1 + rh / 2} ${pX3} ${pY3} Z`
@@ -1551,13 +1605,18 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                   const w1 = el.cantileverDepth || el.width || 1.95;
                   const w2 = (el as any).taperEndDepth ?? 0;
                   const rFillet = el.radius || 1.5;
-                  const dir = ((el.cantileverDirection || 'BOTTOM') as string).toUpperCase();
+                  const dir = (
+                    (el.cantileverDirection || "BOTTOM") as string
+                  ).toUpperCase();
                   const isMirr = !!(el as any).isMirrored;
 
-                  const filletPx = Math.min(rw * 0.4, Math.max(12, rFillet * scaleFactor * 0.5));
+                  const filletPx = Math.min(
+                    rw * 0.4,
+                    Math.max(12, rFillet * scaleFactor * 0.5),
+                  );
                   const h2Px = w2 > 0 ? (w2 / (w1 || 1)) * rh : 0;
 
-                  if (dir === 'TOP' || dir === 'NORTH') {
+                  if (dir === "TOP" || dir === "NORTH") {
                     // Beam at bottom (ry + rh), projects upwards
                     if (isMirr) {
                       const cornerFilletStart = rx + filletPx;
@@ -1568,13 +1627,13 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       const topSlantedY = ry + rh - Math.max(12, rh * 0.5);
                       slabPathD = `M ${rx} ${ry + rh} L ${rx + rw} ${ry + rh} L ${rx + rw} ${ry + rh - h2Px} Q ${rx + rw} ${topSlantedY} ${cornerFilletStart} ${topSlantedY} L ${rx} ${ry} Z`;
                     }
-                  } else if (dir === 'LEFT' || dir === 'WEST') {
+                  } else if (dir === "LEFT" || dir === "WEST") {
                     if (isMirr) {
                       slabPathD = `M ${rx + rw} ${ry} L ${rx + rw} ${ry + rh} Q ${rx + rw * 0.5} ${ry + rh - filletPx} ${rx} ${ry} Z`;
                     } else {
                       slabPathD = `M ${rx + rw} ${ry} L ${rx + rw} ${ry + rh} L ${rx} ${ry + rh} Q ${rx + filletPx} ${ry + rh * 0.5} ${rx + rw * 0.3} ${ry} Z`;
                     }
-                  } else if (dir === 'RIGHT' || dir === 'EAST') {
+                  } else if (dir === "RIGHT" || dir === "EAST") {
                     if (isMirr) {
                       slabPathD = `M ${rx} ${ry} L ${rx} ${ry + rh} Q ${rx + rw * 0.5} ${ry + rh - filletPx} ${rx + rw} ${ry} Z`;
                     } else {
@@ -1728,17 +1787,18 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
 
                 const totalRisers =
                   el.riserCount ||
-                  (el.flights?.reduce(
-                    (acc: number, f: any) =>
-                      acc + (Number(f.riserCount) || 0),
+                  el.flights?.reduce(
+                    (acc: number, f: any) => acc + (Number(f.riserCount) || 0),
                     0,
-                  ) || 12);
+                  ) ||
+                  12;
                 const flightW = (el.flightWidth || 1.2) * scaleFactor;
                 const flightWPx = Math.max(28, flightW);
 
                 // Elevation callout text (▽ Base -> △ Top)
-                const baseElev = el.elevation ?? el.bottomElevation ?? 0;
-                const topElev = el.topElevation ?? (baseElev + (el.height || 3.0));
+                const baseElev = el.bottomElevation ?? 0;
+                const topElev =
+                  el.topElevation ?? baseElev + (el.height || 3.0);
                 const elevTag = `▽${baseElev.toFixed(2)}m → △+${topElev.toFixed(2)}m`;
 
                 const hasTwoFlights =
@@ -1747,14 +1807,25 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                   (Array.isArray(el.flights) && el.flights.length >= 2);
 
                 const fl1Risers = hasTwoFlights
-                  ? Math.max(1, Number(el.flights?.[0]?.riserCount) || Math.round(totalRisers / 2))
+                  ? Math.max(
+                      1,
+                      Number(el.flights?.[0]?.riserCount) ||
+                        Math.round(totalRisers / 2),
+                    )
                   : totalRisers;
                 const fl2Risers = hasTwoFlights
-                  ? Math.max(1, Number(el.flights?.[1]?.riserCount) || (totalRisers - fl1Risers))
+                  ? Math.max(
+                      1,
+                      Number(el.flights?.[1]?.riserCount) ||
+                        totalRisers - fl1Risers,
+                    )
                   : 0;
 
                 const isLeftTurn = (el.turnDirection || "LEFT") === "LEFT";
-                const stairwellGapPx = Math.max(6, Math.min(24, (Number(el.stairwellGap) || 0.15) * scaleFactor));
+                const stairwellGapPx = Math.max(
+                  6,
+                  Math.min(24, (Number(el.stairwellGap) || 0.15) * scaleFactor),
+                );
 
                 if (coords.isSpan) {
                   const spanLen =
@@ -1764,7 +1835,10 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                   const angleDeg = (coords.angleRad * 180) / Math.PI;
 
                   // Architecture: landing platform takes ~22% of total length at the top or dogleg end
-                  const landingLen = Math.max(18, Math.min(flightWPx * 0.9, spanLen * 0.22));
+                  const landingLen = Math.max(
+                    18,
+                    Math.min(flightWPx * 0.9, spanLen * 0.22),
+                  );
                   const runLen = Math.max(10, spanLen - landingLen);
 
                   const stairName =
@@ -1808,7 +1882,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             {/* Flight 1 Outer Box */}
                             <rect
                               x={-spanLen / 2}
-                              y={isLeftTurn ? stairwellGapPx / 2 : -flightWPx - stairwellGapPx / 2}
+                              y={
+                                isLeftTurn
+                                  ? stairwellGapPx / 2
+                                  : -flightWPx - stairwellGapPx / 2
+                              }
                               width={runLen}
                               height={flightWPx}
                               fill={fill}
@@ -1817,23 +1895,37 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                               rx="2"
                             />
                             {/* Flight 1 Exact Riser Lines */}
-                            {Array.from({ length: fl1Risers - 1 }).map((_, i) => (
-                              <line
-                                key={`f1-t-${i}`}
-                                x1={-spanLen / 2 + (i + 1) * stepW1}
-                                y1={isLeftTurn ? stairwellGapPx / 2 : -flightWPx - stairwellGapPx / 2}
-                                x2={-spanLen / 2 + (i + 1) * stepW1}
-                                y2={isLeftTurn ? stairwellGapPx / 2 + flightWPx : -stairwellGapPx / 2}
-                                stroke={stroke}
-                                strokeWidth="1.2"
-                                strokeOpacity="0.8"
-                              />
-                            ))}
+                            {Array.from({ length: fl1Risers - 1 }).map(
+                              (_, i) => (
+                                <line
+                                  key={`f1-t-${i}`}
+                                  x1={-spanLen / 2 + (i + 1) * stepW1}
+                                  y1={
+                                    isLeftTurn
+                                      ? stairwellGapPx / 2
+                                      : -flightWPx - stairwellGapPx / 2
+                                  }
+                                  x2={-spanLen / 2 + (i + 1) * stepW1}
+                                  y2={
+                                    isLeftTurn
+                                      ? stairwellGapPx / 2 + flightWPx
+                                      : -stairwellGapPx / 2
+                                  }
+                                  stroke={stroke}
+                                  strokeWidth="1.2"
+                                  strokeOpacity="0.8"
+                                />
+                              ),
+                            )}
 
                             {/* Flight 2 Outer Box (Parallel returning flight) */}
                             <rect
                               x={-spanLen / 2}
-                              y={isLeftTurn ? -flightWPx - stairwellGapPx / 2 : stairwellGapPx / 2}
+                              y={
+                                isLeftTurn
+                                  ? -flightWPx - stairwellGapPx / 2
+                                  : stairwellGapPx / 2
+                              }
                               width={runLen}
                               height={flightWPx}
                               fill={fill}
@@ -1842,18 +1934,28 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                               rx="2"
                             />
                             {/* Flight 2 Exact Riser Lines */}
-                            {Array.from({ length: fl2Risers - 1 }).map((_, i) => (
-                              <line
-                                key={`f2-t-${i}`}
-                                x1={-spanLen / 2 + (i + 1) * stepW2}
-                                y1={isLeftTurn ? -flightWPx - stairwellGapPx / 2 : stairwellGapPx / 2}
-                                x2={-spanLen / 2 + (i + 1) * stepW2}
-                                y2={isLeftTurn ? -stairwellGapPx / 2 : stairwellGapPx / 2 + flightWPx}
-                                stroke={stroke}
-                                strokeWidth="1.2"
-                                strokeOpacity="0.8"
-                              />
-                            ))}
+                            {Array.from({ length: fl2Risers - 1 }).map(
+                              (_, i) => (
+                                <line
+                                  key={`f2-t-${i}`}
+                                  x1={-spanLen / 2 + (i + 1) * stepW2}
+                                  y1={
+                                    isLeftTurn
+                                      ? -flightWPx - stairwellGapPx / 2
+                                      : stairwellGapPx / 2
+                                  }
+                                  x2={-spanLen / 2 + (i + 1) * stepW2}
+                                  y2={
+                                    isLeftTurn
+                                      ? -stairwellGapPx / 2
+                                      : stairwellGapPx / 2 + flightWPx
+                                  }
+                                  stroke={stroke}
+                                  strokeWidth="1.2"
+                                  strokeOpacity="0.8"
+                                />
+                              ),
+                            )}
 
                             {/* Mid Landing Platform Slab spanning both flights */}
                             <rect
@@ -1883,7 +1985,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             {/* Walkline Arrow curving 180° around the lightwell */}
                             <circle
                               cx={-spanLen / 2 + 8}
-                              cy={isLeftTurn ? stairwellGapPx / 2 + halfW : -halfW - stairwellGapPx / 2}
+                              cy={
+                                isLeftTurn
+                                  ? stairwellGapPx / 2 + halfW
+                                  : -halfW - stairwellGapPx / 2
+                              }
                               r="3"
                               fill="#38bdf8"
                             />
@@ -1900,7 +2006,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             />
                             <text
                               x={-spanLen / 2 + runLen / 2}
-                              y={isLeftTurn ? stairwellGapPx / 2 + halfW - 4 : -halfW - stairwellGapPx / 2 - 4}
+                              y={
+                                isLeftTurn
+                                  ? stairwellGapPx / 2 + halfW - 4
+                                  : -halfW - stairwellGapPx / 2 - 4
+                              }
                               fill="#38bdf8"
                               fontSize="9"
                               fontWeight="bold"
@@ -1911,7 +2021,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             </text>
                             <text
                               x={-spanLen / 2 + runLen / 2}
-                              y={isLeftTurn ? -halfW - stairwellGapPx / 2 + 12 : stairwellGapPx / 2 + halfW + 12}
+                              y={
+                                isLeftTurn
+                                  ? -halfW - stairwellGapPx / 2 + 12
+                                  : stairwellGapPx / 2 + halfW + 12
+                              }
                               fill="#38bdf8"
                               fontSize="9"
                               fontWeight="bold"
@@ -1959,18 +2073,20 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             </text>
 
                             {/* Exact Tread Lines for every single riser */}
-                            {Array.from({ length: totalRisers - 1 }).map((_, i) => (
-                              <line
-                                key={`str-step-${i}`}
-                                x1={-spanLen / 2 + (i + 1) * stepW1}
-                                y1={-flightWPx / 2}
-                                x2={-spanLen / 2 + (i + 1) * stepW1}
-                                y2={flightWPx / 2}
-                                stroke={stroke}
-                                strokeWidth="1.2"
-                                strokeOpacity="0.8"
-                              />
-                            ))}
+                            {Array.from({ length: totalRisers - 1 }).map(
+                              (_, i) => (
+                                <line
+                                  key={`str-step-${i}`}
+                                  x1={-spanLen / 2 + (i + 1) * stepW1}
+                                  y1={-flightWPx / 2}
+                                  x2={-spanLen / 2 + (i + 1) * stepW1}
+                                  y2={flightWPx / 2}
+                                  stroke={stroke}
+                                  strokeWidth="1.2"
+                                  strokeOpacity="0.8"
+                                />
+                              ),
+                            )}
 
                             <circle
                               cx={-spanLen / 2 + 8}
@@ -2008,7 +2124,13 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
 
                       <rect
                         x={coords.midX - tagW / 2}
-                        y={coords.midY + (hasTwoFlights ? flightWPx + stairwellGapPx / 2 : flightWPx / 2) + 3 * labelScale}
+                        y={
+                          coords.midY +
+                          (hasTwoFlights
+                            ? flightWPx + stairwellGapPx / 2
+                            : flightWPx / 2) +
+                          3 * labelScale
+                        }
                         width={tagW}
                         height={tagH}
                         rx={3 * labelScale}
@@ -2023,7 +2145,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         x={coords.midX}
                         y={
                           coords.midY +
-                          (hasTwoFlights ? flightWPx + stairwellGapPx / 2 : flightWPx / 2) +
+                          (hasTwoFlights
+                            ? flightWPx + stairwellGapPx / 2
+                            : flightWPx / 2) +
                           3 * labelScale +
                           tagH / 2 +
                           tagFont * 0.35
@@ -2054,12 +2178,16 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                   : Math.max(80, (el.flightLength || 3.0) * scaleFactor);
                 const rh = isArea
                   ? Math.max(Math.abs(coords.y2 - coords.y1), 40)
-                  : (hasTwoFlights ? flightWPx * 2 + stairwellGapPx : flightWPx);
+                  : hasTwoFlights
+                    ? flightWPx * 2 + stairwellGapPx
+                    : flightWPx;
                 const isHorizontal = rw >= rh;
                 const landingSpan = isHorizontal
                   ? Math.max(20, rw * 0.24)
                   : Math.max(20, rh * 0.24);
-                const runSpan = isHorizontal ? rw - landingSpan : rh - landingSpan;
+                const runSpan = isHorizontal
+                  ? rw - landingSpan
+                  : rh - landingSpan;
 
                 const stairName =
                   labelDetailMode === "COMPACT"
@@ -2097,7 +2225,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           {/* Flight 1 Outer Box */}
                           <rect
                             x={rx}
-                            y={isLeftTurn ? ry + rh / 2 + stairwellGapPx / 2 : ry}
+                            y={
+                              isLeftTurn ? ry + rh / 2 + stairwellGapPx / 2 : ry
+                            }
                             width={runSpan}
                             height={rh / 2 - stairwellGapPx / 2}
                             fill={fill}
@@ -2110,9 +2240,17 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             <line
                               key={`f1-t-area-${i}`}
                               x1={rx + (i + 1) * (runSpan / fl1Risers)}
-                              y1={isLeftTurn ? ry + rh / 2 + stairwellGapPx / 2 : ry}
+                              y1={
+                                isLeftTurn
+                                  ? ry + rh / 2 + stairwellGapPx / 2
+                                  : ry
+                              }
                               x2={rx + (i + 1) * (runSpan / fl1Risers)}
-                              y2={isLeftTurn ? ry + rh : ry + rh / 2 - stairwellGapPx / 2}
+                              y2={
+                                isLeftTurn
+                                  ? ry + rh
+                                  : ry + rh / 2 - stairwellGapPx / 2
+                              }
                               stroke={stroke}
                               strokeWidth="1.2"
                               strokeOpacity="0.8"
@@ -2122,7 +2260,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           {/* Flight 2 Outer Box */}
                           <rect
                             x={rx}
-                            y={isLeftTurn ? ry : ry + rh / 2 + stairwellGapPx / 2}
+                            y={
+                              isLeftTurn ? ry : ry + rh / 2 + stairwellGapPx / 2
+                            }
                             width={runSpan}
                             height={rh / 2 - stairwellGapPx / 2}
                             fill={fill}
@@ -2135,9 +2275,17 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             <line
                               key={`f2-t-area-${i}`}
                               x1={rx + (i + 1) * (runSpan / fl2Risers)}
-                              y1={isLeftTurn ? ry : ry + rh / 2 + stairwellGapPx / 2}
+                              y1={
+                                isLeftTurn
+                                  ? ry
+                                  : ry + rh / 2 + stairwellGapPx / 2
+                              }
                               x2={rx + (i + 1) * (runSpan / fl2Risers)}
-                              y2={isLeftTurn ? ry + rh / 2 - stairwellGapPx / 2 : ry + rh}
+                              y2={
+                                isLeftTurn
+                                  ? ry + rh / 2 - stairwellGapPx / 2
+                                  : ry + rh
+                              }
                               stroke={stroke}
                               strokeWidth="1.2"
                               strokeOpacity="0.8"
@@ -2189,7 +2337,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           />
                           <text
                             x={rx + runSpan / 2}
-                            y={isLeftTurn ? ry + rh * 0.75 - 4 : ry + rh * 0.25 - 4}
+                            y={
+                              isLeftTurn
+                                ? ry + rh * 0.75 - 4
+                                : ry + rh * 0.25 - 4
+                            }
                             fill="#38bdf8"
                             fontSize="9"
                             fontWeight="bold"
@@ -2200,7 +2352,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           </text>
                           <text
                             x={rx + runSpan / 2}
-                            y={isLeftTurn ? ry + rh * 0.25 + 12 : ry + rh * 0.75 + 12}
+                            y={
+                              isLeftTurn
+                                ? ry + rh * 0.25 + 12
+                                : ry + rh * 0.75 + 12
+                            }
                             fill="#38bdf8"
                             fontSize="9"
                             fontWeight="bold"
@@ -2214,7 +2370,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         <g>
                           {/* Vertical Dogleg Flights */}
                           <rect
-                            x={isLeftTurn ? rx + rw / 2 + stairwellGapPx / 2 : rx}
+                            x={
+                              isLeftTurn ? rx + rw / 2 + stairwellGapPx / 2 : rx
+                            }
                             y={ry}
                             width={rw / 2 - stairwellGapPx / 2}
                             height={runSpan}
@@ -2226,9 +2384,17 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           {Array.from({ length: fl1Risers - 1 }).map((_, i) => (
                             <line
                               key={`f1-vt-area-${i}`}
-                              x1={isLeftTurn ? rx + rw / 2 + stairwellGapPx / 2 : rx}
+                              x1={
+                                isLeftTurn
+                                  ? rx + rw / 2 + stairwellGapPx / 2
+                                  : rx
+                              }
                               y1={ry + (i + 1) * (runSpan / fl1Risers)}
-                              x2={isLeftTurn ? rx + rw : rx + rw / 2 - stairwellGapPx / 2}
+                              x2={
+                                isLeftTurn
+                                  ? rx + rw
+                                  : rx + rw / 2 - stairwellGapPx / 2
+                              }
                               y2={ry + (i + 1) * (runSpan / fl1Risers)}
                               stroke={stroke}
                               strokeWidth="1.2"
@@ -2237,7 +2403,9 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           ))}
 
                           <rect
-                            x={isLeftTurn ? rx : rx + rw / 2 + stairwellGapPx / 2}
+                            x={
+                              isLeftTurn ? rx : rx + rw / 2 + stairwellGapPx / 2
+                            }
                             y={ry}
                             width={rw / 2 - stairwellGapPx / 2}
                             height={runSpan}
@@ -2249,9 +2417,17 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           {Array.from({ length: fl2Risers - 1 }).map((_, i) => (
                             <line
                               key={`f2-vt-area-${i}`}
-                              x1={isLeftTurn ? rx : rx + rw / 2 + stairwellGapPx / 2}
+                              x1={
+                                isLeftTurn
+                                  ? rx
+                                  : rx + rw / 2 + stairwellGapPx / 2
+                              }
                               y1={ry + (i + 1) * (runSpan / fl2Risers)}
-                              x2={isLeftTurn ? rx + rw / 2 - stairwellGapPx / 2 : rx + rw}
+                              x2={
+                                isLeftTurn
+                                  ? rx + rw / 2 - stairwellGapPx / 2
+                                  : rx + rw
+                              }
                               y2={ry + (i + 1) * (runSpan / fl2Risers)}
                               stroke={stroke}
                               strokeWidth="1.2"
@@ -2310,8 +2486,16 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           rx="2"
                         />
                         <text
-                          x={isHorizontal ? rx + runSpan + landingSpan / 2 : rx + rw / 2}
-                          y={isHorizontal ? ry + rh / 2 + 3 : ry + runSpan + landingSpan / 2 + 3}
+                          x={
+                            isHorizontal
+                              ? rx + runSpan + landingSpan / 2
+                              : rx + rw / 2
+                          }
+                          y={
+                            isHorizontal
+                              ? ry + rh / 2 + 3
+                              : ry + runSpan + landingSpan / 2 + 3
+                          }
                           fill={stroke}
                           fontSize="8"
                           fontWeight="bold"
@@ -2323,34 +2507,43 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
 
                         {/* Exact Treads for single flight */}
                         {isHorizontal
-                          ? Array.from({ length: totalRisers - 1 }).map((_, i) => (
-                              <line
-                                key={`str-t-${i}`}
-                                x1={rx + (i + 1) * (runSpan / totalRisers)}
-                                y1={ry}
-                                x2={rx + (i + 1) * (runSpan / totalRisers)}
-                                y2={ry + rh}
-                                stroke={stroke}
-                                strokeWidth="1.2"
-                                strokeOpacity="0.8"
-                              />
-                            ))
-                          : Array.from({ length: totalRisers - 1 }).map((_, i) => (
-                              <line
-                                key={`str-t-${i}`}
-                                x1={rx}
-                                y1={ry + (i + 1) * (runSpan / totalRisers)}
-                                x2={rx + rw}
-                                y2={ry + (i + 1) * (runSpan / totalRisers)}
-                                stroke={stroke}
-                                strokeWidth="1.2"
-                                strokeOpacity="0.8"
-                              />
-                            ))}
+                          ? Array.from({ length: totalRisers - 1 }).map(
+                              (_, i) => (
+                                <line
+                                  key={`str-t-${i}`}
+                                  x1={rx + (i + 1) * (runSpan / totalRisers)}
+                                  y1={ry}
+                                  x2={rx + (i + 1) * (runSpan / totalRisers)}
+                                  y2={ry + rh}
+                                  stroke={stroke}
+                                  strokeWidth="1.2"
+                                  strokeOpacity="0.8"
+                                />
+                              ),
+                            )
+                          : Array.from({ length: totalRisers - 1 }).map(
+                              (_, i) => (
+                                <line
+                                  key={`str-t-${i}`}
+                                  x1={rx}
+                                  y1={ry + (i + 1) * (runSpan / totalRisers)}
+                                  x2={rx + rw}
+                                  y2={ry + (i + 1) * (runSpan / totalRisers)}
+                                  stroke={stroke}
+                                  strokeWidth="1.2"
+                                  strokeOpacity="0.8"
+                                />
+                              ),
+                            )}
 
                         {isHorizontal ? (
                           <>
-                            <circle cx={rx + 10} cy={ry + rh / 2} r="3" fill="#38bdf8" />
+                            <circle
+                              cx={rx + 10}
+                              cy={ry + rh / 2}
+                              r="3"
+                              fill="#38bdf8"
+                            />
                             <line
                               x1={rx + 10}
                               y1={ry + rh / 2}
@@ -2378,7 +2571,12 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                           </>
                         ) : (
                           <>
-                            <circle cx={rx + rw / 2} cy={ry + runSpan - 10} r="3" fill="#38bdf8" />
+                            <circle
+                              cx={rx + rw / 2}
+                              cy={ry + runSpan - 10}
+                              r="3"
+                              fill="#38bdf8"
+                            />
                             <line
                               x1={rx + rw / 2}
                               y1={ry + runSpan - 10}
@@ -2467,15 +2665,15 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     ? activeLayer === "FORMWORK"
                       ? `${footName} [${footFmwk.toFixed(1)} m² fmwk]`
                       : `${footName} [${el.concreteGrade || "Pad"}]`
-                    : labelDetailMode === "STANDARD" && activeLayer === "FORMWORK"
+                    : labelDetailMode === "STANDARD" &&
+                        activeLayer === "FORMWORK"
                       ? `${footName} (${footFmwk.toFixed(1)} m²)`
                       : footName;
-                const { width: fpW, height: fpH, fontSize: fpFont } = getPillDimensions(
-                  footText,
-                  10.5,
-                  6,
-                  labelScale,
-                );
+                const {
+                  width: fpW,
+                  height: fpH,
+                  fontSize: fpFont,
+                } = getPillDimensions(footText, 10.5, 6, labelScale);
 
                 let footFill = "#47556940";
                 let footStroke = "#94a3b8";
@@ -2591,12 +2789,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         : `${wallName} (${wallSpanM.toFixed(1)}m)`
                       : wallName;
 
-                const { width: wpW, height: wpH, fontSize: wpFont } = getPillDimensions(
-                  wallText,
-                  11,
-                  7,
-                  labelScale,
-                );
+                const {
+                  width: wpW,
+                  height: wpH,
+                  fontSize: wpFont,
+                } = getPillDimensions(wallText, 11, 7, labelScale);
 
                 const wdx = coords.x2 - coords.x1;
                 const wdy = coords.y2 - coords.y1;
@@ -2694,6 +2891,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                 const midY = (coords.y1 + coords.y2) / 2;
                 const spanM = coords.spanLength / scaleFactor;
                 const beamFmwk = getOrCalculateFormworkArea(el);
+                const beamGeom = getBeam2DDimensions(el, scaleFactor);
 
                 const beamName =
                   labelDetailMode === "COMPACT"
@@ -2702,18 +2900,19 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                 const beamText =
                   labelDetailMode === "DETAILED"
                     ? activeLayer === "FORMWORK"
-                      ? `${beamName} [${beamFmwk.toFixed(1)} m² fmwk]`
-                      : `${beamName} [${spanM.toFixed(1)}m · ${el.concreteGrade || "C30"}]`
-                    : labelDetailMode === "STANDARD" && activeLayer === "FORMWORK"
-                      ? `${beamName} (${beamFmwk.toFixed(1)} m²)`
+                      ? `${beamName} [${beamGeom.dimensionLabel} · ${beamFmwk.toFixed(1)} m² fmwk]`
+                      : `${beamName} [${beamGeom.dimensionLabel} · ${spanM.toFixed(1)}m · ${el.concreteGrade || "C30"}]`
+                    : labelDetailMode === "STANDARD"
+                      ? activeLayer === "FORMWORK"
+                        ? `${beamName} (${beamGeom.dimensionLabel})`
+                        : `${beamName} [${beamGeom.dimensionLabel}]`
                       : beamName;
 
-                const { width: bpW, height: bpH, fontSize: bpFont } = getPillDimensions(
-                  beamText,
-                  11,
-                  7,
-                  labelScale,
-                );
+                const {
+                  width: bpW,
+                  height: bpH,
+                  fontSize: bpFont,
+                } = getPillDimensions(beamText, 11, 7, labelScale);
 
                 const bdx = coords.x2 - coords.x1;
                 const bdy = coords.y2 - coords.y1;
@@ -2731,15 +2930,16 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     onMouseLeave={() => setHoveredElement(null)}
                     opacity={isMatching ? 0.95 : 0.2}
                   >
-                    {/* Main structural beam line */}
+                    {/* Main structural beam body to physical scale */}
                     <line
                       x1={coords.x1}
                       y1={coords.y1}
                       x2={coords.x2}
                       y2={coords.y2}
                       stroke={stroke}
-                      strokeWidth="9"
-                      strokeLinecap="round"
+                      strokeWidth={beamGeom.widthPx}
+                      strokeLinecap="butt"
+                      strokeOpacity="0.9"
                     />
                     {/* Beam centerline */}
                     <line
@@ -2750,7 +2950,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       stroke={currentTheme.beamCenterline}
                       strokeWidth="1.5"
                       strokeDasharray="4 2"
-                      opacity="0.6"
+                      opacity="0.8"
                     />
                     {/* Orientation-Aligned Label Tag on Beam */}
                     <g
@@ -2821,10 +3021,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                   stroke = fw.stroke;
                 }
 
-                const isCircular =
-                  el.columnShape === "circular" ||
-                  el.elementType === "COLUMN_CIRCULAR";
-                const size = 26;
+                const colGeom = getColumn2DDimensions(el, scaleFactor);
+                const colW = colGeom.widthPx;
+                const colH = colGeom.heightPx;
+                const colR = colGeom.radiusPx;
+                const isCircular = colGeom.isCircular;
 
                 return (
                   <g
@@ -2841,24 +3042,24 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         <circle
                           cx={cx}
                           cy={cy}
-                          r={size / 2}
+                          r={colR}
                           fill={fill}
                           stroke={stroke}
                           strokeWidth="2.5"
                         />
                         <line
-                          x1={cx - size / 2}
+                          x1={cx - colR}
                           y1={cy}
-                          x2={cx + size / 2}
+                          x2={cx + colR}
                           y2={cy}
                           stroke={currentTheme.columnHatch}
                           strokeWidth="1"
                         />
                         <line
                           x1={cx}
-                          y1={cy - size / 2}
+                          y1={cy - colR}
                           x2={cx}
-                          y2={cy + size / 2}
+                          y2={cy + colR}
                           stroke={currentTheme.columnHatch}
                           strokeWidth="1"
                         />
@@ -2866,10 +3067,10 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     ) : (
                       <g>
                         <rect
-                          x={cx - size / 2}
-                          y={cy - size / 2}
-                          width={size}
-                          height={size}
+                          x={cx - colW / 2}
+                          y={cy - colH / 2}
+                          width={colW}
+                          height={colH}
                           rx="3"
                           fill={fill}
                           stroke={stroke}
@@ -2877,18 +3078,18 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         />
                         {/* Architectural column hatch */}
                         <line
-                          x1={cx - size / 2}
-                          y1={cy - size / 2}
-                          x2={cx + size / 2}
-                          y2={cy + size / 2}
+                          x1={cx - colW / 2}
+                          y1={cy - colH / 2}
+                          x2={cx + colW / 2}
+                          y2={cy + colH / 2}
                           stroke={currentTheme.columnHatch}
                           strokeWidth="1"
                         />
                         <line
-                          x1={cx - size / 2}
-                          y1={cy + size / 2}
-                          x2={cx + size / 2}
-                          y2={cy - size / 2}
+                          x1={cx - colW / 2}
+                          y1={cy + colH / 2}
+                          x2={cx + colW / 2}
+                          y2={cy - colH / 2}
                           stroke={currentTheme.columnHatch}
                           strokeWidth="1"
                         />
@@ -2904,13 +3105,18 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                       const colText =
                         labelDetailMode === "DETAILED"
                           ? activeLayer === "FORMWORK"
-                            ? `${colName} [${colFmwk.toFixed(1)} m² fmwk]`
-                            : `${colName} [${el.concreteGrade || "C35"}]`
-                          : labelDetailMode === "STANDARD" && activeLayer === "FORMWORK"
-                            ? `${colName} (${colFmwk.toFixed(1)} m²)`
+                            ? `${colName} [${colGeom.dimensionLabel} · ${colFmwk.toFixed(1)} m² fmwk]`
+                            : `${colName} [${colGeom.dimensionLabel} · ${el.concreteGrade || "C35"}]`
+                          : labelDetailMode === "STANDARD" &&
+                              activeLayer === "FORMWORK"
+                            ? `${colName} (${colGeom.dimensionLabel})`
                             : colName;
-                      const { width: cpW, height: cpH, fontSize: cpFont } =
-                        getPillDimensions(colText, 11, 8, labelScale);
+                      const {
+                        width: cpW,
+                        height: cpH,
+                        fontSize: cpFont,
+                      } = getPillDimensions(colText, 11, 8, labelScale);
+                      const colBottomExtent = isCircular ? colR : colH / 2;
                       return (
                         <g
                           data-layer="labels"
@@ -2919,7 +3125,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                         >
                           <rect
                             x={cx - cpW / 2}
-                            y={cy + size / 2 + 3 * labelScale}
+                            y={cy + colBottomExtent + 3 * labelScale}
                             width={cpW}
                             height={cpH}
                             rx={4 * labelScale}
@@ -2932,7 +3138,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             x={cx}
                             y={
                               cy +
-                              size / 2 +
+                              colBottomExtent +
                               3 * labelScale +
                               cpH / 2 +
                               cpFont * 0.35

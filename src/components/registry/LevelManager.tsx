@@ -13,13 +13,14 @@ import {
   AlertTriangle,
   Layers,
   Save,
+  Briefcase,
   X,
 } from "lucide-react";
 import { dbService } from "@/lib/db";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { writeAudit } from "@/lib/audit";
-import { ProjectLevel, StructuralElement } from "@/types";
+import { ProjectLevel, StructuralElement, WorkPackage } from "@/types";
 import { calculateLevelProgressList, EnrichedLevelProgress } from "@/lib/levelCalculations";
 import { toast } from "react-hot-toast";
 
@@ -31,6 +32,7 @@ export const LevelManager: React.FC = () => {
 
   const [levels, setLevels] = useState<ProjectLevel[]>([]);
   const [elements, setElements] = useState<StructuralElement[]>([]);
+  const [packages, setPackages] = useState<WorkPackage[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Add Level State
@@ -39,23 +41,27 @@ export const LevelManager: React.FC = () => {
   const [newElevation, setNewElevation] = useState(0);
   const [newLevelPosition, setNewLevelPosition] = useState<"TOP" | "BASE" | "CUSTOM">("TOP");
   const [newLevelCustomOrder, setNewLevelCustomOrder] = useState(1);
+  const [newWorkPackageId, setNewWorkPackageId] = useState("");
 
   // Edit Level State
   const [editingLevel, setEditingLevel] = useState<ProjectLevel | null>(null);
   const [editLevelName, setEditLevelName] = useState("");
   const [editElevation, setEditElevation] = useState(0);
   const [editOrder, setEditOrder] = useState(1);
+  const [editWorkPackageId, setEditWorkPackageId] = useState("");
 
   const loadData = async () => {
     if (!currentProjId) return;
     setLoading(true);
     try {
-      const [lvlList, elemList] = await Promise.all([
+      const [lvlList, elemList, pkgList] = await Promise.all([
         dbService.getLevels(currentProjId, currentCompId),
         dbService.getElements(currentProjId, currentCompId),
+        dbService.getWorkPackages(currentProjId, currentCompId),
       ]);
       setLevels(lvlList);
       setElements(elemList);
+      setPackages(pkgList);
     } catch (err) {
       console.error("Failed to load levels:", err);
     } finally {
@@ -87,6 +93,8 @@ export const LevelManager: React.FC = () => {
       name: newLevelName.trim(),
       elevation: Number(newElevation),
       order: targetOrder,
+      workPackageId: newWorkPackageId || undefined,
+      workPackageName: packages.find((p) => p.id === newWorkPackageId)?.name || undefined,
     };
 
     const updatedList = [...levels, newLvl]
@@ -100,6 +108,7 @@ export const LevelManager: React.FC = () => {
       setNewLevelName("");
       setNewElevation(0);
       setNewLevelPosition("TOP");
+      setNewWorkPackageId("");
       loadData();
     } catch (err) {
       toast.error("Failed to create level.");
@@ -158,6 +167,7 @@ export const LevelManager: React.FC = () => {
     setEditLevelName(lvl.name);
     setEditElevation(lvl.elevation);
     setEditOrder(lvl.order ?? 1);
+    setEditWorkPackageId(lvl.workPackageId || "");
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -171,6 +181,8 @@ export const LevelManager: React.FC = () => {
           name: editLevelName.trim(),
           elevation: Number(editElevation),
           order: Number(editOrder),
+          workPackageId: editWorkPackageId || undefined,
+          workPackageName: packages.find((p) => p.id === editWorkPackageId)?.name || undefined,
         };
       }
       return l;
@@ -272,6 +284,16 @@ export const LevelManager: React.FC = () => {
                     </div>
 
                     <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">{lvl.name}</h4>
+                    {lvl.workPackageName ? (
+                      <div className="mt-1 flex items-center gap-1 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold truncate bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-200/50 dark:border-indigo-800/40">
+                        <Briefcase className="w-2.5 h-2.5 flex-shrink-0" />
+                        <span className="truncate">{lvl.workPackageName}</span>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-[10px] text-slate-400 italic">
+                        No Package Assigned
+                      </div>
+                    )}
 
                     <div className="mt-2.5 space-y-1">
                       <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
@@ -399,6 +421,24 @@ export const LevelManager: React.FC = () => {
                 </select>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Assigned Work Package (Inherited by all elements on this floor)
+                </label>
+                <select
+                  value={newWorkPackageId}
+                  onChange={(e) => setNewWorkPackageId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-brand-500"
+                >
+                  <option value="">No Work Package (Unassigned)</option>
+                  {packages.map((pkg) => (
+                    <option key={pkg.id} value={pkg.id}>
+                      {pkg.name} ({pkg.code || "PKG"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {newLevelPosition === "CUSTOM" && (
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Custom Rank #</label>
@@ -410,9 +450,7 @@ export const LevelManager: React.FC = () => {
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-brand-500"
                   />
                 </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+              )}<div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -483,6 +521,24 @@ export const LevelManager: React.FC = () => {
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-brand-500"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Assigned Work Package (Inherited by all elements on this floor)
+                </label>
+                <select
+                  value={editWorkPackageId}
+                  onChange={(e) => setEditWorkPackageId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-brand-500"
+                >
+                  <option value="">No Work Package (Unassigned)</option>
+                  {packages.map((pkg) => (
+                    <option key={pkg.id} value={pkg.id}>
+                      {pkg.name} ({pkg.code || "PKG"})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">

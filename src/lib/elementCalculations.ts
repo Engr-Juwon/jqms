@@ -278,6 +278,85 @@ export function getOrCalculateElementArea(el: Partial<StructuralElement>): numbe
 }
 
 /**
+ * Returns user-friendly dimension metadata based on structural member type.
+ * Columns: Breadth (L) × Width (W) × Storey Height (H) [has Height, NO Depth]
+ * Beams:   Span (L) × Web Width (W) × Section Depth (D) [has Depth, NO Height]
+ * Walls:   Length (L) × Thickness (T) × Wall Height (H) [has Height & Thickness]
+ * Slabs:   Length (L) × Width (W) × Slab Thickness (T)  [has Thickness]
+ */
+export function getElementDimensionMeta(typeStr?: string) {
+  const type = String(typeStr || "COLUMN").toUpperCase();
+  if (type.includes("COLUMN")) {
+    return {
+      type: "COLUMN",
+      dim1Label: "Breadth (L)",
+      dim2Label: "Width (W)",
+      dim3Label: "Storey Height (H)",
+      dim3Key: "height" as const,
+      hasDepth: false,
+      hasHeight: true,
+      hasThickness: false,
+      summary: (l: number, w: number, h: number, d: number, t: number) =>
+        `${(w * 1000).toFixed(0)}×${(l * 1000).toFixed(0)}mm · H: ${(h || d || 3.2).toFixed(2)}m`,
+    };
+  }
+  if (type.includes("BEAM")) {
+    return {
+      type: "BEAM",
+      dim1Label: "Span (L)",
+      dim2Label: "Width (b)",
+      dim3Label: "Section Depth (D)",
+      dim3Key: "depth" as const,
+      hasDepth: true,
+      hasHeight: false,
+      hasThickness: false,
+      summary: (l: number, w: number, h: number, d: number, t: number) =>
+        `Span: ${l.toFixed(2)}m · ${(w * 1000).toFixed(0)}×${((d || h || 0.6) * 1000).toFixed(0)}mm`,
+    };
+  }
+  if (type.includes("WALL")) {
+    return {
+      type: "WALL",
+      dim1Label: "Length (L)",
+      dim2Label: "Thickness (t)",
+      dim3Label: "Wall Height (H)",
+      dim3Key: "height" as const,
+      hasDepth: false,
+      hasHeight: true,
+      hasThickness: true,
+      summary: (l: number, w: number, h: number, d: number, t: number) =>
+        `L: ${l.toFixed(2)}m · T: ${((t || 0.25) * 1000).toFixed(0)}mm · H: ${(h || d || 3.0).toFixed(2)}m`,
+    };
+  }
+  if (type.includes("SLAB")) {
+    return {
+      type: "SLAB",
+      dim1Label: "Length (L)",
+      dim2Label: "Width (W)",
+      dim3Label: "Thickness (t)",
+      dim3Key: "thickness" as const,
+      hasDepth: false,
+      hasHeight: false,
+      hasThickness: true,
+      summary: (l: number, w: number, h: number, d: number, t: number) =>
+        `${l.toFixed(2)}×${w.toFixed(2)}m · T: ${((t || 0.175) * 1000).toFixed(0)}mm`,
+    };
+  }
+  return {
+    type: "OTHER",
+    dim1Label: "Length (L)",
+    dim2Label: "Width (W)",
+    dim3Label: "Height/Depth",
+    dim3Key: "height" as const,
+    hasDepth: true,
+    hasHeight: true,
+    hasThickness: true,
+    summary: (l: number, w: number, h: number, d: number, t: number) =>
+      `${l.toFixed(2)}×${w.toFixed(2)}m · ${(h || d || t || 1.0).toFixed(2)}m`,
+  };
+}
+
+/**
  * Derives the in-situ concrete volume (m³) for an element from its geometry or saved volume.
  */
 export function getOrCalculateVolume(el: Partial<StructuralElement>): number {
@@ -301,15 +380,15 @@ export function getOrCalculateVolume(el: Partial<StructuralElement>): number {
   let vol = 0;
 
   if (type.includes("COLUMN")) {
+    const effH = H || D || 3.2;
     if (el.columnShape === "circular" || Dia > 0) {
-      const effH = H || 3.2;
       const r = (Dia || 0.6) / 2;
       vol = Math.PI * r * r * effH;
     } else {
-      const effH = H || 3.2;
       vol = (L || 0.6) * (W || 0.6) * effH;
     }
   } else if (type.includes("BEAM")) {
+    const effD = D || H || 0.6;
     if (el.beamShape === "curved" || R > 0) {
       const geom = calculateCurvedGeometry({
         radius: R || 5.0,
@@ -318,9 +397,9 @@ export function getOrCalculateVolume(el: Partial<StructuralElement>): number {
         arcAngle: angle || 45,
         inputMode: el.curvedInputMode || (angle > 0 ? "radius_angle" : "radius_rise"),
       });
-      vol = geom.arcLength * (W || 0.3) * (D || 0.6);
+      vol = geom.arcLength * (W || 0.3) * effD;
     } else {
-      vol = (L || 6.0) * (W || 0.3) * (D || 0.6);
+      vol = (L || 6.0) * (W || 0.3) * effD;
     }
   } else if (type.includes("SLAB")) {
     const area = getOrCalculateElementArea(el);
@@ -504,3 +583,276 @@ export function getOrCalculateFormworkArea(el: Partial<StructuralElement>): numb
 
   return parseFloat(area.toFixed(2));
 }
+
+export interface CalculatedElevations {
+  elevation: number;
+  topElevation: number;
+  bottomElevation: number;
+  gridZ: number;
+  elevationOffset: number;
+  base: number;
+  top: number;
+  bottom: number;
+}
+
+/**
+ * Calculates correct structural element elevations based on parent level datum
+ * and individual element height/depth and elevationOffset.
+ * 
+ * If level datum is e.g. +7.40m and element has elevationOffset +0.10m,
+ * base elevation = 7.50m.
+ * For columns/walls/stairs: base = baseWithOffset, top = base + height (default 3.2m).
+ * For beams: top = baseWithOffset, bottom = top - depth (default 0.6m).
+ * For slabs: top = baseWithOffset, bottom = top - thickness (default 0.175m).
+ * For footings: top = baseWithOffset, bottom = top - depth (default 1.0m).
+ */
+/**
+ * Calculates absolute elevations (base, top, bottom) for a structural element.
+ * For columns/walls: bottom = baseWithOffset, top = bottom + height.
+ * For beams: top = baseWithOffset, bottom = top - depth (default 0.6m).
+ * For slabs: top = baseWithOffset, bottom = top - thickness.
+ * For footings: top = baseWithOffset, bottom = top - depth (default 1.0m).
+ */
+export function calculateElementElevations(
+  element: Partial<StructuralElement>,
+  levelElevation?: number | null
+): CalculatedElevations {
+  const offset = normalizeDimension(element.elevationOffset) || 0;
+  const rawLvlElev =
+    levelElevation !== undefined && levelElevation !== null && levelElevation !== 0
+      ? normalizeDimension(levelElevation)
+      : normalizeDimension(element.elevation) || 0;
+  const levelDatum = rawLvlElev;
+  const baseWithOffset = levelDatum + offset;
+
+  const type = String(element.elementType || (element as any).type || "").toUpperCase();
+  const height = normalizeDimension(element.height) || 3.2;
+  const depth = normalizeDimension(element.depth) || 0.6;
+  const thickness = normalizeDimension(element.thickness) || 0.175;
+
+  let base = baseWithOffset;
+  let top = baseWithOffset + height;
+  let bottom = baseWithOffset;
+
+  if (type.includes("COLUMN") || type.includes("WALL") || type.includes("STAIR")) {
+    base = baseWithOffset;
+    bottom = baseWithOffset;
+    top = baseWithOffset + height;
+  } else if (type.includes("BEAM")) {
+    top = baseWithOffset;
+    bottom = baseWithOffset - depth;
+    base = baseWithOffset;
+  } else if (type.includes("SLAB")) {
+    top = baseWithOffset;
+    bottom = baseWithOffset - thickness;
+    base = baseWithOffset;
+  } else if (type.includes("FOOTING") || type.includes("PILE")) {
+    top = baseWithOffset;
+    bottom = baseWithOffset - depth;
+    base = baseWithOffset;
+  } else {
+    base = baseWithOffset;
+    top = element.height ? baseWithOffset + Number(element.height) : baseWithOffset + 3.2;
+    bottom = element.depth ? baseWithOffset - Number(element.depth) : baseWithOffset;
+  }
+
+  // If explicit topElevation or bottomElevation exist on the element, prioritize them
+  if (element.bottomElevation !== undefined && element.bottomElevation !== null) {
+    bottom = normalizeDimension(element.bottomElevation);
+  }
+  if (element.topElevation !== undefined && element.topElevation !== null) {
+    top = normalizeDimension(element.topElevation);
+  }
+
+  return {
+    elevation: parseFloat(base.toFixed(3)),
+    topElevation: parseFloat(top.toFixed(3)),
+    bottomElevation: parseFloat(bottom.toFixed(3)),
+    base: parseFloat(base.toFixed(3)),
+    top: parseFloat(top.toFixed(3)),
+    bottom: parseFloat(bottom.toFixed(3)),
+    gridZ: parseFloat(base.toFixed(3)),
+    elevationOffset: offset,
+  };
+}
+
+export interface Column2DDimensions {
+  widthPx: number;
+  heightPx: number;
+  radiusPx: number;
+  isCircular: boolean;
+  maxExtentPx: number;
+  dimensionLabel: string;
+  isVertical: boolean;
+  widthM: number;
+  heightM: number;
+}
+
+/**
+ * Derives accurate 2D CAD dimensions and orientation for a column.
+ * - Respects actual physical size: e.g. 450mm x 450mm vs 300mm x 300mm vs 600mm x 300mm
+ * - Respects column orientation (HORIZONTAL / 0° vs VERTICAL / 90°)
+ */
+export function getColumn2DDimensions(
+  element: Partial<StructuralElement>,
+  scaleFactor: number = 80
+): Column2DDimensions {
+  const isCircular =
+    element.columnShape === "circular" ||
+    element.elementType === "COLUMN_CIRCULAR";
+
+  const rawDimL = normalizeDimension(element.length) || normalizeDimension(element.dimensions?.length) || 0.45;
+  const rawDimW = normalizeDimension(element.width) || normalizeDimension(element.dimensions?.width) || 0.45;
+  const rawDia = normalizeDimension(element.diameter) || rawDimW || 0.45;
+
+  const orientation = String(element.columnOrientation || element.cantileverDirection || "HORIZONTAL").toUpperCase();
+  const isVertical =
+    orientation === "VERTICAL" ||
+    orientation === "TOP" ||
+    orientation === "BOTTOM" ||
+    orientation === "NORTH" ||
+    orientation === "SOUTH" ||
+    orientation === "90";
+
+  let colWidthM = rawDimL;
+  let colHeightM = rawDimW;
+
+  if (isVertical) {
+    colWidthM = Math.min(rawDimL, rawDimW);
+    colHeightM = Math.max(rawDimL, rawDimW);
+  } else {
+    colWidthM = Math.max(rawDimL, rawDimW);
+    colHeightM = Math.min(rawDimL, rawDimW);
+  }
+
+  // Convert to pixels (1m = scaleFactor px, default 80px)
+  const widthPx = Math.max(16, colWidthM * scaleFactor);
+  const heightPx = Math.max(16, colHeightM * scaleFactor);
+  const radiusPx = Math.max(8, (rawDia / 2) * scaleFactor);
+  const maxExtentPx = isCircular ? radiusPx * 2 : Math.max(widthPx, heightPx);
+
+  const dimensionLabel = isCircular
+    ? `${Math.round(rawDia * 1000)}mm Ø`
+    : `${Math.round(colWidthM * 1000)}×${Math.round(colHeightM * 1000)}mm`;
+
+  return {
+    widthPx,
+    heightPx,
+    radiusPx,
+    isCircular,
+    maxExtentPx,
+    dimensionLabel,
+    isVertical,
+    widthM: isCircular ? rawDia : colWidthM,
+    heightM: isCircular ? rawDia : colHeightM,
+  };
+}
+
+/**
+ * Derives initial storey height for a column based on project floor elevations.
+ * Finds the height difference between the current level and the level before it (or next level).
+ */
+export function deriveStoreyHeightForLevel(
+  targetLevelId?: string | null,
+  levels: Array<{ id: string; elevation?: number | null; order?: number | null; name?: string }> = []
+): number {
+  if (!targetLevelId || !levels || levels.length === 0) return 3.2;
+
+  const sorted = [...levels].sort((a, b) => {
+    if (a.order !== undefined && b.order !== undefined && a.order !== null && b.order !== null && a.order !== b.order) {
+      return (a.order || 0) - (b.order || 0);
+    }
+    return (Number(a.elevation) || 0) - (Number(b.elevation) || 0);
+  });
+
+  const curIdx = sorted.findIndex((l) => l.id === targetLevelId);
+  if (curIdx === -1) return 3.2;
+
+  const curElev = Number(sorted[curIdx].elevation) || 0;
+
+  // 1. Elevation of current level deducted from elevation of level before (as requested)
+  if (curIdx > 0) {
+    const prevElev = Number(sorted[curIdx - 1].elevation) || 0;
+    const diff = Math.abs(curElev - prevElev);
+    if (diff > 0.4) return parseFloat(diff.toFixed(3));
+  }
+
+  // 2. If it's the lowest level (no level before), use elevation of next level deducted from current level
+  if (curIdx < sorted.length - 1) {
+    const nextElev = Number(sorted[curIdx + 1].elevation) || 0;
+    const diff = Math.abs(nextElev - curElev);
+    if (diff > 0.4) return parseFloat(diff.toFixed(3));
+  }
+
+  return 3.2;
+}
+
+export interface Beam2DDimensions {
+  beamWidthM: number;
+  beamDepthM: number;
+  widthPx: number;
+  dimensionLabel: string;
+}
+
+/**
+ * Derives accurate 2D CAD dimensions for a beam.
+ * Converts physical width (web thickness) to canvas pixels so 225mm, 300mm, 450mm beams render visibly distinct to scale.
+ */
+export function getBeam2DDimensions(
+  element: Partial<StructuralElement>,
+  scaleFactor: number = 80
+): Beam2DDimensions {
+  const rawDimW =
+    normalizeDimension(element.width) ||
+    normalizeDimension(element.dimensions?.width) ||
+    0.225;
+  const rawDimD =
+    normalizeDimension(element.depth) ||
+    normalizeDimension((element.dimensions as any)?.depth) ||
+    0.6;
+
+  // Beam plan thickness in pixels (minimum 8px for visibility on canvas)
+  const widthPx = Math.max(8, rawDimW * scaleFactor);
+  const dimensionLabel = `${Math.round(rawDimW * 1000)}×${Math.round(rawDimD * 1000)}mm`;
+
+  return {
+    beamWidthM: rawDimW,
+    beamDepthM: rawDimD,
+    widthPx,
+    dimensionLabel,
+  };
+}
+
+export interface BeamElevationDatums {
+  levelElevation: number;
+  topOfBeam: number;
+  soffitElevation: number;
+  elevationOffset: number;
+  depth: number;
+}
+
+/**
+ * Derives Top of Beam (TOB) and Bottom of Beam / Soffit elevations from level datums.
+ */
+export function deriveBeamElevationDatums(
+  targetLevelId?: string | null,
+  levels: Array<{ id: string; elevation?: number | null; name?: string }> = [],
+  elevationOffset: number = 0,
+  beamDepth: number = 0.6
+): BeamElevationDatums {
+  const lvl = levels.find((l) => l.id === targetLevelId);
+  const levelElev = Number(lvl?.elevation) || 0;
+  const off = Number(elevationOffset) || 0;
+  const d = Math.max(0.1, Number(beamDepth) || 0.6);
+  const tob = parseFloat((levelElev + off).toFixed(3));
+  const soffit = parseFloat((tob - d).toFixed(3));
+
+  return {
+    levelElevation: levelElev,
+    topOfBeam: tob,
+    soffitElevation: soffit,
+    elevationOffset: off,
+    depth: d,
+  };
+}
+

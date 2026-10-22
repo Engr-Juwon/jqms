@@ -49,6 +49,14 @@ import {
   resolveElementGridCoords,
   GridSystemGeometry,
 } from "@/lib/gridUtils";
+import {
+  normalizeDimension,
+  deriveStoreyHeightForLevel,
+  getColumn2DDimensions,
+  getBeam2DDimensions,
+  deriveBeamElevationDatums,
+  calculateElementElevations,
+} from "@/lib/elementCalculations";
 
 export interface BIMViewer3DProps {
   elements: StructuralElement[];
@@ -84,6 +92,17 @@ const STATUS_HEX: Record<ElementStatus, string> = {
   APPROVED: "#16a34a",
   REJECTED: "#dc2626",
 };
+
+/**
+ * Normalizes elevation strings/numbers (converts mm to meters if >= 50, parses +7400 or +7.4).
+ */
+function normalizeElevation(val: any): number {
+  if (val === undefined || val === null || val === "") return 0;
+  const num = typeof val === "number" ? val : parseFloat(String(val).replace("+", ""));
+  if (isNaN(num)) return 0;
+  if (Math.abs(num) >= 50) return parseFloat((num / 1000).toFixed(3));
+  return parseFloat(num.toFixed(3));
+}
 
 // Create a 2D canvas texture with text (for grid bubbles and elevation markers)
 function createTextSprite(
@@ -430,22 +449,22 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
 
   // Level Elevation & Story Height Lookup Table
   const { sortedLevels, levelElevationMap, levelHeightMap } = useMemo(() => {
-    const sorted = [...levels].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const sorted = [...levels].sort((a, b) => {
+      if (a.order !== undefined && b.order !== undefined && a.order !== null && b.order !== null && a.order !== b.order) {
+        return (a.order || 0) - (b.order || 0);
+      }
+      return normalizeElevation(a.elevation) - normalizeElevation(b.elevation);
+    });
     const elevMap = new Map<string, number>();
     const heightMap = new Map<string, number>();
 
-    sorted.forEach((l, idx) => {
-      const curElev = l.elevation || 0;
+    sorted.forEach((l) => {
+      const curElev = normalizeElevation(l.elevation);
       elevMap.set(l.id, curElev);
       elevMap.set(l.name.toLowerCase().trim(), curElev);
 
-      const nextLvl = sorted[idx + 1];
-      if (nextLvl) {
-        const diff = (nextLvl.elevation || 0) - curElev;
-        heightMap.set(l.id, diff > 0.5 ? diff : 3.2);
-      } else {
-        heightMap.set(l.id, 3.2);
-      }
+      const derivedH = deriveStoreyHeightForLevel(l.id, sorted);
+      heightMap.set(l.id, derivedH);
     });
 
     return {
@@ -1006,7 +1025,7 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
     const planeD = gridMaxZ - gridMinZ + 8;
 
     sortedLevels.forEach((lvl) => {
-      const rawElev = lvl.elevation || 0;
+      const rawElev = normalizeElevation(lvl.elevation);
       const elev = rawElev * explodeFactor;
       const isLevelActive =
         !activeLevelId || activeLevelId === "ALL" || activeLevelId === lvl.id;
@@ -1096,17 +1115,23 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         activeLevelId === "ALL" ||
         activeLevelId === el.levelId;
 
-      // Determine Floor Level Elevation & Story Height
-      let rawElev = 0;
+      // Determine Floor Level Elevation Datum
+      const elevOffset = normalizeElevation(el.elevationOffset);
+      let levelDatum = 0;
       if (el.levelId && levelElevationMap.has(el.levelId)) {
-        rawElev = levelElevationMap.get(el.levelId)!;
+        levelDatum = levelElevationMap.get(el.levelId)!;
       } else if (el.gridY !== undefined) {
-        rawElev = el.gridY;
-      } else {
-        rawElev = 0;
+        levelDatum = normalizeElevation(el.gridY);
+      } else if (el.elevation !== undefined && el.elevation !== null && el.elevation !== 0) {
+        levelDatum = normalizeElevation(el.elevation);
       }
-      const floorElevation = rawElev * explodeFactor;
-      const storyHeight = (el.levelId && levelHeightMap.get(el.levelId)) || 3.2;
+
+      // Calculate exact element elevations (base, top, bottom, offset)
+      const elevCalc = calculateElementElevations(el, levelDatum);
+      const floorElevation = elevCalc.elevation * explodeFactor;
+      const storyHeight =
+        (el.levelId && levelHeightMap.get(el.levelId)) ||
+        deriveStoreyHeightForLevel(el.levelId, sortedLevels);
 
       // Resolve Spatial Grid Coordinates via Bidirectional Resolver
       const coords = resolveElementGridCoords(
@@ -1122,24 +1147,31 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         el.gridZ,
       );
 
-      // Parse Physical Dimensions
-      const rawL = el.length || el.dimensions?.length;
-      const rawW = el.width || el.dimensions?.width;
-      const rawH = el.height || el.dimensions?.height;
-      const rawT = el.thickness || (el.dimensions as any)?.thickness;
-      const rawD = el.diameter || (el.dimensions as any)?.diameter;
-      const rawDepth = el.depth || (el.dimensions as any)?.depth;
-
-      const lengthM = rawL ? (rawL > 50 ? rawL / 1000 : rawL) : 0;
-      const widthM = rawW ? (rawW > 50 ? rawW / 1000 : rawW) : 0.35;
-      const heightM = rawH ? (rawH > 50 ? rawH / 1000 : rawH) : storyHeight;
-      const thicknessM = rawT ? (rawT > 50 ? rawT / 1000 : rawT) : 0.2;
-      const depthM = rawDepth
-        ? rawDepth > 50
-          ? rawDepth / 1000
-          : rawDepth
-        : 0.6;
-      const diameterM = rawD ? (rawD > 50 ? rawD / 1000 : rawD) : 0.5;
+      // Parse Physical Dimensions (auto-normalizing m vs mm)
+      const lengthM =
+        normalizeDimension(el.length) ||
+        normalizeDimension(el.dimensions?.length) ||
+        0;
+      const widthM =
+        normalizeDimension(el.width) ||
+        normalizeDimension(el.dimensions?.width) ||
+        0.35;
+      const heightM =
+        normalizeDimension(el.height) ||
+        normalizeDimension(el.dimensions?.height) ||
+        storyHeight;
+      const thicknessM =
+        normalizeDimension(el.thickness) ||
+        normalizeDimension((el.dimensions as any)?.thickness) ||
+        0.2;
+      const depthM =
+        normalizeDimension(el.depth) ||
+        normalizeDimension((el.dimensions as any)?.depth) ||
+        0.6;
+      const diameterM =
+        normalizeDimension(el.diameter) ||
+        normalizeDimension((el.dimensions as any)?.diameter) ||
+        0.45;
 
       // 3D Geometry & Spatial Placement Calculation
       let geo: THREE.BufferGeometry;
@@ -1155,35 +1187,139 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
       ) {
         posX = coords.x1 - centerOffsetX;
         posZ = coords.y1 - centerOffsetZ;
-        posY = floorElevation + heightM / 2;
 
-        if (
-          el.columnShape === "circular" ||
-          type.includes("CIRCULAR") ||
-          el.diameter
-        ) {
-          const radius = diameterM / 2;
-          geo = new THREE.CylinderGeometry(radius, radius, heightM, 24);
+        // Actual physical height: if explicit height given, use it; otherwise height between top and bottom elevation datums
+        const colH =
+          normalizeDimension(el.height) ||
+          Math.max(0.2, elevCalc.top - elevCalc.bottom) ||
+          storyHeight;
+        // The column's base sits directly on its datum elevation
+        posY = elevCalc.bottom * explodeFactor + colH / 2;
+
+        const colShape = (el.columnShape || "").toLowerCase();
+        const elTypeStr = (el.elementType || "").toUpperCase();
+        const isExplicitCircular =
+          elTypeStr.includes("CIRCULAR") ||
+          elTypeStr === "COLUMN_CIRCULAR" ||
+          elTypeStr === "COLUMN (CIRCULAR)";
+
+        // A column is circular ONLY if explicitly configured as circular shape or circular type.
+        // Standard columns (rectangular) or default shapes NEVER render as circular, even if a dummy diameter exists.
+        const isCircular =
+          colShape === "circular" ||
+          isExplicitCircular ||
+          (colShape !== "rectangular" && !el.length && !el.width && Number(el.diameter) > 0);
+
+        if (isCircular) {
+          const dia = diameterM || widthM || 0.45;
+          const radius = dia / 2;
+          geo = new THREE.CylinderGeometry(radius, radius, colH, 32);
         } else {
-          const colX = widthM || 0.35;
-          const colZ = lengthM || colX;
-          geo = new THREE.BoxGeometry(colX, heightM, colZ);
+          const dimL = lengthM || widthM || 0.45;
+          const dimW = widthM || lengthM || 0.45;
+
+          const orientation = String(
+            el.columnOrientation || el.cantileverDirection || "HORIZONTAL",
+          ).toUpperCase();
+          const isVertical =
+            orientation === "VERTICAL" ||
+            orientation === "TOP" ||
+            orientation === "BOTTOM" ||
+            orientation === "NORTH" ||
+            orientation === "SOUTH" ||
+            orientation === "90";
+
+          let colX = dimL;
+          let colZ = dimW;
+
+          if (isVertical) {
+            // Major axis North-South (Z), Minor axis East-West (X)
+            colX = Math.min(dimL, dimW);
+            colZ = Math.max(dimL, dimW);
+          } else {
+            // Major axis East-West (X), Minor axis North-South (Z)
+            colX = Math.max(dimL, dimW);
+            colZ = Math.min(dimL, dimW);
+          }
+
+          geo = new THREE.BoxGeometry(colX, colH, colZ);
+        }
+
+        // Slanted / Inclined column handling
+        if (el.isInclined || el.verticality === "inclined") {
+          const angleDeg = Number(el.inclinationAngle) || 10;
+          const angleRad = (angleDeg * Math.PI) / 180;
+          geo.rotateZ(angleRad);
         }
       } else if (type.includes("BEAM")) {
-        if (coords.isSpan) {
-          posX = coords.midX - centerOffsetX;
-          posZ = coords.midY - centerOffsetZ;
-          const spanLen =
-            coords.spanLength > 0.05 ? coords.spanLength : lengthM || 5.0;
-          rotationY = -coords.angleRad;
-          geo = new THREE.BoxGeometry(spanLen, depthM, widthM);
+        const beamW =
+          normalizeDimension(el.width) ||
+          normalizeDimension(el.dimensions?.width) ||
+          0.225;
+        const beamD =
+          normalizeDimension(el.depth) ||
+          normalizeDimension((el.dimensions as any)?.depth) ||
+          0.6;
+        const isCurved =
+          el.beamShape === "curved" || (Number(el.radius) > 0);
+
+        if (isCurved) {
+          // Curved Beam swept along arc with real web width and depth
+          const R = normalizeDimension(el.radius) || 3.0;
+          const angleDeg = Number(el.arcAngle) || 90;
+          const angleRad = (angleDeg * Math.PI) / 180;
+          const halfAngle = angleRad / 2;
+
+          const innerR = Math.max(0.1, R - beamW / 2);
+          const outerR = R + beamW / 2;
+
+          const shape = new THREE.Shape();
+          shape.absarc(0, 0, outerR, -halfAngle, halfAngle, false);
+          shape.absarc(0, 0, innerR, halfAngle, -halfAngle, true);
+          shape.closePath();
+
+          const extrudeSettings = {
+            depth: beamD,
+            bevelEnabled: false,
+            curveSegments: 32,
+          };
+          geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+          // Rotate so extruded depth beamD is vertical along Y
+          geo.rotateX(Math.PI / 2);
+          geo.center();
+
+          if (coords.isSpan) {
+            posX = coords.midX - centerOffsetX;
+            posZ = coords.midY - centerOffsetZ;
+            rotationY = -coords.angleRad;
+          } else {
+            posX = coords.x1 - centerOffsetX;
+            posZ = coords.y1 - centerOffsetZ;
+          }
         } else {
-          posX = coords.x1 - centerOffsetX;
-          posZ = coords.y1 - centerOffsetZ;
-          const spanLen = lengthM || 4.5;
-          geo = new THREE.BoxGeometry(spanLen, depthM, widthM);
+          // Straight Beam with physical web width (beamW) and depth (beamD)
+          let spanLen = 4.5;
+          if (coords.isSpan) {
+            posX = coords.midX - centerOffsetX;
+            posZ = coords.midY - centerOffsetZ;
+            spanLen =
+              coords.spanLength > 0.05
+                ? coords.spanLength
+                : lengthM || 5.0;
+            rotationY = -coords.angleRad;
+          } else {
+            posX = coords.x1 - centerOffsetX;
+            posZ = coords.y1 - centerOffsetZ;
+            spanLen = lengthM || 4.5;
+          }
+
+          // BoxGeometry: width (along span X), height (depth Y), depth (web width Z)
+          geo = new THREE.BoxGeometry(spanLen, beamD, beamW);
         }
-        posY = floorElevation + storyHeight - depthM / 2;
+
+        // Top of Beam (TOB) is flush with top elevation (elevCalc.top * explodeFactor).
+        // Center of beam is positioned at TOB - beamD / 2 so soffit hangs down accurately.
+        posY = elevCalc.top * explodeFactor - beamD / 2;
       } else if (type.includes("SLAB")) {
         const slabW = coords.isArea
           ? Math.max(1.0, coords.sizeX)
@@ -1191,7 +1327,8 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         const slabD = coords.isArea
           ? Math.max(1.0, coords.sizeY)
           : (el.cantileverDepth || widthM || 6.0);
-        posY = floorElevation + storyHeight - thicknessM / 2;
+        // Top of slab sits flush at elevCalc.top * explodeFactor
+        posY = elevCalc.top * explodeFactor - thicknessM / 2;
 
         const shape = el.slabShape || "rectangular";
         const dir = ((el.cantileverDirection || 'TOP') as string).toUpperCase();
@@ -1385,7 +1522,7 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
           const wallLen = lengthM || 4.0;
           geo = new THREE.BoxGeometry(wallLen, heightM, thicknessM);
         }
-        posY = floorElevation + heightM / 2;
+        posY = elevCalc.bottom * explodeFactor + heightM / 2;
       } else if (
         type.includes("FOOTING") ||
         type.includes("PAD") ||
@@ -1397,7 +1534,7 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         const footW = widthM || 1.8;
         const footL = lengthM || 1.8;
         const footThick = thicknessM || 0.6;
-        posY = floorElevation + footThick / 2;
+        posY = elevCalc.top * explodeFactor - footThick / 2;
         geo = new THREE.BoxGeometry(footL, footThick, footW);
       } else if (type.includes("STAIR")) {
         const stairW = el.flightWidth || (widthM > 0.4 ? widthM : 1.2);
@@ -1407,15 +1544,8 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
             ? el.landingThickness
             : Number(el.landingThickness)) || 0.2;
 
-        const baseElev =
-          (el.elevation !== undefined || el.bottomElevation !== undefined
-            ? (el.elevation ?? el.bottomElevation ?? 0)
-            : rawElev) * explodeFactor + ((el.elevationOffset || 0) * explodeFactor);
-
-        const topElev =
-          el.topElevation !== undefined
-            ? el.topElevation * explodeFactor + ((el.elevationOffset || 0) * explodeFactor)
-            : baseElev + storyHeight * explodeFactor;
+        const baseElev = elevCalc.bottom * explodeFactor;
+        const topElev = elevCalc.top * explodeFactor;
 
         const stairRise = Math.max(0.6, topElev - baseElev);
 
@@ -2042,6 +2172,68 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
               </span>
             </div>
           </div>
+
+          {/* Physical Dimensions & Elevation Datum Callout */}
+          {(() => {
+            const el = singleSelectedElement;
+            const t = (el.elementType || "").toUpperCase();
+            if (t.includes("COLUMN")) {
+              const geom = getColumn2DDimensions(el);
+              const lvlElev =
+                el.levelId && levelElevationMap.has(el.levelId)
+                  ? levelElevationMap.get(el.levelId)!
+                  : 0;
+              const elevs = calculateElementElevations(el, lvlElev);
+              const colH =
+                normalizeDimension(el.height) ||
+                Math.max(0.2, elevs.top - elevs.bottom) ||
+                3.2;
+              return (
+                <div className="bg-slate-950/90 p-2 rounded-xl border border-cyan-500/30 flex items-center justify-between text-[11px] font-mono">
+                  <div>
+                    <span className="text-slate-400 text-[9px] block uppercase font-sans font-bold">
+                      3D Column Footprint
+                    </span>
+                    <strong className="text-cyan-300">{geom.dimensionLabel}</strong> &bull; H ={' '}
+                    {colH.toFixed(2)}m
+                  </div>
+                  <div className="text-right">
+                    <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-500/40 block mb-0.5">
+                      {geom.isVertical ? '↕ Vert (N-S)' : '↔ Horiz (E-W)'}
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Base: <strong className="text-white">+{elevs.bottom.toFixed(2)}m</strong>
+                    </span>
+                  </div>
+                </div>
+              );
+            } else if (t.includes("BEAM")) {
+              const geom = getBeam2DDimensions(el);
+              const elevs = deriveBeamElevationDatums(
+                el.levelId,
+                sortedLevels,
+                el.elevationOffset,
+                geom.beamDepthM,
+              );
+              return (
+                <div className="bg-slate-950/90 p-2 rounded-xl border border-amber-500/30 flex items-center justify-between text-[11px] font-mono">
+                  <div>
+                    <span className="text-slate-400 text-[9px] block uppercase font-sans font-bold">
+                      3D Beam Cross Section
+                    </span>
+                    <strong className="text-amber-300">{geom.dimensionLabel}</strong> &bull; D ={' '}
+                    {geom.beamDepthM.toFixed(2)}m
+                  </div>
+                  <div className="text-right text-[10px]">
+                    <span className="text-emerald-400">TOB: +{elevs.topOfBeam.toFixed(2)}m</span>
+                    <span className="text-slate-500 mx-1">|</span>
+                    <span className="text-amber-400">SOB: +{elevs.soffitElevation.toFixed(2)}m</span>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
 
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-1.5 pt-1">

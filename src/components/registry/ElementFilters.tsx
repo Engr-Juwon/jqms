@@ -8,6 +8,7 @@ import {
   Activity,
   Table as TableIcon,
   LayoutGrid,
+  FileSpreadsheet,
 } from "lucide-react";
 
 interface ElementFiltersProps {
@@ -26,8 +27,12 @@ interface ElementFiltersProps {
   elementTypes?: string[];
   selectAllChecked: boolean;
   onToggleSelectAll: () => void;
-  viewMode?: "TABLE" | "CARDS";
-  onViewModeChange?: (mode: "TABLE" | "CARDS") => void;
+  viewMode?: "TABLE" | "CARDS" | "SPREADSHEET";
+  onViewModeChange?: (mode: "TABLE" | "CARDS" | "SPREADSHEET") => void;
+  totalFilteredCount?: number;
+  totalSelectedCount?: number;
+  onSelectAllFiltered?: () => void;
+  onClearSelection?: () => void;
 }
 
 const CORE_ELEMENT_TYPES = [
@@ -70,6 +75,10 @@ export const ElementFilters: React.FC<ElementFiltersProps> = ({
   onToggleSelectAll,
   viewMode,
   onViewModeChange,
+  totalFilteredCount,
+  totalSelectedCount,
+  onSelectAllFiltered,
+  onClearSelection,
 }) => {
   // Build unified dynamic + core types list
   const typeOptions = React.useMemo(() => {
@@ -105,8 +114,8 @@ export const ElementFilters: React.FC<ElementFiltersProps> = ({
         </div>
 
         <div className="flex items-center gap-2 self-stretch md:self-auto justify-between md:justify-start">
-          {/* Select All on Page Checkbox */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl shrink-0">
+          {/* Select Options (Page vs All) */}
+          <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-xl shrink-0">
             <input
               type="checkbox"
               id="selectAllPage"
@@ -118,8 +127,31 @@ export const ElementFilters: React.FC<ElementFiltersProps> = ({
               htmlFor="selectAllPage"
               className="text-xs font-semibold text-slate-700 dark:text-slate-300 select-none cursor-pointer whitespace-nowrap"
             >
-              Select on Page
+              Select Page
             </label>
+            {onSelectAllFiltered && totalFilteredCount !== undefined && totalFilteredCount > 0 && (
+              <>
+                <span className="text-slate-300 dark:text-slate-700 text-xs">|</span>
+                <button
+                  type="button"
+                  onClick={onSelectAllFiltered}
+                  className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:underline whitespace-nowrap"
+                  title={`Select all ${totalFilteredCount} elements in this view`}
+                >
+                  All ({totalFilteredCount})
+                </button>
+              </>
+            )}
+            {totalSelectedCount !== undefined && totalSelectedCount > 0 && onClearSelection && (
+              <button
+                type="button"
+                onClick={onClearSelection}
+                className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 ml-1 font-bold"
+                title="Clear selection"
+              >
+                ✕
+              </button>
+            )}
           </div>
 
           {/* Table / Cards View Mode Toggle */}
@@ -150,6 +182,19 @@ export const ElementFilters: React.FC<ElementFiltersProps> = ({
               >
                 <LayoutGrid className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Cards</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onViewModeChange("SPREADSHEET")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  viewMode === "SPREADSHEET"
+                    ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+                title="Spreadsheet Quick-Edit View"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Quick Edit</span>
               </button>
             </div>
           )}

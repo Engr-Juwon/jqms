@@ -54,6 +54,10 @@ import {
   calculateCurvedGeometry,
   CurvedGeometryResult,
   normalizeDimension,
+  deriveStoreyHeightForLevel,
+  getColumn2DDimensions,
+  getBeam2DDimensions,
+  deriveBeamElevationDatums,
 } from '@/lib/elementCalculations';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { isQAQCUser, hasMinRole, canCreateRecords } from '@/lib/permissions';
@@ -185,6 +189,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 
   // Column specific
   const [columnShape, setColumnShape] = useState<'rectangular' | 'circular' | 'inclined'>('rectangular');
+  const [columnOrientation, setColumnOrientation] = useState<'HORIZONTAL' | 'VERTICAL'>('HORIZONTAL');
   const [isInclined, setIsInclined] = useState(false);
   const [inclinedCalcMode, setInclinedCalcMode] = useState<'offset' | 'angle'>('offset');
   const [horizontalOffset, setHorizontalOffset] = useState<number>(0.4);
@@ -342,6 +347,12 @@ export const ElementModal: React.FC<ElementModalProps> = ({
           ? 'circular'
           : 'rectangular');
       setColumnShape(colShape);
+      const rawColOrient = (editingElement.columnOrientation || editingElement.cantileverDirection || '').toUpperCase();
+      setColumnOrientation(
+        rawColOrient === 'VERTICAL' || rawColOrient === 'TOP' || rawColOrient === 'BOTTOM' || rawColOrient === 'NORTH' || rawColOrient === 'SOUTH' || rawColOrient === '90'
+          ? 'VERTICAL'
+          : 'HORIZONTAL'
+      );
       setIsInclined(!!editingElement.isInclined || editingElement.verticality === 'inclined');
       setInclinedCalcMode(editingElement.inclinedCalcMode || 'offset');
       setHorizontalOffset(editingElement.horizontalOffset ?? 0.4);
@@ -440,8 +451,9 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setElementName('');
       setElementType('COLUMN');
       setStatus('PENDING');
+      const initialLvlId = activeProject?.currentLevelId || (levels.length > 0 ? levels[0].id : '');
       if (levels.length > 0 && !levelId) {
-        setLevelId(activeProject?.currentLevelId || levels[0].id);
+        setLevelId(initialLvlId);
       }
       if (packages.length > 0 && !workPackageId) {
         setWorkPackageId(packages[0].id);
@@ -453,6 +465,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setCalculatedVolumeOverride('');
       setAchievedVolume(0);
       setColumnShape('rectangular');
+      setColumnOrientation('HORIZONTAL');
       setSlabShape('rectangular');
       setBeamShape('straight');
       setWallShape('straight');
@@ -468,7 +481,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setIsInclined(false);
       setLength(0.6);
       setWidth(0.6);
-      setHeight(3.2);
+      const initialStoreyHeight = deriveStoreyHeightForLevel(initialLvlId, levels);
+      setHeight(initialStoreyHeight);
       setDepth(0.6);
       setThickness(0.175);
       setDiameter(0.6);
@@ -482,6 +496,16 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   const selectedLevel = useMemo(() => {
     return levels.find((l) => l.id === levelId);
   }, [levels, levelId]);
+
+  // Auto-derived storey height between current level and previous floor datum
+  const derivedStoreyHeight = useMemo(() => {
+    return deriveStoreyHeightForLevel(levelId, levels);
+  }, [levelId, levels]);
+
+  // Auto-derived beam elevation datums (TOB & Soffit)
+  const beamElevDatums = useMemo(() => {
+    return deriveBeamElevationDatums(levelId, levels, elevationOffset, depth);
+  }, [levelId, levels, elevationOffset, depth]);
 
   // Auto Grid Span Resolution
   useEffect(() => {
@@ -935,7 +959,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       area: takeoff.elementArea,
 
       // Elevation Datum
-      elevation: calculatedElevations.baseElevation,
+      elevation: calculatedElevations.levelDatum,
       bottomElevation: calculatedElevations.baseElevation,
       topElevation: calculatedElevations.topElevation,
       elevationOffset: Number(elevationOffset) || 0,
@@ -946,7 +970,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       height: Number(height) || 0,
       depth: Number(depth) || 0,
       thickness: Number(thickness) || 0,
-      diameter: Number(diameter) || 0,
+      diameter: (elementType === 'COLUMN' && columnShape === 'circular') ? (Number(diameter) || 0) : undefined,
       dimensions: {
         length: Number(length) || 0,
         width: Number(width) || 0,
@@ -956,6 +980,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 
       // Column attributes
       columnShape: elementType === 'COLUMN' ? columnShape : undefined,
+      columnOrientation: elementType === 'COLUMN' ? columnOrientation : undefined,
       isInclined: elementType === 'COLUMN' ? isInclined : false,
       verticality: isInclined ? 'inclined' : 'straight',
       inclinedCalcMode: isInclined ? inclinedCalcMode : undefined,
@@ -999,7 +1024,9 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       cantileverDirection:
         elementType === 'SLAB' && (slabShape === 'curved_cantilever' || slabShape === 'trapezoidal_cantilever')
           ? cantileverDirection
-          : undefined,
+          : elementType === 'COLUMN'
+            ? (columnOrientation === 'VERTICAL' ? 'TOP' : 'LEFT')
+            : undefined,
       isFlipped:
         elementType === 'SLAB' && cantileverDirection === 'BOTTOM',
       isMirrored:
@@ -1190,8 +1217,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                     type="button"
                     onClick={() => {
                       setElementType(cfg.type);
-                      if (cfg.type === 'COLUMN' && length === 0.6 && width === 0.6) {
-                        setHeight(3.2);
+                      if (cfg.type === 'COLUMN' && !editingElement) {
+                        setHeight(derivedStoreyHeight);
                       } else if (cfg.type === 'BEAM') {
                         setLength(5.0);
                         setWidth(0.3);
@@ -1249,7 +1276,18 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               </label>
               <select
                 value={levelId}
-                onChange={(e) => setLevelId(e.target.value)}
+                onChange={(e) => {
+                  const newLvlId = e.target.value;
+                  setLevelId(newLvlId);
+                  const lvl = levels.find((l) => l.id === newLvlId);
+                  if (lvl?.workPackageId) {
+                    setWorkPackageId(lvl.workPackageId);
+                  }
+                  if (!editingElement && (elementType === 'COLUMN' || elementType === 'WALL')) {
+                    const autoHeight = deriveStoreyHeightForLevel(newLvlId, levels);
+                    setHeight(autoHeight);
+                  }
+                }}
                 className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-sm focus:outline-none focus:border-brand-500"
               >
                 {levels.length === 0 && <option value="">No Levels Defined</option>}
@@ -1428,50 +1466,302 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                 </div>
 
                 {columnShape === 'rectangular' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <SmartField
-                      label="Length (L / Width X)"
-                      unit="m"
-                      type="number"
-                      step="0.01"
-                      value={length}
-                      onChange={(v) => setLength(Number(v))}
-                    />
-                    <SmartField
-                      label="Width (W / Depth Y)"
-                      unit="m"
-                      type="number"
-                      step="0.01"
-                      value={width}
-                      onChange={(v) => setWidth(Number(v))}
-                    />
-                    <SmartField
-                      label="Clear Height (H)"
-                      unit="m"
-                      type="number"
-                      step="0.01"
-                      value={height}
-                      onChange={(v) => setHeight(Number(v))}
-                    />
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <SmartField
+                        label="Length (L / Width X)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={length}
+                        onChange={(v) => setLength(Number(v))}
+                      />
+                      <SmartField
+                        label="Width (W / Depth Y)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={width}
+                        onChange={(v) => setWidth(Number(v))}
+                      />
+                      <div>
+                        <SmartField
+                          label="Clear Height (H)"
+                          unit="m"
+                          type="number"
+                          step="0.01"
+                          value={height}
+                          onChange={(v) => setHeight(Number(v))}
+                        />
+                        {derivedStoreyHeight > 0 && (
+                          <div className="mt-1 flex items-center justify-between text-[10px]">
+                            <span className="text-slate-500 dark:text-slate-400">
+                              Storey Datum: <strong className="text-slate-700 dark:text-slate-300 font-mono">{derivedStoreyHeight.toFixed(2)}m</strong>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setHeight(derivedStoreyHeight);
+                                toast.success(`Height synchronized to storey datum: ${derivedStoreyHeight.toFixed(2)}m`);
+                              }}
+                              className="text-brand-600 dark:text-brand-400 hover:underline font-bold"
+                            >
+                              Sync Datum
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 2D Plan Orientation Controls */}
+                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                            2D Plan Orientation (Grid Alignment)
+                          </span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Dictates how the physical cross section aligns on the 2D CAD plan
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setColumnOrientation('HORIZONTAL')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                              columnOrientation === 'HORIZONTAL'
+                                ? 'bg-brand-500 text-white shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 border border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            <span>↔</span> Horizontal (East-West)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setColumnOrientation('VERTICAL')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                              columnOrientation === 'VERTICAL'
+                                ? 'bg-brand-500 text-white shadow-sm'
+                                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 border border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            <span>↕</span> Vertical (North-South)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const oldL = length;
+                              const oldW = width;
+                              setLength(oldW);
+                              setWidth(oldL);
+                              setColumnOrientation((prev) => (prev === 'HORIZONTAL' ? 'VERTICAL' : 'HORIZONTAL'));
+                              toast.success(`Swapped dimensions: ${Math.round(oldW * 1000)}mm × ${Math.round(oldL * 1000)}mm`);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition flex items-center gap-1"
+                            title="Rotate 90° (Swap Length and Width)"
+                          >
+                            <RotateCw className="w-3.5 h-3.5" />
+                            Rotate 90°
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Live Cross-Section Blueprint Preview */}
+                      {(() => {
+                        const geom = getColumn2DDimensions(
+                          {
+                            elementType: 'COLUMN',
+                            columnShape: 'rectangular',
+                            length,
+                            width,
+                            columnOrientation,
+                          },
+                          100,
+                        );
+                        const dimMmX = Math.round(geom.widthM * 1000);
+                        const dimMmY = Math.round(geom.heightM * 1000);
+                        const areaM2 = (length * width).toFixed(3);
+
+                        const maxDim = Math.max(geom.widthM, geom.heightM, 0.3);
+                        const svgScale = 100 / maxDim;
+                        const boxW = Math.max(24, Math.min(100, geom.widthM * svgScale));
+                        const boxH = Math.max(24, Math.min(76, geom.heightM * svgScale));
+
+                        return (
+                          <div className="bg-slate-900 rounded-lg p-3 text-white flex flex-col sm:flex-row items-center justify-between gap-4 border border-slate-800">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-400 font-bold border border-brand-500/30">
+                                  2D Plan Footprint
+                                </span>
+                                <span className="text-xs font-mono font-bold text-slate-200">
+                                  {dimMmX}mm (X) × {dimMmY}mm (Y)
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400">
+                                Section Area: <strong className="text-white font-mono">{areaM2} m²</strong> &bull; Major Axis: <span className="text-brand-300 font-semibold">{columnOrientation === 'HORIZONTAL' ? 'East-West (X)' : 'North-South (Y)'}</span>
+                              </p>
+                            </div>
+
+                            <div className="relative flex items-center justify-center p-2 bg-slate-950/80 rounded border border-slate-800/80 w-36 h-24 shrink-0">
+                              <svg width="120" height="80" viewBox="0 0 120 80" className="overflow-visible">
+                                <line x1="10" y1="40" x2="110" y2="40" stroke="#334155" strokeDasharray="2 2" strokeWidth="1" />
+                                <line x1="60" y1="5" x2="60" y2="75" stroke="#334155" strokeDasharray="2 2" strokeWidth="1" />
+                                <text x="114" y="43" fill="#64748b" fontSize="7" fontWeight="bold">E</text>
+                                <text x="60" y="4" fill="#64748b" fontSize="7" fontWeight="bold" textAnchor="middle">N</text>
+
+                                <rect
+                                  x={60 - boxW / 2}
+                                  y={40 - boxH / 2}
+                                  width={boxW}
+                                  height={boxH}
+                                  rx="2"
+                                  fill="#0284c7"
+                                  fillOpacity="0.35"
+                                  stroke="#38bdf8"
+                                  strokeWidth="2"
+                                />
+                                <line
+                                  x1={60 - boxW / 2}
+                                  y1={40 - boxH / 2}
+                                  x2={60 + boxW / 2}
+                                  y2={40 + boxH / 2}
+                                  stroke="#38bdf8"
+                                  strokeWidth="1"
+                                  strokeOpacity="0.6"
+                                />
+                                <line
+                                  x1={60 - boxW / 2}
+                                  y1={40 + boxH / 2}
+                                  x2={60 + boxW / 2}
+                                  y2={40 - boxH / 2}
+                                  stroke="#38bdf8"
+                                  strokeWidth="1"
+                                  strokeOpacity="0.6"
+                                />
+
+                                <text
+                                  x="60"
+                                  y={40 + boxH / 2 + 10}
+                                  fill="#94a3b8"
+                                  fontSize="7.5"
+                                  fontWeight="bold"
+                                  textAnchor="middle"
+                                  fontFamily="monospace"
+                                >
+                                  {dimMmX}
+                                </text>
+                                <text
+                                  x={60 - boxW / 2 - 4}
+                                  y="43"
+                                  fill="#94a3b8"
+                                  fontSize="7.5"
+                                  fontWeight="bold"
+                                  textAnchor="end"
+                                  fontFamily="monospace"
+                                >
+                                  {dimMmY}
+                                </text>
+                              </svg>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <SmartField
-                      label="Column Diameter (Ø)"
-                      unit="m"
-                      type="number"
-                      step="0.01"
-                      value={diameter}
-                      onChange={(v) => setDiameter(Number(v))}
-                    />
-                    <SmartField
-                      label="Clear Height (H)"
-                      unit="m"
-                      type="number"
-                      step="0.01"
-                      value={height}
-                      onChange={(v) => setHeight(Number(v))}
-                    />
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <SmartField
+                        label="Column Diameter (Ø)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={diameter}
+                        onChange={(v) => setDiameter(Number(v))}
+                      />
+                      <div>
+                        <SmartField
+                          label="Clear Height (H)"
+                          unit="m"
+                          type="number"
+                          step="0.01"
+                          value={height}
+                          onChange={(v) => setHeight(Number(v))}
+                        />
+                        {derivedStoreyHeight > 0 && (
+                          <div className="mt-1 flex items-center justify-between text-[10px]">
+                            <span className="text-slate-500 dark:text-slate-400">
+                              Storey Datum: <strong className="text-slate-700 dark:text-slate-300 font-mono">{derivedStoreyHeight.toFixed(2)}m</strong>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setHeight(derivedStoreyHeight);
+                                toast.success(`Height synchronized to storey datum: ${derivedStoreyHeight.toFixed(2)}m`);
+                              }}
+                              className="text-brand-600 dark:text-brand-400 hover:underline font-bold"
+                            >
+                              Sync Datum
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Circular Column Plan Footprint Preview */}
+                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                      {(() => {
+                        const diaMm = Math.round((diameter || 0.45) * 1000);
+                        const areaM2 = (Math.PI * Math.pow((diameter || 0.45) / 2, 2)).toFixed(3);
+                        return (
+                          <div className="bg-slate-900 rounded-lg p-3 text-white flex flex-col sm:flex-row items-center justify-between gap-4 border border-slate-800">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-400 font-bold border border-brand-500/30">
+                                  2D Plan Footprint
+                                </span>
+                                <span className="text-xs font-mono font-bold text-slate-200">
+                                  Ø {diaMm}mm Circular Column
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400">
+                                Section Area: <strong className="text-white font-mono">{areaM2} m²</strong> &bull; Perimeter: <strong className="text-white font-mono">{(Math.PI * (diameter || 0.45)).toFixed(2)} m</strong>
+                              </p>
+                            </div>
+
+                            <div className="relative flex items-center justify-center p-2 bg-slate-950/80 rounded border border-slate-800/80 w-36 h-24 shrink-0">
+                              <svg width="120" height="80" viewBox="0 0 120 80" className="overflow-visible">
+                                <line x1="10" y1="40" x2="110" y2="40" stroke="#334155" strokeDasharray="2 2" strokeWidth="1" />
+                                <line x1="60" y1="5" x2="60" y2="75" stroke="#334155" strokeDasharray="2 2" strokeWidth="1" />
+                                <circle
+                                  cx="60"
+                                  cy="40"
+                                  r="24"
+                                  fill="#0284c7"
+                                  fillOpacity="0.35"
+                                  stroke="#38bdf8"
+                                  strokeWidth="2"
+                                />
+                                <line x1="36" y1="40" x2="84" y2="40" stroke="#38bdf8" strokeWidth="1" strokeOpacity="0.6" />
+                                <line x1="60" y1="16" x2="60" y2="64" stroke="#38bdf8" strokeWidth="1" strokeOpacity="0.6" />
+                                <text
+                                  x="60"
+                                  y="74"
+                                  fill="#94a3b8"
+                                  fontSize="7.5"
+                                  fontWeight="bold"
+                                  textAnchor="middle"
+                                  fontFamily="monospace"
+                                >
+                                  Ø {diaMm}mm
+                                </text>
+                              </svg>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
                 )}
 
@@ -1590,14 +1880,26 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                       value={width}
                       onChange={(v) => setWidth(Number(v))}
                     />
-                    <SmartField
-                      label="Overall Depth (D)"
-                      unit="m"
-                      type="number"
-                      step="0.01"
-                      value={depth}
-                      onChange={(v) => setDepth(Number(v))}
-                    />
+                    <div>
+                      <SmartField
+                        label="Overall Depth (D)"
+                        unit="m"
+                        type="number"
+                        step="0.01"
+                        value={depth}
+                        onChange={(v) => setDepth(Number(v))}
+                      />
+                      {selectedLevel && (
+                        <div className="mt-1 flex items-center justify-between text-[10px]">
+                          <span className="text-slate-500 dark:text-slate-400">
+                            Soffit (SOB): <strong className="text-amber-600 dark:text-amber-400 font-mono">+{beamElevDatums.soffitElevation.toFixed(2)}m</strong>
+                          </span>
+                          <span className="text-slate-500 dark:text-slate-400">
+                            TOB: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">+{beamElevDatums.topOfBeam.toFixed(2)}m</strong>
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3 p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-amber-300 dark:border-amber-500/30 shadow-sm">
@@ -1626,14 +1928,26 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                         value={width}
                         onChange={(v) => setWidth(Number(v))}
                       />
-                      <SmartField
-                        label="Overall Depth (D)"
-                        unit="m"
-                        type="number"
-                        step="0.01"
-                        value={depth}
-                        onChange={(v) => setDepth(Number(v))}
-                      />
+                      <div>
+                        <SmartField
+                          label="Overall Depth (D)"
+                          unit="m"
+                          type="number"
+                          step="0.01"
+                          value={depth}
+                          onChange={(v) => setDepth(Number(v))}
+                        />
+                        {selectedLevel && (
+                          <div className="mt-1 flex items-center justify-between text-[10px]">
+                            <span className="text-slate-500 dark:text-slate-400">
+                              Soffit: <strong className="text-amber-600 dark:text-amber-400 font-mono">+{beamElevDatums.soffitElevation.toFixed(2)}m</strong>
+                            </span>
+                            <span className="text-slate-500 dark:text-slate-400">
+                              TOB: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">+{beamElevDatums.topOfBeam.toFixed(2)}m</strong>
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     {takeoff.curvedGeom && (
                       <div className="flex items-center gap-4 text-xs font-mono text-amber-600 dark:text-amber-400 pt-1">
@@ -1667,6 +1981,175 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                       />
                     </div>
                   )}
+                </div>
+
+                {/* 2D Cross-Section & Elevation Blueprint Preview for Beams */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                  {(() => {
+                    const bMm = Math.round((width || 0.225) * 1000);
+                    const dMm = Math.round((depth || 0.6) * 1000);
+                    const tSlabMm = deductSlab ? Math.round((supportedSlabThickness || 0.15) * 1000) : 0;
+                    const areaM2 = ((width || 0.225) * (depth || 0.6)).toFixed(3);
+
+                    const maxDim = Math.max(width || 0.225, depth || 0.6, 0.4);
+                    const svgScale = 75 / maxDim;
+                    const boxW = Math.max(20, Math.min(60, (width || 0.225) * svgScale));
+                    const boxH = Math.max(30, Math.min(70, (depth || 0.6) * svgScale));
+                    const slabH = deductSlab
+                      ? Math.max(6, Math.min(boxH * 0.4, (supportedSlabThickness || 0.15) * svgScale))
+                      : 0;
+                    const flangeW = 22;
+
+                    const centerX = 60;
+                    const topY = 12;
+
+                    return (
+                      <div className="bg-slate-900 rounded-lg p-3 text-white flex flex-col sm:flex-row items-center justify-between gap-4 border border-slate-800">
+                        <div className="space-y-1.5 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-400 font-bold border border-brand-500/30">
+                              2D Cross Section
+                            </span>
+                            <span className="text-xs font-mono font-bold text-slate-200">
+                              {bMm}mm (b) × {dMm}mm (D)
+                            </span>
+                            {deductSlab && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+                                Monolithic T-Rebate ({tSlabMm}mm)
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400">
+                            Section Area: <strong className="text-white font-mono">{areaM2} m²</strong> &bull; Top Datum (TOB):{' '}
+                            <strong className="text-emerald-300 font-mono">+{beamElevDatums.topOfBeam.toFixed(2)}m</strong> &bull;{' '}
+                            Soffit (SOB): <strong className="text-amber-300 font-mono">+{beamElevDatums.soffitElevation.toFixed(2)}m</strong>
+                          </p>
+                          <p className="text-[10px] text-slate-500">
+                            Plan Canvas Scale: Rendered with true physical width ({Math.round((width || 0.225) * 80)}px @ 80px/m)
+                          </p>
+                        </div>
+
+                        <div className="relative flex items-center justify-center p-2 bg-slate-950/80 rounded border border-slate-800/80 w-36 h-28 shrink-0">
+                          <svg width="120" height="96" viewBox="0 0 120 96" className="overflow-visible">
+                            {/* Datum lines */}
+                            <line x1="10" y1={topY} x2="110" y2={topY} stroke="#10b981" strokeDasharray="2 2" strokeWidth="1" />
+                            <text x="114" y={topY + 3} fill="#10b981" fontSize="6.5" fontWeight="bold">
+                              TOB
+                            </text>
+
+                            <line
+                              x1="10"
+                              y1={topY + boxH}
+                              x2="110"
+                              y2={topY + boxH}
+                              stroke="#f59e0b"
+                              strokeDasharray="2 2"
+                              strokeWidth="1"
+                            />
+                            <text x="114" y={topY + boxH + 3} fill="#f59e0b" fontSize="6.5" fontWeight="bold">
+                              SOB
+                            </text>
+
+                            {/* Centerline */}
+                            <line
+                              x1={centerX}
+                              y1={topY - 4}
+                              x2={centerX}
+                              y2={topY + boxH + 6}
+                              stroke="#38bdf8"
+                              strokeDasharray="3 2"
+                              strokeWidth="1"
+                              strokeOpacity="0.7"
+                            />
+
+                            {/* Monolithic Slab Wings */}
+                            {deductSlab && (
+                              <g opacity="0.45">
+                                <rect
+                                  x={centerX - boxW / 2 - flangeW}
+                                  y={topY}
+                                  width={flangeW}
+                                  height={slabH}
+                                  fill="#10b981"
+                                  stroke="#34d399"
+                                  strokeDasharray="2 2"
+                                  strokeWidth="1"
+                                />
+                                <rect
+                                  x={centerX + boxW / 2}
+                                  y={topY}
+                                  width={flangeW}
+                                  height={slabH}
+                                  fill="#10b981"
+                                  stroke="#34d399"
+                                  strokeDasharray="2 2"
+                                  strokeWidth="1"
+                                />
+                              </g>
+                            )}
+
+                            {/* Beam Web Box */}
+                            <rect
+                              x={centerX - boxW / 2}
+                              y={topY}
+                              width={boxW}
+                              height={boxH}
+                              rx="1.5"
+                              fill="#f59e0b"
+                              fillOpacity="0.28"
+                              stroke="#fbbf24"
+                              strokeWidth="1.8"
+                            />
+
+                            {/* Architectural Section Hatch */}
+                            <line
+                              x1={centerX - boxW / 2}
+                              y1={topY}
+                              x2={centerX + boxW / 2}
+                              y2={topY + boxH}
+                              stroke="#fbbf24"
+                              strokeWidth="1"
+                              strokeOpacity="0.5"
+                            />
+                            <line
+                              x1={centerX - boxW / 2}
+                              y1={topY + boxH}
+                              x2={centerX + boxW / 2}
+                              y2={topY}
+                              stroke="#fbbf24"
+                              strokeWidth="1"
+                              strokeOpacity="0.5"
+                            />
+
+                            {/* Width Callout at Bottom */}
+                            <text
+                              x={centerX}
+                              y={topY + boxH + 11}
+                              fill="#94a3b8"
+                              fontSize="7.5"
+                              fontWeight="bold"
+                              textAnchor="middle"
+                              fontFamily="monospace"
+                            >
+                              b={bMm}
+                            </text>
+                            {/* Depth Callout on Side */}
+                            <text
+                              x={centerX - boxW / 2 - (deductSlab ? flangeW + 4 : 4)}
+                              y={topY + boxH / 2 + 3}
+                              fill="#94a3b8"
+                              fontSize="7.5"
+                              fontWeight="bold"
+                              textAnchor="end"
+                              fontFamily="monospace"
+                            >
+                              D={dMm}
+                            </text>
+                          </svg>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}

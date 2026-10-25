@@ -1,10 +1,13 @@
 import type { Handler, HandlerEvent } from "@netlify/functions";
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import {
+  assertBodySize,
+  buildCorsHeaders,
+  checkRateLimit,
+  HttpSecurityError,
+  isOriginAllowed,
+  jsonResponse,
+  verifyFirebaseRequest,
+} from "./_security";
 
 interface AssistantRequest {
   prompt: string;
@@ -15,6 +18,8 @@ interface AssistantRequest {
     roleTitle?: string;
     userName?: string;
     currentModule?: string;
+    currentRoute?: string;
+    currentDocumentId?: string;
     currentDateTime?: string;
     currentDateFormatted?: string;
     currentTimeFormatted?: string;
@@ -22,86 +27,103 @@ interface AssistantRequest {
     userRole?: string;
     projectDataSummary?: string;
   };
-  taskType?: "chat" | "ncr_draft" | "weekly_summary" | "spec_lookup" | "photo_defect_analysis";
-  imageBase64?: string; // Optional image for defect analysis
+  taskType?:
+    | "chat"
+    | "ncr_draft"
+    | "weekly_summary"
+    | "spec_lookup"
+    | "photo_defect_analysis";
+  imageBase64?: string;
   history?: Array<{ role: "user" | "model"; text: string }>;
 }
 
+const MAX_BODY_BYTES = 6 * 1024 * 1024; // 6 MB max (prompt + optional compressed defect image)
+
 export const handler: Handler = async (event: HandlerEvent) => {
   if (event.httpMethod === "OPTIONS") {
+    if (!isOriginAllowed(event)) {
+      return jsonResponse(event, 403, { error: "Origin not permitted." });
+    }
     return {
       statusCode: 200,
-      headers: CORS_HEADERS,
+      headers: buildCorsHeaders(event),
       body: "",
     };
   }
 
   if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({ error: "Method not allowed. Use POST." }),
-    };
-  }
-
-  const rawKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || "";
-  const apiKey = rawKey.replace(/^["']|["']$/g, "").trim();
-
-  if (!apiKey) {
-    return {
-      statusCode: 500,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({
-        error: "GEMINI_API_KEY is not detected in the current Netlify deployment. If you recently added the environment variable, you must go to Netlify -> Deploys -> 'Trigger deploy' -> 'Clear cache and deploy site' to activate it.",
-      }),
-    };
+    return jsonResponse(event, 405, { error: "Method not allowed. Use POST." });
   }
 
   try {
-    const payload: AssistantRequest = JSON.parse(event.body || "{}");
-    const { prompt, context, taskType = "chat", imageBase64, history = [] } = payload;
+    assertBodySize(event, MAX_BODY_BYTES);
+    const verifiedUser = await verifyFirebaseRequest(event);
+    checkRateLimit("gemini-assistant", verifiedUser.uid, 30, 60_000);
 
-    if (!prompt && !imageBase64) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({ error: "Prompt or image is required." }),
-      };
+    const rawKey = process.env.GEMINI_API_KEY || "";
+    const apiKey = rawKey.replace(/^["']|["']$/g, "").trim();
+
+    if (!apiKey) {
+      return jsonResponse(event, 500, {
+        error:
+          "GEMINI_API_KEY is not configured in the server environment. Add GEMINI_API_KEY in Netlify Site Configuration -> Environment Variables and trigger a redeploy.",
+      });
     }
 
-    // Build specialized Civil QA/QC engineering system prompt
-    const standardsText = (context?.standards || [
-      "ISO 9001:2015 Quality Management Systems",
-      "BS EN 12390 Testing Hardened Concrete",
-      "BS 4449 Carbon Steel Reinforcement",
-      "ASTM C39 Compressive Strength of Cylindrical Concrete",
-      "ACI 318 Building Code Requirements for Structural Concrete",
-      "BS 8110 Structural Use of Concrete",
-    ]).join(", ");
+    const payload: AssistantRequest = JSON.parse(event.body || "{}");
+    const {
+      prompt = "",
+      context,
+      imageBase64,
+      history = [],
+    } = payload;
 
-    const liveDateStr = context?.currentDateFormatted || new Date().toDateString();
-    const liveTimeStr = context?.currentTimeFormatted || new Date().toLocaleTimeString();
+    const trimmedPrompt = String(prompt).slice(0, 32_000).trim();
+    if (!trimmedPrompt && !imageBase64) {
+      return jsonResponse(event, 400, {
+        error: "Prompt or image is required.",
+      });
+    }
+
+    const standardsText = (
+      context?.standards || [
+        "ISO 9001:2015 Quality Management Systems",
+        "BS EN 12390 Testing Hardened Concrete",
+        "BS 4449 Carbon Steel Reinforcement",
+        "ASTM C39 Compressive Strength of Cylindrical Concrete",
+        "ACI 318 Building Code Requirements for Structural Concrete",
+        "BS 8110 Structural Use of Concrete",
+      ]
+    ).join(", ");
+
+    const liveDateStr =
+      context?.currentDateFormatted || new Date().toDateString();
+    const liveTimeStr =
+      context?.currentTimeFormatted || new Date().toLocaleTimeString();
     const liveTimezone = context?.timezone || "UTC";
     const liveIso = context?.currentDateTime || new Date().toISOString();
-    const projectDbSnapshot = context?.projectDataSummary?.trim() || "No live project database records loaded or project database is currently empty.";
+    const projectDbSnapshot = (context?.projectDataSummary || "")
+      .slice(0, 48_000)
+      .trim() ||
+      "No live project database records loaded or project database is currently empty.";
 
     const systemInstruction = `You are "Jay-QMS Copilot", an elite Civil Engineering & QA/QC Quality Director, Technical Auditor, and AI Data Intelligence Assistant built directly into the Jay-QMS platform.
 Project Context:
 - Active Project: ${context?.projectName || "Civil Infrastructure Works"} (${context?.projectCode || "PRJ"})
-- User: ${context?.userName || "Site Engineer"} (Role: ${context?.roleTitle || "QA/QC Engineer"}, System Role: ${context?.userRole || "ENGINEER"})
+- User: ${context?.userName || verifiedUser.email || "Site Engineer"} (Role: ${context?.roleTitle || "QA/QC Engineer"}, System Role: ${context?.userRole || "ENGINEER"})
 - Governed Engineering Standards: ${standardsText}
 - Active Module: ${context?.currentModule || "General Quality & Engineering"}
+- Active Screen / Route: ${context?.currentRoute || "Main"}${context?.currentDocumentId ? ` (Active Document ID: ${context.currentDocumentId})` : ""}
 - Live System Date & Time: ${liveDateStr} at ${liveTimeStr} (${liveTimezone})
 - Exact Timestamp: ${liveIso}
 
 TEMPORAL & CLOCK ACCESS:
 You have direct, real-time access to the user's live device clock, date, time, and timezone. When the user asks about the current date, day of the week, time, or uses temporal references like "today", "yesterday", "tomorrow", "this morning", "this week", or "scheduled pour date", use the live date and time provided above. NEVER state that you do not have clock access or cannot read the date.
 
-ROLE-BASED ACCESS CONTROL (RBAC) & DATA GOVERNANCE:
-You operate with strict awareness of the user's role ("${context?.roleTitle || "Site Engineer"}", code: ${context?.userRole || "ENGINEER"}).
-All database records provided in the snapshot below are pre-filtered and authorized according to the user's statutory authority.
-- If a user asks for data or actions that are outside their role's permissions (e.g. an external subcontractor asking for restricted audit trails, or a non-QAQC user trying to modify structural element registries), inform them professionally that the requested information is restricted for their current role under ISO 9001 governance.
-- If an entity section in the database snapshot below indicates "Access restricted for your role", respect that boundary and do not invent restricted data.
+DATA TRANSPARENCY & ASSISTANCE:
+You operate with complete, comprehensive access to the active project's technical quality database records across all 24 entities provided in the snapshot below.
+Provide accurate, transparent, and detailed engineering insights, summaries, audits, and analyses across all project entities to empower the engineering team.
+If the user asks where records or reports are stored (such as Weekly Reports), explain that they are persisted in Google Cloud Firestore (e.g. in the 'weeklyReports' collection) and reference the specific document IDs and titles.
 
 LIVE PROJECT DATABASE SNAPSHOT (AUTHORITATIVE RECORD OF TRUTH):
 ${projectDbSnapshot}
@@ -317,27 +339,29 @@ Schema specifications for the \`\`\`jqms-action ... \`\`\` block:
 
 Always populate all fields with realistic, high-standard civil engineering details derived from the user's prompt.`;
 
-    // Construct Gemini API contents
-    const contents: Array<{ role: string; parts: Array<Record<string, any>> }> = [];
+    const contents: Array<{ role: string; parts: Array<Record<string, any>> }> =
+      [];
 
-    // Append conversation history if provided
-    for (const h of history) {
+    // Bound conversation history to prevent unbounded token inflation
+    const boundedHistory = Array.isArray(history) ? history.slice(-20) : [];
+    for (const h of boundedHistory) {
+      if (!h || typeof h.text !== "string") continue;
       contents.push({
         role: h.role === "user" ? "user" : "model",
-        parts: [{ text: h.text }],
+        parts: [{ text: h.text.slice(0, 12_000) }],
       });
     }
 
-    // Current turn parts
     const currentParts: Array<Record<string, any>> = [];
 
-    // If an image was passed (for site photo inspection/defect analysis)
     if (imageBase64) {
-      const match = imageBase64.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+      const match = imageBase64.match(
+        /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/i,
+      );
       if (match) {
         currentParts.push({
           inlineData: {
-            mimeType: match[1],
+            mimeType: match[1].toLowerCase(),
             data: match[2],
           },
         });
@@ -351,24 +375,24 @@ Always populate all fields with realistic, high-standard civil engineering detai
       }
     }
 
-    currentParts.push({ text: prompt });
+    currentParts.push({ text: trimmedPrompt || "Analyze the attached site photo." });
     contents.push({ role: "user", parts: currentParts });
 
-    // Call Google Gemini REST API using modern supported models
+    // Current Gemini models per upstream Google Gemini API guidance
     const candidateModels = [
       "gemini-3.8-flash",
-      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
       "gemini-flash-latest",
-      "gemini-2.5-flash",
     ];
 
-    let lastError: string = "";
+    let lastError = "";
     let data: any = null;
     let selectedModel = "";
 
     for (const model of candidateModels) {
       try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
         const geminiResponse = await fetch(geminiUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -378,7 +402,7 @@ Always populate all fields with realistic, high-standard civil engineering detai
               parts: [{ text: systemInstruction }],
             },
             generationConfig: {
-              temperature: 0.2, // Low temperature for high technical precision
+              temperature: 0.2,
               maxOutputTokens: 2048,
             },
           }),
@@ -390,7 +414,10 @@ Always populate all fields with realistic, high-standard civil engineering detai
           break;
         } else {
           lastError = await geminiResponse.text();
-          console.warn(`Model ${model} failed (${geminiResponse.status}):`, lastError);
+          console.warn(
+            `Model ${model} failed (${geminiResponse.status}):`,
+            lastError,
+          );
         }
       } catch (err: any) {
         lastError = err?.message || String(err);
@@ -399,38 +426,28 @@ Always populate all fields with realistic, high-standard civil engineering detai
     }
 
     if (!data) {
-      return {
-        statusCode: 502,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({
-          error: "Gemini API rejected request.",
-          details: lastError,
-        }),
-      };
+      return jsonResponse(event, 502, {
+        error: "Gemini API rejected request.",
+        details: lastError.slice(0, 500),
+      });
     }
 
     const replyText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "No response generated.";
 
-    return {
-      statusCode: 200,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({
-        text: replyText,
-        model: selectedModel,
-        usage: data?.usageMetadata,
-      }),
-    };
+    return jsonResponse(event, 200, {
+      text: replyText,
+      model: selectedModel,
+      usage: data?.usageMetadata,
+    });
   } catch (error: any) {
+    if (error instanceof HttpSecurityError) {
+      return jsonResponse(event, error.statusCode, { error: error.message });
+    }
     console.error("Assistant execution failure:", error);
-    return {
-      statusCode: 500,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({
-        error: "Internal server error in AI Copilot handler.",
-        details: error?.message,
-      }),
-    };
+    return jsonResponse(event, 500, {
+      error: "Internal server error in AI Copilot handler.",
+    });
   }
 };

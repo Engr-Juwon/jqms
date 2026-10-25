@@ -1,5 +1,5 @@
 // JQMS Enterprise — Offline-First Service Worker
-const CACHE_NAME = "jqms-cache-v1";
+const CACHE_NAME = "jqms-cache-v2";
 const OFFLINE_URL = "/";
 
 const STATIC_ASSETS = [
@@ -46,8 +46,12 @@ self.addEventListener("fetch", (event) => {
   // Only handle GET requests
   if (request.method !== "GET") return;
 
-  // Ignore non-http/https requests (e.g. chrome-extension://, blob:)
-  if (!request.url.startsWith("http")) return;
+  // Only handle same-origin requests; ignore third-party CDNs, Cloudinary, Firebase
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Ignore serverless APIs
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/.netlify/")) return;
 
   // Navigation requests (HTML pages): Network first, fallback to cached index.html
   if (request.mode === "navigate") {
@@ -69,12 +73,19 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets (images, fonts, scripts): Stale-While-Revalidate
+  // Static assets (images, fonts, scripts): Stale-While-Revalidate with Content-Type verification
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
       const fetchPromise = fetch(request)
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
+            const contentType = networkResponse.headers.get("content-type") || "";
+            // Never cache HTML responses for JS/CSS assets (prevents bricking when router serves index.html for missing 404 chunks)
+            const isAsset = url.pathname.startsWith("/assets/") || url.pathname.endsWith(".js") || url.pathname.endsWith(".css");
+            if (isAsset && contentType.includes("text/html")) {
+              return networkResponse;
+            }
+
             const responseToCache = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, responseToCache);
@@ -83,8 +94,8 @@ self.addEventListener("fetch", (event) => {
           return networkResponse;
         })
         .catch(() => {
-          // Return cached or offline fallback
-          return cachedResponse;
+          // If offline and not in cache, return error response for subresources so caller fails cleanly
+          return cachedResponse || Response.error();
         });
 
       return cachedResponse || fetchPromise;

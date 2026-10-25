@@ -91,8 +91,8 @@ export const MethodStatementsPage: React.FC = () => {
   const { activeProject } = useProjectStore();
   const { company } = useCompany();
 
-  const projectId = activeProject?.id || "proj-default";
-  const companyId = company?.id || "comp-default";
+  const projectId = activeProject?.id || "";
+  const companyId = company?.id || currentUser?.companyId || activeProject?.companyId || "";
 
   // State
   const [loading, setLoading] = useState(true);

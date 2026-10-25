@@ -6,7 +6,9 @@ import { dbService } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { hasPermission } from "@/lib/rbac";
 import { toast } from "react-hot-toast";
-import { LevelElementSelect } from "@/components/sitecomments/LevelElementSelect";
+import MultiLevelElementSelect, {
+  SelectedElementItem,
+} from "@/components/masterdata/MultiLevelElementSelect";
 import { TradeSubtradeSelect } from "@/components/sitecomments/TradeSubtradeSelect";
 import { PermitToPour } from "@/types";
 import { DraftBanner } from "@/components/common/DraftBanner";
@@ -50,6 +52,30 @@ export const PermitToPourCreate: React.FC = () => {
   const [levelName, setLevelName] = useState(activeProject?.currentLevelName || "");
   const [elementId, setElementId] = useState("");
   const [elementName, setElementName] = useState("");
+  const [selectedElements, setSelectedElements] = useState<
+    SelectedElementItem[]
+  >([]);
+
+  const handleSelectedElementsChange = (items: SelectedElementItem[]) => {
+    setSelectedElements(items);
+    if (items.length > 0) {
+      const names = items.map((i) => i.elementName).join(", ");
+      const grids = Array.from(
+        new Set(items.map((i) => i.grid).filter(Boolean)),
+      ).join(", ");
+      const levels = Array.from(
+        new Set(items.map((i) => i.levelName).filter(Boolean)),
+      ).join(", ");
+      setElementName(names);
+      setElementId(items[0].id);
+      if (items[0].levelId) setLevelId(items[0].levelId);
+      if (levels) setLevelName(levels);
+      if (grids) setGridAxis(grids);
+    } else {
+      setElementName("");
+      setElementId("");
+    }
+  };
   const [tradeId, setTradeId] = useState("");
   const [gridAxis, setGridAxis] = useState("");
   const [tradeName, setTradeName] = useState("Structural Concrete");
@@ -63,27 +89,26 @@ export const PermitToPourCreate: React.FC = () => {
   const [targetVolumeM3, setTargetVolumeM3] = useState(8.4);
   const [concreteGrade, setConcreteGrade] = useState("C60/75 SCC");
   const [slumpTargetMm, setSlumpTargetMm] = useState(650);
-  const [supplierBatchPlant, setSupplierBatchPlant] = useState(
-    "ReadyMix Batching Plant #4",
-  );
+  const [supplierBatchPlant, setSupplierBatchPlant] = useState("");
   const [truckDeliveryCountEstimate, setTruckDeliveryCountEstimate] =
-    useState(2);
+    useState(1);
   const [notes, setNotes] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Pre-Pour Checklist
-  const [rebarInspectionApproved, setRebarInspectionApproved] = useState(true);
-  const [rebarInspectionRef, setRebarInspectionRef] = useState("INSP-APPROVED");
+  const [rebarInspectionApproved, setRebarInspectionApproved] = useState(false);
+  const [rebarInspectionRef, setRebarInspectionRef] = useState("");
   const [formworkStabilityChecked, setFormworkStabilityChecked] =
-    useState(true);
-  const [mepEmbedsSleevesClear, setMepEmbedsSleevesClear] = useState(true);
+    useState(false);
+  const [mepEmbedsSleevesClear, setMepEmbedsSleevesClear] = useState(false);
   const [jointCleanlinessWaterjet, setJointCleanlinessWaterjet] =
-    useState(true);
+    useState(false);
   const [concreteMixGradeSlumpVerified, setConcreteMixGradeSlumpVerified] =
-    useState(true);
+    useState(false);
   const [safetyLightingAccessClear, setSafetyLightingAccessClear] =
-    useState(true);
+    useState(false);
   const [vibratorsPumpsStandbyReady, setVibratorsPumpsStandbyReady] =
-    useState(true);
+    useState(false);
   const [checklistItems, setChecklistItems] = useState<PermitChecklistItem[]>(
     createDefaultPermitChecklist(),
   );
@@ -281,22 +306,39 @@ export const PermitToPourCreate: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!canCreatePTP) {
       toast.error("You do not have permission to create Permits to Pour");
       return;
     }
-    if (!currentProjId) return;
+    if (!currentProjId || !currentCompId) {
+      toast.error("Active project workspace is required to create a Permit to Pour");
+      return;
+    }
     if (!currentUser) return;
 
-    const newPtp: PermitToPour = {
-      id: `ptp-${Date.now()}`,
-      projectId: currentProjId,
-      companyId: currentCompId,
-      ptpNumber,
+    setIsSubmitting(true);
+    let finalPtpNumber = ptpNumber;
+    try {
+      const seq = await dbService.getNextSequenceNumber(currentCompId, currentProjId, "PTP");
+      finalPtpNumber = seq.formattedCode;
+    } catch {
+      // fallback to generated
+    }
+
+    try {
+      const newPtp: PermitToPour = {
+        id: `ptp-${Date.now()}`,
+        projectId: currentProjId,
+        companyId: currentCompId,
+        ptpNumber: finalPtpNumber,
       levelId: levelId || "lvl-site",
       levelName: levelName || "Site Level",
       elementId,
       elementName: elementName || "General Structural Pour Zone",
+      elementIds: selectedElements.map((e) => e.id),
+      elementNames: selectedElements.map((e) => e.elementName),
+      elementsData: selectedElements,
       tradeId,
       tradeName,
       subtradeName,
@@ -366,19 +408,16 @@ export const PermitToPourCreate: React.FC = () => {
           signedAt: new Date().toISOString(),
         },
         rebarInspector: {
-          name: "QA/QC Rebar Inspector",
-          signed: true,
-          signedAt: new Date().toISOString(),
+          name: "Pending Rebar QA/QC Inspection",
+          signed: false,
         },
         mepCoordinator: {
-          name: "MEP Coordinator",
-          signed: true,
-          signedAt: new Date().toISOString(),
+          name: "Pending MEP Clearance",
+          signed: false,
         },
         qaqcLeadEngineer: {
-          name: currentUser?.fullName || "QA/QC Lead",
-          signed: true,
-          signedAt: new Date().toISOString(),
+          name: "Pending QA/QC Final Authorization",
+          signed: false,
         },
       },
       notes,
@@ -397,12 +436,18 @@ export const PermitToPourCreate: React.FC = () => {
         userRole: currentUser.role,
         action: "ISSUE_PERMIT_TO_POUR",
         module: "PermitToPour",
-        details: `Issued Permit to Pour ${ptpNumber} for ${elementName || "Pour Zone"} (${targetVolumeM3} m³ of ${concreteGrade})`,
+        details: `Issued Permit to Pour ${finalPtpNumber} for ${elementName || "Pour Zone"} (${targetVolumeM3} m³ of ${concreteGrade})`,
         newValue: newPtp,
       });
     }
 
     navigate(`/project/permit-to-pour/${newPtp.id}`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to submit Permit to Pour");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -444,23 +489,13 @@ export const PermitToPourCreate: React.FC = () => {
       <form onSubmit={handleSubmit} className="space-y-6 text-xs">
         {/* Pour Schedule & Location */}
         <div className="p-6 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl space-y-4">
-          <LevelElementSelect
+          <MultiLevelElementSelect
             projectId={currentProjId}
             companyId={currentCompId}
-            selectedLevelId={levelId}
-            selectedLevelName={levelName}
-            selectedElementId={elementId}
-            selectedElementName={elementName}
-            onLevelChange={(lId, lName) => {
-              setLevelId(lId);
-              setLevelName(lName);
-            }}
-            onElementChange={(elId, elName, elAxis) => {
-              setElementId(elId);
-              setElementName(elName);
-              if(elAxis) setGridAxis(elAxis);
-            }}
+            selectedElements={selectedElements}
+            onChange={handleSelectedElementsChange}
             required
+            label="Structural Elements Scheduled for Concrete Pour"
           />
 
           <TradeSubtradeSelect

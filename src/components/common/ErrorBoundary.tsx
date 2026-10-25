@@ -11,6 +11,7 @@ import {
   Trash2,
   HelpCircle,
 } from "lucide-react";
+import { clearAllVaultData } from "@/lib/idbVault";
 
 interface Props {
   children: ReactNode;
@@ -61,8 +62,22 @@ export class ErrorBoundary extends Component<Props, State> {
     window.location.href = "/project/dashboard";
   };
 
-  private handleClearCache = () => {
+  private handleClearCache = async () => {
     try {
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs) {
+          await reg.unregister();
+        }
+      }
+      if ("caches" in window) {
+        const cacheKeys = await caches.keys();
+        for (const key of cacheKeys) {
+          await caches.delete(key);
+        }
+      }
+      clearAllVaultData({ preserveSyncQueue: true, preserveAuthStorage: true });
+
       const keysToPreserve = ["jqms_user", "jqms_auth", "jqms_theme"];
       Object.keys(localStorage).forEach((key) => {
         if (!keysToPreserve.includes(key)) {

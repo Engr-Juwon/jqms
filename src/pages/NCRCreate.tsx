@@ -32,6 +32,7 @@ import MultiLevelElementSelect, {
 } from "@/components/masterdata/MultiLevelElementSelect";
 import { toast } from "react-hot-toast";
 import { generateNcrNumber } from "@/lib/naming";
+import { UniversalPhotoUploader, PhotoItem } from "@/components/common/UniversalPhotoUploader";
 
 const inputClass =
   "w-full px-3.5 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl text-[13px] font-medium bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:border-[#ea580c] focus:ring-1 focus:ring-orange-100 transition-all shadow-sm placeholder:text-gray-400";
@@ -61,36 +62,13 @@ export const NCRCreate: React.FC = () => {
   const { activeProject } = useProjectStore();
   const navigate = useNavigate();
 
-  // Resilient fallback resolution for auth and project
-  const authUser =
-    currentUser ||
-    (() => {
-      try {
-        const raw = localStorage.getItem("jqms_current_user");
-        return raw ? JSON.parse(raw) : null;
-      } catch {
-        return null;
-      }
-    })() || {
-      uid: "user-qa-field",
-      fullName: "QA/QC Field Engineer",
-      role: "QUALITY_ENGINEER",
-      companyId: "comp-apex-civil",
-    };
-
-  const activeProjId =
-    activeProject?.id ||
-    projectId ||
-    localStorage.getItem("jqms_active_project_id") ||
-    "proj-bankside";
+  const authUser = currentUser;
+  const activeProjId = activeProject?.id || projectId || "";
   const activeCompId =
-    authUser?.companyId ||
-    company?.id ||
-    activeProject?.companyId ||
-    localStorage.getItem("jqms_current_company_id") ||
-    "comp-apex-civil";
+    authUser?.companyId || company?.id || activeProject?.companyId || "";
 
   const [submitting, setSubmitting] = useState(false);
+  const [ncrPhotos, setNcrPhotos] = useState<PhotoItem[]>([]);
   const canCreateNCR = authUser?.role ? hasPermission(authUser.role, "CREATE_NCR") : true;
 
   const [selectedElements, setSelectedElements] = useState<SelectedElementItem[]>([]);
@@ -242,8 +220,17 @@ export const NCRCreate: React.FC = () => {
   }, [searchParams]);
 
   const handleSubmit = async () => {
+    if (submitting) return;
     if (!canCreateNCR) {
       toast.error("You do not have permission to create NCRs");
+      return;
+    }
+    if (!activeCompId || !activeProjId) {
+      toast.error("Active project workspace is required to create an NCR");
+      return;
+    }
+    if (!authUser) {
+      toast.error("You must be logged in to create an NCR");
       return;
     }
 
@@ -260,13 +247,23 @@ export const NCRCreate: React.FC = () => {
     try {
       const timestamp = Date.now();
       const projectCode = activeProject?.code?.toUpperCase() || "NCR";
-      const finalNumber = generateNcrNumber(projectCode);
+      let finalNumber = "";
+      try {
+        const seq = await dbService.getNextSequenceNumber(
+          activeCompId,
+          activeProjId,
+          `${projectCode}-NCR`,
+        );
+        finalNumber = seq.formattedCode;
+      } catch {
+        finalNumber = generateNcrNumber(projectCode);
+      }
 
       const statusHistory: StatusHistoryEntry[] = [
         {
           status: "OPEN",
-          userId: authUser.uid,
-          userName: authUser.fullName,
+          userId: authUser?.uid || "user",
+          userName: authUser?.fullName || "QA Engineer",
           comment: "NCR created via contextual element registry route",
           timestamp,
         },
@@ -315,7 +312,7 @@ export const NCRCreate: React.FC = () => {
             : form.priority === "MEDIUM"
               ? "MEDIUM"
               : "LOW") as any,
-        photos: [],
+        photos: ncrPhotos.map((p) => p.url),
         category: form.category || finalTradeName,
         location: form.locationLevel || "Site Level",
         elementName: primaryElementName,
@@ -750,6 +747,21 @@ b. Column construction joint is littered with binding wires.`}
                   className={`${inputClass} disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-500`}
                 />
               </Field>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
+              <UniversalPhotoUploader
+                photos={ncrPhotos}
+                onChange={setNcrPhotos}
+                projectId={activeProjId}
+                companyId={activeCompId}
+                uploadedBy={authUser?.uid}
+                uploadedByName={authUser?.fullName}
+                sourceModule="NCR"
+                sourceId="new-ncr"
+                title="Defect Evidence & Inspection Photos"
+                description="Capture or upload high-resolution evidence for this Non-Conformance Report"
+              />
             </div>
 
             <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-sm space-y-3 border border-slate-800">

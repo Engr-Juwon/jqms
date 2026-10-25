@@ -1,0 +1,16 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "sitePhotos": {
+      "$companyId": {
+        "$projectId": {
+          ".read": "auth != null && $companyId.length > 0 && $projectId.length > 0",
+          "$photoId": {
+            ".write": "auth != null && $companyId.length > 0 && $projectId.length > 0 && (!newData.exists() || (newData.child('companyId').val() === $companyId && newData.child('projectId').val() === $projectId && (!newData.hasChild('url') || (newData.child('url').isString() && newData.child('url').val().length <= 4096))))"
+          }
+        }
+      }
+    }
+  }
+}

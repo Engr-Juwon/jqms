@@ -359,6 +359,105 @@ export function getElementDimensionMeta(typeStr?: string) {
 /**
  * Derives the in-situ concrete volume (m³) for an element from its geometry or saved volume.
  */
+/**
+ * Calculates the true effective axis length for a column.
+ * For straight vertical columns: returns H.
+ * For slanted / inclined columns: returns L_slant = sqrt(H² + Δ²) = H / cos(θ).
+ */
+export function getEffectiveColumnLength(el: Partial<StructuralElement>): number {
+  const H = normalizeDimension(el.height ?? el.dimensions?.height) || 3.2;
+  const isInclined = !!el.isInclined || el.verticality === "inclined";
+  if (!isInclined) return H;
+
+  const mode = el.inclinedCalcMode || "offset";
+  const offset = Number(el.horizontalOffset);
+  const angle = Number(el.inclinationAngle);
+
+  if (mode === "offset" && offset > 0) {
+    return parseFloat(Math.sqrt(H * H + offset * offset).toFixed(3));
+  } else if (angle > 0) {
+    const rad = (Math.min(85, angle) * Math.PI) / 180;
+    return parseFloat((H / Math.cos(rad)).toFixed(3));
+  } else if (offset > 0) {
+    return parseFloat(Math.sqrt(H * H + offset * offset).toFixed(3));
+  }
+  return H;
+}
+
+export interface ColumnInclinationInfo {
+  isInclined: boolean;
+  verticalHeightM: number;
+  horizontalOffsetM: number;
+  inclinationAngleDeg: number;
+  effectiveLengthM: number;
+  direction: "EAST" | "WEST" | "NORTH" | "SOUTH";
+  deltaX: number; // in meters (world X)
+  deltaY: number; // in meters (2D plan Y: North is negative, South is positive)
+  deltaZ: number; // in meters (Three.js world Z: North is negative, South is positive)
+}
+
+export function getColumnInclinationInfo(el: Partial<StructuralElement>): ColumnInclinationInfo {
+  const H = normalizeDimension(el.height ?? el.dimensions?.height) || 3.2;
+  const isInclined = !!el.isInclined || el.verticality === "inclined";
+  const rawDir = String(el.inclinationDirection || "EAST").toUpperCase();
+  let direction: "EAST" | "WEST" | "NORTH" | "SOUTH" = "EAST";
+  if (rawDir.includes("WEST") || rawDir === "-X" || rawDir === "LEFT") direction = "WEST";
+  else if (rawDir.includes("NORTH") || rawDir === "+Y" || rawDir === "TOP") direction = "NORTH";
+  else if (rawDir.includes("SOUTH") || rawDir === "-Y" || rawDir === "BOTTOM") direction = "SOUTH";
+
+  let offsetM = Number(el.horizontalOffset) || 0;
+  let angleDeg = Number(el.inclinationAngle) || 0;
+
+  if (isInclined) {
+    if (el.inclinedCalcMode === "angle" && angleDeg > 0) {
+      const rad = (Math.min(85, angleDeg) * Math.PI) / 180;
+      offsetM = parseFloat((H * Math.tan(rad)).toFixed(3));
+    } else if (offsetM > 0) {
+      angleDeg = parseFloat(((Math.atan(offsetM / H) * 180) / Math.PI).toFixed(1));
+    } else if (angleDeg > 0) {
+      const rad = (Math.min(85, angleDeg) * Math.PI) / 180;
+      offsetM = parseFloat((H * Math.tan(rad)).toFixed(3));
+    } else {
+      offsetM = 0.4;
+      angleDeg = parseFloat(((Math.atan(0.4 / H) * 180) / Math.PI).toFixed(1));
+    }
+  }
+
+  const effectiveLengthM = isInclined
+    ? parseFloat(Math.sqrt(H * H + offsetM * offsetM).toFixed(3))
+    : H;
+
+  let deltaX = 0;
+  let deltaY = 0;
+  let deltaZ = 0;
+
+  if (isInclined) {
+    if (direction === "EAST") {
+      deltaX = offsetM;
+    } else if (direction === "WEST") {
+      deltaX = -offsetM;
+    } else if (direction === "NORTH") {
+      deltaY = -offsetM;
+      deltaZ = -offsetM;
+    } else if (direction === "SOUTH") {
+      deltaY = offsetM;
+      deltaZ = offsetM;
+    }
+  }
+
+  return {
+    isInclined,
+    verticalHeightM: H,
+    horizontalOffsetM: offsetM,
+    inclinationAngleDeg: angleDeg,
+    effectiveLengthM,
+    direction,
+    deltaX,
+    deltaY,
+    deltaZ,
+  };
+}
+
 export function getOrCalculateVolume(el: Partial<StructuralElement>): number {
   const savedVol = parseFloat(String(el.calculatedVolume || el.volume || 0));
   if (!isNaN(savedVol) && savedVol > 0) {
@@ -380,7 +479,7 @@ export function getOrCalculateVolume(el: Partial<StructuralElement>): number {
   let vol = 0;
 
   if (type.includes("COLUMN")) {
-    const effH = H || D || 3.2;
+    const effH = getEffectiveColumnLength(el) || H || D || 3.2;
     if (el.columnShape === "circular" || Dia > 0) {
       const r = (Dia || 0.6) / 2;
       vol = Math.PI * r * r * effH;
@@ -450,7 +549,7 @@ export function getOrCalculateFormworkArea(el: Partial<StructuralElement>): numb
   let area = 0;
 
   if (type.includes("COLUMN")) {
-    const effH = H || 3.2;
+    const effH = getEffectiveColumnLength(el) || H || 3.2;
     if (el.columnShape === "circular" || Dia > 0) {
       const d = Dia || 0.6;
       area = Math.PI * d * effH;
@@ -686,12 +785,14 @@ export interface Column2DDimensions {
   isVertical: boolean;
   widthM: number;
   heightM: number;
+  inclinationInfo: ColumnInclinationInfo;
 }
 
 /**
  * Derives accurate 2D CAD dimensions and orientation for a column.
  * - Respects actual physical size: e.g. 450mm x 450mm vs 300mm x 300mm vs 600mm x 300mm
  * - Respects column orientation (HORIZONTAL / 0° vs VERTICAL / 90°)
+ * - Respects slant / inclination direction and plan projection offset
  */
 export function getColumn2DDimensions(
   element: Partial<StructuralElement>,
@@ -731,9 +832,11 @@ export function getColumn2DDimensions(
   const radiusPx = Math.max(8, (rawDia / 2) * scaleFactor);
   const maxExtentPx = isCircular ? radiusPx * 2 : Math.max(widthPx, heightPx);
 
+  const inclinationInfo = getColumnInclinationInfo(element);
+
   const dimensionLabel = isCircular
-    ? `${Math.round(rawDia * 1000)}mm Ø`
-    : `${Math.round(colWidthM * 1000)}×${Math.round(colHeightM * 1000)}mm`;
+    ? `${Math.round(rawDia * 1000)}mm Ø${inclinationInfo.isInclined ? ` ⤢ ${inclinationInfo.inclinationAngleDeg}°` : ""}`
+    : `${Math.round(colWidthM * 1000)}×${Math.round(colHeightM * 1000)}mm${inclinationInfo.isInclined ? ` ⤢ ${inclinationInfo.inclinationAngleDeg}°` : ""}`;
 
   return {
     widthPx,
@@ -745,6 +848,7 @@ export function getColumn2DDimensions(
     isVertical,
     widthM: isCircular ? rawDia : colWidthM,
     heightM: isCircular ? rawDia : colHeightM,
+    inclinationInfo,
   };
 }
 

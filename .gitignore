@@ -1,8 +1,13 @@
-# Local Netlify folder
-.netlify
-node_modules
-dist
+# Dependencies & Build Outputs
+node_modules/
+dist/
+.netlify/
+*.tsbuildinfo
+
+# Local Environment Secrets (Keep .env.example tracked)
 .env
 .env.*
 !.env.example
 
+# Local Scratch & Debug Scripts
+scratch/

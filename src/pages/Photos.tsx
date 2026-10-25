@@ -5,6 +5,7 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { dbService, sortByNewestFirst } from "@/lib/db";
 import { uploadMultiple, getThumbnail, getOptimized } from "@/lib/cloudinary";
 import { syncMultiplePhotosToSiteGallery, syncPhotoToSiteGallery } from "@/lib/photoSync";
+import { generateUniversalName } from "@/lib/naming";
 import { FieldPhotoCapture, FieldPhotoMetadata } from "@/components/common/FieldPhotoCapture";
 import { SitePhoto, PhotoCategory, ProjectLevel, MasterTrade } from "@/types";
 import {
@@ -34,8 +35,8 @@ export const Photos: React.FC = () => {
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-apex-civil";
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+    currentUser?.companyId || company?.id || activeProject?.companyId || "";
+  const currentProjId = projectId || activeProject?.id || "";
 
   const [photos, setPhotos] = useState<SitePhoto[]>([]);
   const [levels, setLevels] = useState<ProjectLevel[]>([]);
@@ -441,30 +442,44 @@ export const Photos: React.FC = () => {
     const toastId = toast.loading(`Uploading ${uploadFiles.length} photo(s) to Cloudinary...`);
 
     try {
-      const results = await uploadMultiple(uploadFiles, `jqms/photos/${currentProjId}`);
+      const standardizedFiles = uploadFiles.map((file) => {
+        const ext = file.name.split(".").pop() || "jpg";
+        const universalName = generateUniversalName(
+          activeProject?.code || currentProjId,
+          "PHOTO",
+          { extension: ext }
+        );
+        return new File([file], universalName, { type: file.type });
+      });
+      const results = await uploadMultiple(standardizedFiles, `jqms/photos/${currentProjId}`);
 
-      const newPhotosToSync = results.map((res, i) => ({
-        projectId: currentProjId,
-        companyId: currentCompId,
-        url: res.url,
-        thumbnailUrl: getThumbnail(res.url, 250),
-        caption: uploadCaption
-          ? `${uploadCaption} (${i + 1})`
-          : `Site Record ${new Date().toLocaleDateString()}`,
-        floorLevel: uploadFloor || undefined,
-        levelId: uploadLevelId || undefined,
-        levelName: uploadFloor || undefined,
-        elementName: uploadElement || undefined,
-        category: uploadCategory,
-        tradeName: uploadTrade || undefined,
-        tradeId: uploadTradeId || undefined,
-        subtradeName: uploadSubtrade || undefined,
-        subtradeId: uploadSubtradeId || undefined,
-        uploadedBy: currentUser?.fullName || "QA/QC Inspector",
-        uploaderRole: currentUser?.role,
-        sourceModule: "DirectUpload" as const,
-        sourceId: `upload-${Date.now()}`,
-      }));
+      const newPhotosToSync = results.map((res, i) => {
+        const photoCode =
+          standardizedFiles[i]?.name.replace(/\.[^/.]+$/, "") ||
+          generateUniversalName(activeProject?.code || currentProjId, "PHOTO");
+        return {
+          projectId: currentProjId,
+          companyId: currentCompId,
+          url: res.url,
+          thumbnailUrl: getThumbnail(res.url, 250),
+          caption: uploadCaption
+            ? `${photoCode} - ${uploadCaption} (${i + 1})`
+            : `${photoCode} - Site Record ${new Date().toLocaleDateString()}`,
+          floorLevel: uploadFloor || undefined,
+          levelId: uploadLevelId || undefined,
+          levelName: uploadFloor || undefined,
+          elementName: uploadElement || undefined,
+          category: uploadCategory,
+          tradeName: uploadTrade || undefined,
+          tradeId: uploadTradeId || undefined,
+          subtradeName: uploadSubtrade || undefined,
+          subtradeId: uploadSubtradeId || undefined,
+          uploadedBy: currentUser?.fullName || "QA/QC Inspector",
+          uploaderRole: currentUser?.role,
+          sourceModule: "DirectUpload" as const,
+          sourceId: `upload-${Date.now()}`,
+        };
+      });
 
       await syncMultiplePhotosToSiteGallery(newPhotosToSync);
 
@@ -497,10 +512,19 @@ export const Photos: React.FC = () => {
     const toastId = toast.loading("Uploading camera snapshot to Cloudinary...");
 
     try {
-      const results = await uploadMultiple([file], `jqms/photos/${currentProjId}`);
+      const universalName = generateUniversalName(
+        activeProject?.code || currentProjId,
+        "PHOTO",
+        { extension: "jpg" }
+      );
+      const renamedFile = new File([file], universalName, {
+        type: file.type || "image/jpeg",
+      });
+      const results = await uploadMultiple([renamedFile], `jqms/photos/${currentProjId}`);
       const res = results[0];
 
-      const snapCaption = `Field Camera Capture (${new Date().toLocaleString()})`;
+      const photoCode = universalName.replace(/\.[^/.]+$/, "");
+      const snapCaption = `${photoCode} - Field Camera Capture (${new Date().toLocaleString()})`;
 
       await syncPhotoToSiteGallery({
         projectId: currentProjId,

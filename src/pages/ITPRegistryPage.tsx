@@ -40,9 +40,9 @@ export const ITPRegistryPage: React.FC = () => {
   const navigate = useNavigate();
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+  const currentProjId = projectId || activeProject?.id || "";
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-collection-dev";
+    currentUser?.companyId || company?.id || activeProject?.companyId || "";
 
   const [itpPlans, setItpPlans] = useState<ITPPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,7 +83,7 @@ export const ITPRegistryPage: React.FC = () => {
   // URL Helper
   const getDetailUrl = (planId: string) => {
     if (projectId) {
-      return `/projects/${projectId}/itp/${planId}`;
+      return `/project/${projectId}/itp/${planId}`;
     }
     return `/project/itp/${planId}`;
   };
@@ -162,10 +162,10 @@ export const ITPRegistryPage: React.FC = () => {
       projectId: currentProjId,
       projectName: activeProject?.name || "Standard Construction Project",
       companyId: currentCompId,
-      companyName: company?.name || "Collection Developments LTD",
-      officeAddress: "3B, Taofik Lawal, Off Awolowo Road, Ikoyi, Lagos",
-      contactEmail: "info@collection.gp",
-      contactPhone: "+234 (0) 16328782",
+      companyName: company?.name || "Corporate Quality Framework",
+      officeAddress: company?.address || "",
+      contactEmail: company?.email || "",
+      contactPhone: company?.phone || "",
       items: [
         {
           id: `item-${Date.now()}-1`,
@@ -222,7 +222,7 @@ export const ITPRegistryPage: React.FC = () => {
   const handleResetDefaults = async () => {
     if (
       !window.confirm(
-        "Load standard templates from Collection Developments LTD Quality Plan (CD-QP-001)? Existing customized plans will be preserved.",
+        "Load standard templates from Company Quality Plan? Existing customized plans will be preserved.",
       )
     ) {
       return;
@@ -301,14 +301,17 @@ export const ITPRegistryPage: React.FC = () => {
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             <span>
-              <strong>Collection Developments LTD</strong> &bull; 3B, Taofik Lawal, Ikoyi Lagos
+              <strong>{company?.name || "Corporate Quality Assurance"}</strong>
+              {company?.address ? ` • ${company.address}` : ""}
             </span>
           </div>
-          <div className="flex items-center gap-3">
-            <span>Contact: +234 (0) 16328782</span>
-            <span>&bull;</span>
-            <span className="text-amber-400 font-mono">info@collection.gp</span>
-          </div>
+          {(company?.phone || company?.email) && (
+            <div className="flex items-center gap-3">
+              {company?.phone && <span>Contact: {company.phone}</span>}
+              {company?.phone && company?.email && <span>&bull;</span>}
+              {company?.email && <span className="text-amber-400 font-mono">{company.email}</span>}
+            </div>
+          )}
         </div>
       </div>
 
@@ -689,7 +692,7 @@ export const ITPRegistryPage: React.FC = () => {
                   Create Inspection & Test Plan (ITP)
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Collection Developments LTD Quality Management Framework
+                  {company?.name ? `${company.name} Quality Management Framework` : "Standard Quality Management Framework"}
                 </p>
               </div>
               <button

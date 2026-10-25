@@ -2,6 +2,7 @@ import jsPDF from "jspdf";
 import autoTable, { RowInput } from "jspdf-autotable";
 import { ITPPlan, Project, Company } from "@/types";
 import { renderCompanyBrandCell } from "@/lib/companyHelper";
+import { generateUniversalName } from "@/lib/naming";
 
 export interface ITPExportOptions {
   fileName?: string;
@@ -10,7 +11,7 @@ export interface ITPExportOptions {
 
 /**
  * Generates and directly downloads the company-standard Inspection & Test Plan (ITP) Matrix PDF
- * conforming to Collection Developments LTD Quality Plan (CD-QP-001 Rev 01).
+ * conforming to Company Quality Plan (QMP-ITP-001).
  * Uses pure jsPDF + autoTable for reliable vector PDF generation.
  */
 export function exportITPPlanPDF(
@@ -20,16 +21,16 @@ export function exportITPPlanPDF(
   options: ITPExportOptions = {},
 ): void {
   const companyName =
-    company?.name || plan.companyName || "Collection Developments LTD";
+    company?.name || plan.companyName || "Corporate Quality Framework";
   const officeAddress =
     company?.address ||
     plan.officeAddress ||
-    "3B, Taofik Lawal, Off Awolowo Road, Ikoyi, Lagos";
+    "";
   const contactPhone =
-    company?.phone || plan.contactPhone || "+234 (0) 16328782";
+    company?.phone || plan.contactPhone || "";
   const contactEmail =
-    company?.email || plan.contactEmail || "info@collection.gp";
-  const docCode = plan.docCode || "CD-QP-001";
+    company?.email || plan.contactEmail || "";
+  const docCode = plan.docCode || "QMP-ITP-001";
   const revision = plan.revision || "REV. 01";
   const projectName = project?.name || plan.projectName || "Standard Construction Development";
   const projectCode = project?.code || "CDL-PRJ-001";
@@ -40,8 +41,9 @@ export function exportITPPlanPDF(
     year: "numeric",
   });
 
-  const docRef = plan.itpNumber || "CD-ITP-001";
-  const fileName = options.fileName || `${docRef}_ITP_Matrix.pdf`;
+  const docRef =
+    plan.itpNumber || generateUniversalName(project?.code, "ITP");
+  const fileName = options.fileName || `${docRef}.pdf`;
 
   // Initialize Landscape A4 Document (297mm x 210mm)
   const doc = new jsPDF({
@@ -470,8 +472,9 @@ export function exportITPPlanPDF(
  * Generates clean CSV spreadsheet export of the ITP Matrix.
  */
 export function exportITPPlanCSV(plan: ITPPlan, fileName?: string): void {
-  const docRef = plan.itpNumber || "CD-ITP-001";
-  const outName = fileName || `${docRef}_ITP_Matrix.csv`;
+  const docRef =
+    plan.itpNumber || generateUniversalName(plan.projectId, "ITP");
+  const outName = fileName || `${docRef}.csv`;
 
   const headers = [
     "S/N",
@@ -523,18 +526,18 @@ export function generateITPHTML(
   company?: Partial<Company>,
 ): string {
   const companyName =
-    company?.name || plan.companyName || "Collection Developments LTD";
+    company?.name || plan.companyName || "Corporate Quality Framework";
   const officeAddress =
     company?.address ||
     plan.officeAddress ||
-    "3B, Taofik Lawal, Off Awolowo Road, Ikoyi, Lagos";
+    "";
   const contactPhone =
-    company?.phone || plan.contactPhone || "+234 (0) 16328782";
+    company?.phone || plan.contactPhone || "";
   const contactEmail =
-    company?.email || plan.contactEmail || "info@collection.gp";
-  const docCode = plan.docCode || "CD-QP-001";
+    company?.email || plan.contactEmail || "";
+  const docCode = plan.docCode || "QMP-ITP-001";
   const revision = plan.revision || "REV. 01";
-  const docRef = plan.itpNumber || "CD-ITP-001";
+  const docRef = plan.itpNumber || "ITP-001";
 
   const rowsHTML = (plan.items || [])
     .map((item, idx) => {

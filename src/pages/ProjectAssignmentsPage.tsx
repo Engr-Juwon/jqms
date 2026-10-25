@@ -39,7 +39,7 @@ export const ProjectAssignmentsPage: React.FC = () => {
   const { currentUser, company } = useAuthStore();
   const { loadProjects } = useProjectStore();
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-apex-civil";
+    currentUser?.companyId || company?.id || "";
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
@@ -263,7 +263,7 @@ export const ProjectAssignmentsPage: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-sm">
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-brand-600 dark:text-brand-400 uppercase tracking-wider mb-1">
-            <FolderKanban className="w-3.5 h-3.5" />
+            <FolderKanban className="w-3.5 h-3.5" /> 
             <span>ISO 9001 Project Governance</span>
           </div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-3">

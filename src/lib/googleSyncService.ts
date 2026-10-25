@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from "firebase/app";
 import { GoogleAuthProvider, signInWithPopup, getAuth } from "firebase/auth";
 import { firebaseConfig } from "@/firebase";
+import { safeSetLocalStorage, safeRemoveLocalStorage } from "@/lib/idbVault";
 
 function getSecondarySyncAuth() {
   const secondaryName = "GoogleWorkspaceSync";
@@ -58,30 +59,44 @@ export interface GoogleWorkspaceConfig {
 
 const STORAGE_KEY = "jqms_google_workspace_config";
 
+// Keep OAuth access tokens strictly in memory — never persist raw bearer tokens in localStorage
+let inMemoryGoogleAccessToken: string | undefined = undefined;
+
 /**
  * Loads current user's Google Workspace configuration from localStorage
+ * and attaches any active session-scoped OAuth token from memory.
  */
 export function getGoogleWorkspaceConfig(): GoogleWorkspaceConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw) as GoogleWorkspaceConfig;
+      if (parsed.accessToken) {
+        // Migrate any legacy stored token out of localStorage immediately
+        inMemoryGoogleAccessToken = inMemoryGoogleAccessToken || parsed.accessToken;
+        const { accessToken: _stripped, ...rest } = parsed;
+        safeSetLocalStorage(STORAGE_KEY, rest);
+      }
+      return {
+        ...parsed,
+        accessToken: inMemoryGoogleAccessToken,
+      };
     }
   } catch (err) {
     console.warn("Failed to load Google Workspace configuration:", err);
   }
-  return {};
+  return inMemoryGoogleAccessToken ? { accessToken: inMemoryGoogleAccessToken } : {};
 }
 
 /**
- * Saves Google Workspace configuration
+ * Saves Google Workspace configuration (keeping accessToken strictly in memory)
  */
 export function saveGoogleWorkspaceConfig(config: GoogleWorkspaceConfig): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-  } catch (err) {
-    console.warn("Failed to save Google Workspace configuration:", err);
+  if (config.accessToken !== undefined) {
+    inMemoryGoogleAccessToken = config.accessToken || undefined;
   }
+  const { accessToken: _omitToken, ...safeConfig } = config;
+  safeSetLocalStorage(STORAGE_KEY, safeConfig);
 }
 
 /**
@@ -99,6 +114,8 @@ export async function connectGoogleAccount(): Promise<{ email: string; token: st
   const token = credential?.accessToken || "";
   const email = result.user.email || "";
 
+  inMemoryGoogleAccessToken = token || undefined;
+
   const updatedConfig: GoogleWorkspaceConfig = {
     ...getGoogleWorkspaceConfig(),
     connectedEmail: email,
@@ -110,19 +127,17 @@ export async function connectGoogleAccount(): Promise<{ email: string; token: st
 }
 
 /**
- * Disconnects Google Workspace account
+ * Disconnects Google Workspace account and wipes session OAuth state
  */
 export function disconnectGoogleAccount(): void {
+  inMemoryGoogleAccessToken = undefined;
   try {
     const syncAuth = getSecondarySyncAuth();
-    syncAuth.signOut();
-  } catch (e) {
+    syncAuth.signOut().catch(() => {});
+  } catch {
     // ignore
   }
-  const cfg = getGoogleWorkspaceConfig();
-  delete cfg.accessToken;
-  delete cfg.connectedEmail;
-  saveGoogleWorkspaceConfig(cfg);
+  safeRemoveLocalStorage(STORAGE_KEY);
 }
 
 /**

@@ -90,12 +90,12 @@ export const ElementDetail: React.FC = () => {
 
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
-  const currentProjId = projectId || activeProject?.id || "proj-default";
+  const currentProjId = projectId || activeProject?.id || "";
   const currentCompId =
     currentUser?.companyId ||
     company?.id ||
     activeProject?.companyId ||
-    "comp-default";
+    "";
 
   const [element, setElement] = useState<StructuralElement | null>(null);
   const [inspections, setInspections] = useState<InspectionRequest[]>([]);

@@ -1,26 +1,48 @@
 import { openDB, IDBPDatabase } from "idb";
+import { auth } from "@/firebase";
 
 const DB_NAME = "jqms-offline-vault";
 const DB_VERSION = 2;
 
+export type OfflineSyncEntityType =
+  | "SITE_COMMENT"
+  | "INSPECTION"
+  | "NCR"
+  | "PHOTO_UPLOAD"
+  | "POUR_PERMIT"
+  | "CUBE_TEST"
+  | "RFI"
+  | "MAR"
+  | "MIR"
+  | "SITE_INSTRUCTION"
+  | "DAILY_LOG"
+  | "STEEL_TEST"
+  | "BAR_CUTTING"
+  | "MATERIAL_DELIVERY"
+  | "WEEKLY_REPORT"
+  | "ITP_PLAN"
+  | "PUNCH_ITEM"
+  | "TOC"
+  | "METHOD_STATEMENT"
+  | "PLANNER_EVENT"
+  | "DOCUMENT"
+  | "PROJECT_LEVELS"
+  | "STRUCTURAL_ELEMENTS"
+  | "GRIDLINES"
+  | "WORK_PACKAGE"
+  | "TRADE"
+  | "INSPECTION_TEMPLATE";
+
 export interface OfflineSyncItem {
   id: string;
-  type:
-    | "SITE_COMMENT"
-    | "INSPECTION"
-    | "NCR"
-    | "PHOTO_UPLOAD"
-    | "POUR_PERMIT"
-    | "CUBE_TEST"
-    | "RFI"
-    | "MAR"
-    | "WEEKLY_REPORT";
+  type: OfflineSyncEntityType;
   projectId: string;
   companyId: string;
   payload: any;
   createdAt: string;
   status: "QUEUED" | "SYNCING" | "FAILED";
   retryCount: number;
+  lastError?: string;
 }
 
 export interface FormDraftItem {
@@ -64,8 +86,31 @@ function getDb(): Promise<IDBPDatabase> {
   return dbPromise;
 }
 
-// ─── STARTUP MIGRATION: SEED L1 MEMORY & IDB FROM LOCALSTORAGE ──────────
+// ─── STARTUP MIGRATION & HYDRATION: SEED L1 MEMORY & IDB ──────────
 let migrationInitiated = false;
+
+/**
+ * Pre-warms L1 in-memory cache directly from IndexedDB so synchronous
+ * reads never return default empty arrays on page reloads or new tabs.
+ */
+export async function hydrateVaultFromIDB(): Promise<void> {
+  try {
+    const db = await getDb();
+    const allRecords = await db.getAll("cachedRecords");
+    for (const record of allRecords) {
+      if (record && record.id && record.data !== undefined) {
+        memoryCache.set(record.id, record.data);
+      }
+    }
+    if (allRecords.length > 0) {
+      console.log(
+        `[JQMS Vault] Pre-warmed ${allRecords.length} cached records from IndexedDB into memory cache.`,
+      );
+    }
+  } catch (e) {
+    console.warn("[JQMS Vault] IndexedDB hydration error:", e);
+  }
+}
 
 export function initVaultMigration(): void {
   if (
@@ -75,6 +120,9 @@ export function initVaultMigration(): void {
   )
     return;
   migrationInitiated = true;
+
+  // 1. Immediately hydrate existing IDB records into memory
+  hydrateVaultFromIDB().catch(() => {});
 
   try {
     const keysToMigrate: string[] = [];
@@ -250,6 +298,18 @@ export function purgeBloatedLocalStorage(): void {
     }
     keysToRemove.forEach((key) => {
       try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (!memoryCache.has(key)) {
+              memoryCache.set(key, parsed);
+              getDb().then((db) => {
+                db.put("cachedRecords", { id: key, data: parsed, updatedAt: Date.now() });
+              }).catch(() => {});
+            }
+          } catch {}
+        }
         localStorage.removeItem(key);
       } catch {}
     });
@@ -259,6 +319,114 @@ export function purgeBloatedLocalStorage(): void {
 // Auto-run on startup to immediately free up browser storage
 if (typeof window !== "undefined") {
   setTimeout(() => purgeBloatedLocalStorage(), 100);
+}
+
+/**
+ * Safely writes small state/metadata to localStorage without throwing QuotaExceededError.
+ * Strips oversized inline data URLs if an object is passed, and retries once after purging legacy keys.
+ */
+export function safeSetLocalStorage(key: string, value: unknown): boolean {
+  if (typeof window === "undefined" || !window.localStorage) return false;
+  let serialized: string;
+  try {
+    if (typeof value === "string") {
+      serialized = value;
+    } else {
+      serialized = JSON.stringify(value, (_k, v) => {
+        if (typeof v === "string" && v.startsWith("data:") && v.length > 4096) {
+          return undefined;
+        }
+        return v;
+      });
+    }
+  } catch {
+    return false;
+  }
+
+  // Never attempt to push multi-megabyte strings into 5MB localStorage
+  if (serialized.length > 512_000) {
+    console.warn(`[JQMS Vault] Skipped oversized localStorage write for ${key} (${serialized.length} chars)`);
+    return false;
+  }
+
+  try {
+    localStorage.setItem(key, serialized);
+    return true;
+  } catch {
+    try {
+      purgeBloatedLocalStorage();
+      localStorage.setItem(key, serialized);
+      return true;
+    } catch (retryErr) {
+      console.warn(`[JQMS Vault] localStorage quota exceeded for ${key}:`, retryErr);
+      return false;
+    }
+  }
+}
+
+export function safeRemoveLocalStorage(key: string): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Ignore storage removal errors
+  }
+}
+
+/**
+ * Wipes in-memory L1 cache, IndexedDB object stores, and jqms_* localStorage keys.
+ * Used on logout (full tenant isolation wipe) and ErrorBoundary cache recovery.
+ */
+export async function clearAllVaultData(options?: {
+  preserveSyncQueue?: boolean;
+  preserveDrafts?: boolean;
+  preserveAuthStorage?: boolean;
+}): Promise<void> {
+  memoryCache.clear();
+
+  try {
+    const db = await getDb();
+    const storesToClear: Array<"cachedRecords" | "syncQueue" | "formDrafts" | "draftObservations"> = [
+      "cachedRecords",
+    ];
+    if (!options?.preserveSyncQueue) {
+      storesToClear.push("syncQueue");
+    }
+    if (!options?.preserveDrafts) {
+      storesToClear.push("formDrafts", "draftObservations");
+    }
+    const tx = db.transaction(storesToClear, "readwrite");
+    for (const storeName of storesToClear) {
+      await tx.objectStore(storeName).clear();
+    }
+    await tx.done;
+  } catch (e) {
+    console.warn("[JQMS Vault] Failed clearing IndexedDB stores:", e);
+  }
+
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      const keysToDelete: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith("jqms_")) {
+          if (
+            options?.preserveAuthStorage &&
+            (k === "jqms_current_user" || k === "jqms_current_company")
+          ) {
+            continue;
+          }
+          keysToDelete.push(k);
+        }
+      }
+      for (const k of keysToDelete) {
+        localStorage.removeItem(k);
+      }
+    } catch {
+      // Ignore
+    }
+  }
 }
 
 /**
@@ -404,11 +572,57 @@ export function upsertInVaultCache<T extends { id?: string; sampleId?: string }>
 
 // ─── OFFLINE ACTION QUEUE ───────────────────────────────────────────────
 
+function notifyOfflineQueueChanged(): void {
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(new CustomEvent("jqms:offline-queue-changed"));
+    } catch {
+      // Ignore event dispatch errors in non-DOM test environments
+    }
+  }
+}
+
 export async function queueOfflineAction(
   item: Omit<OfflineSyncItem, "id" | "createdAt" | "status" | "retryCount">,
 ): Promise<string> {
   const db = await getDb();
-  const id = `OFFLINE-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+  const payloadEntityId =
+    item.payload && typeof item.payload === "object"
+      ? item.payload.id || item.payload.sampleId
+      : undefined;
+
+  if (payloadEntityId) {
+    try {
+      const existing = (await db.getAll("syncQueue")) as OfflineSyncItem[];
+      const match = existing.find(
+        (q) =>
+          q.type === item.type &&
+          q.companyId === item.companyId &&
+          q.status !== "SYNCING" &&
+          (q.payload?.id === payloadEntityId || q.payload?.sampleId === payloadEntityId),
+      );
+      if (match) {
+        const updated: OfflineSyncItem = {
+          ...match,
+          projectId: item.projectId,
+          companyId: item.companyId,
+          payload: item.payload,
+          status: "QUEUED",
+        };
+        await db.put("syncQueue", updated);
+        notifyOfflineQueueChanged();
+        return match.id;
+      }
+    } catch {
+      // Proceed to insert fresh queue item
+    }
+  }
+
+  const uuid =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  const id = `OFFLINE-${uuid}`;
   const syncItem: OfflineSyncItem = {
     ...item,
     id,
@@ -417,6 +631,7 @@ export async function queueOfflineAction(
     retryCount: 0,
   };
   await db.put("syncQueue", syncItem);
+  notifyOfflineQueueChanged();
   return id;
 }
 
@@ -429,19 +644,32 @@ export async function getQueuedActions(): Promise<OfflineSyncItem[]> {
   }
 }
 
+export async function updateQueuedAction(item: OfflineSyncItem): Promise<void> {
+  const db = await getDb();
+  await db.put("syncQueue", item);
+  notifyOfflineQueueChanged();
+}
+
 export async function removeQueuedAction(id: string): Promise<void> {
   const db = await getDb();
   await db.delete("syncQueue", id);
+  notifyOfflineQueueChanged();
 }
 
-// ─── GENERIC FORM DRAFTS ────────────────────────────────────────────────
+// ─── GENERIC FORM DRAFTS (Scoped by Authenticated UID) ──────────────────
+
+function buildScopedDraftId(formType: string, draftId: string, explicitUserId?: string): string {
+  const uid = (explicitUserId || auth.currentUser?.uid || "").trim();
+  return uid ? `${uid}_${formType}_${draftId}` : `${formType}_${draftId}`;
+}
 
 export async function saveFormDraft(
   formType: string,
   draftId: string,
   data: any,
+  userId?: string,
 ): Promise<void> {
-  const compositeId = `${formType}_${draftId}`;
+  const compositeId = buildScopedDraftId(formType, draftId, userId);
   const now = new Date().toISOString();
   const draftItem: FormDraftItem = {
     id: compositeId,
@@ -462,8 +690,9 @@ export async function saveFormDraft(
 export async function getFormDraft(
   formType: string,
   draftId: string,
+  userId?: string,
 ): Promise<{ data: any; updatedAt: string } | null> {
-  const compositeId = `${formType}_${draftId}`;
+  const compositeId = buildScopedDraftId(formType, draftId, userId);
   try {
     const db = await getDb();
     const result = (await db.get("formDrafts", compositeId)) as
@@ -494,17 +723,23 @@ export async function getFormDraft(
 export async function clearFormDraft(
   formType: string,
   draftId: string,
+  userId?: string,
 ): Promise<void> {
-  const compositeId = `${formType}_${draftId}`;
+  const compositeId = buildScopedDraftId(formType, draftId, userId);
+  const legacyCompositeId = `${formType}_${draftId}`;
   try {
     const db = await getDb();
     await db.delete("formDrafts", compositeId);
+    if (legacyCompositeId !== compositeId) {
+      await db.delete("formDrafts", legacyCompositeId);
+    }
   } catch (e) {
     console.warn("IDB formDraft delete warning:", e);
   }
 
   try {
     localStorage.removeItem(`jqms_draft_${compositeId}`);
+    localStorage.removeItem(`jqms_draft_${legacyCompositeId}`);
   } catch {
     // Ignore
   }

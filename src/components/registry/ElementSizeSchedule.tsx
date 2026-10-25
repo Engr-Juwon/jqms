@@ -80,14 +80,17 @@ const parseElementProfile = (
   // 1. Column Profiles
   if (type === "Column") {
     const isCircular = el.columnShape === "circular" || typeStr.includes("circular");
+    const isSlanted = !!el.isInclined || el.verticality === "inclined";
+    const slantSuffix = isSlanted ? ` [Slanted ${Number(el.inclinationAngle) || 10}°]` : "";
+    const slantKey = isSlanted ? `_SLANTED_${Number(el.inclinationAngle) || 10}` : "";
 
     if (isCircular && el.diameter) {
       const dMm = formatMm(el.diameter);
       return {
         type,
-        key: `COL_CIRC_${dMm}`,
-        label: `Ø${dMm} mm`,
-        details: `Circular Column · Diameter: ${dMm}mm`,
+        key: `COL_CIRC_${dMm}${slantKey}`,
+        label: `Ø${dMm} mm${slantSuffix}`,
+        details: `${isSlanted ? "Slanted " : ""}Circular Column · Diameter: ${dMm}mm${isSlanted ? ` (${Number(el.inclinationAngle) || 10}°)` : ""}`,
       };
     } else {
       const wMm = formatMm(el.width || el.dimensions?.width);
@@ -98,9 +101,9 @@ const parseElementProfile = (
 
       return {
         type,
-        key: `COL_RECT_${keyStr}`,
-        label: labelStr,
-        details: `Rect. Column · ${wMm}mm × ${lMm}mm`,
+        key: `COL_RECT_${keyStr}${slantKey}`,
+        label: `${labelStr}${slantSuffix}`,
+        details: `${isSlanted ? "Slanted " : ""}Rect. Column · ${wMm}mm × ${lMm}mm${isSlanted ? ` (${Number(el.inclinationAngle) || 10}°)` : ""}`,
       };
     }
   }

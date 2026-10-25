@@ -1,3 +1,5 @@
+import { auth } from "@/firebase";
+
 export type AIActionType =
   | "CREATE_NCR"
   | "CREATE_DAILY_LOG"
@@ -36,6 +38,8 @@ export interface AskAIOptions {
     roleTitle?: string;
     userName?: string;
     currentModule?: string;
+    currentRoute?: string;
+    currentDocumentId?: string;
     currentDateTime?: string;
     currentDateFormatted?: string;
     currentTimeFormatted?: string;
@@ -43,7 +47,12 @@ export interface AskAIOptions {
     userRole?: string;
     projectDataSummary?: string;
   };
-  taskType?: "chat" | "ncr_draft" | "weekly_summary" | "spec_lookup" | "photo_defect_analysis";
+  taskType?:
+    | "chat"
+    | "ncr_draft"
+    | "weekly_summary"
+    | "spec_lookup"
+    | "photo_defect_analysis";
   imageBase64?: string;
   history?: Array<{ role: "user" | "model"; text: string }>;
 }
@@ -59,7 +68,10 @@ export interface AIResponse {
 /**
  * Parses markdown ```jqms-action ... ``` block out of the model's text response.
  */
-export function extractActionProposal(rawText: string): { cleanText: string; action?: AIActionProposal } {
+export function extractActionProposal(rawText: string): {
+  cleanText: string;
+  action?: AIActionProposal;
+} {
   const match = rawText.match(/```jqms-action\s*([\s\S]*?)\s*```/);
   if (!match) {
     return { cleanText: rawText };
@@ -68,7 +80,9 @@ export function extractActionProposal(rawText: string): { cleanText: string; act
   try {
     const jsonStr = match[1].trim();
     const action = JSON.parse(jsonStr) as AIActionProposal;
-    const cleanText = rawText.replace(/```jqms-action\s*[\s\S]*?\s*```/, "").trim();
+    const cleanText = rawText
+      .replace(/```jqms-action\s*[\s\S]*?\s*```/, "")
+      .trim();
     return { cleanText, action };
   } catch (err) {
     console.warn("Failed parsing action proposal JSON:", err);
@@ -77,39 +91,85 @@ export function extractActionProposal(rawText: string): { cleanText: string; act
 }
 
 /**
- * Client service to communicate with the secure Netlify AI Copilot serverless function.
+ * Client service to communicate with the AI Copilot exclusively via the
+ * authenticated Netlify serverless endpoint (/api/gemini-assistant).
+ * Server API keys never enter browser bundles or client network query strings.
  */
-export async function askGeminiCopilot(options: AskAIOptions): Promise<AIResponse> {
-  try {
-    const res = await fetch("/api/gemini-assistant", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(options),
-    });
-
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => null);
-      throw new Error(errJson?.error || `Server responded with status ${res.status}`);
-    }
-
-    const data = await res.json();
-    const rawText = data.text || "No reply received from AI model.";
-    const { cleanText, action } = extractActionProposal(rawText);
-
-    return {
-      text: rawText,
-      cleanText,
-      actionProposal: action,
-      model: data.model,
-    };
-  } catch (err: any) {
-    console.error("Gemini Copilot client error:", err);
+export async function askGeminiCopilot(
+  options: AskAIOptions,
+): Promise<AIResponse> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
     return {
       text: "",
       cleanText: "",
-      error: err?.message || "Failed to communicate with AI Copilot.",
+      error: "Authentication required. Please sign in to use Jay-QMS Copilot.",
     };
   }
+
+  let idToken = "";
+  try {
+    idToken = await currentUser.getIdToken();
+  } catch (tokenErr: any) {
+    return {
+      text: "",
+      cleanText: "",
+      error:
+        tokenErr?.message ||
+        "Unable to verify session token. Please sign in again.",
+    };
+  }
+
+  const endpoints = [
+    "/api/gemini-assistant",
+    "/.netlify/functions/gemini-assistant",
+  ];
+  let lastError = "Failed to communicate with AI Copilot.";
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify(options),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        // Likely SPA fallback in non-netlify vite dev server; try direct netlify function path next
+        lastError =
+          "AI Copilot serverless endpoint is not reachable in this environment. Run `npx netlify dev` locally or deploy to Netlify with GEMINI_API_KEY configured.";
+        continue;
+      }
+
+      const data = await res.json();
+      if (!res.ok) {
+        lastError =
+          data?.error ||
+          `AI Copilot returned status ${res.status}.`;
+        break;
+      }
+
+      const rawText = data.text || "No reply received from AI model.";
+      const { cleanText, action } = extractActionProposal(rawText);
+
+      return {
+        text: rawText,
+        cleanText,
+        actionProposal: action,
+        model: data.model,
+      };
+    } catch (err: any) {
+      lastError = err?.message || String(err);
+    }
+  }
+
+  return {
+    text: "",
+    cleanText: "",
+    error: lastError,
+  };
 }

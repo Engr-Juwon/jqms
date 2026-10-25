@@ -18,16 +18,25 @@ import {
   Percent,
   FileText,
   AlertTriangle,
+  Box,
+  Lock,
+  Eye,
+  EyeOff,
+  ShieldAlert,
+  CheckCircle,
+  RotateCcw,
+  CheckCheck,
 } from "lucide-react";
 import { dbService } from "../../lib/db";
 import { useProjectStore } from "../../stores/useProjectStore";
 import { useAuthStore } from "../../stores/useAuthStore";
 import { writeAudit } from "../../lib/audit";
-import { Project, Level } from "../../types";
+import { Project, Level, BimModuleSettings, DEFAULT_BIM_SETTINGS } from "../../types";
 import {
   hasMinRole,
   isGlobalManagerRole,
   isQAQCEngineerRole,
+  canManageProjectFeatures,
 } from "../../lib/permissions";
 import { uploadMultiple } from "../../lib/cloudinary";
 import { toast } from "react-hot-toast";
@@ -41,16 +50,16 @@ export const ProjectEdit: React.FC = () => {
     useProjectStore();
   const { currentUser, company } = useAuthStore();
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-apex-civil";
+    currentUser?.companyId || company?.id || "";
 
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const [activeTab, setActiveTab] = useState<"details" | "matrix" | "levels">(
-    tabParam === "matrix" ? "matrix" : tabParam === "levels" ? "levels" : "details",
+  const [activeTab, setActiveTab] = useState<"details" | "matrix" | "levels" | "bim">(
+    tabParam === "matrix" ? "matrix" : tabParam === "levels" ? "levels" : tabParam === "bim" ? "bim" : "details",
   );
 
   useEffect(() => {
-    if (tabParam === "matrix" || tabParam === "levels" || tabParam === "details") {
+    if (tabParam === "matrix" || tabParam === "levels" || tabParam === "details" || tabParam === "bim") {
       setActiveTab(tabParam);
     }
   }, [tabParam]);
@@ -63,6 +72,10 @@ export const ProjectEdit: React.FC = () => {
   // Form State
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [enableBim, setEnableBim] = useState(false);
+  const [bimSettings, setBimSettings] = useState<Required<BimModuleSettings>>({
+    ...DEFAULT_BIM_SETTINGS,
+  });
   const [type, setType] = useState("High-rise Residential");
   const [customType, setCustomType] = useState("");
   const [location, setLocation] = useState("");
@@ -88,6 +101,7 @@ export const ProjectEdit: React.FC = () => {
   const [newLevelElevation, setNewLevelElevation] = useState<number>(0);
 
   const canEdit = hasMinRole(currentUser?.role, 3);
+  const canManageBim = canManageProjectFeatures(currentUser, project);
 
   const loadData = async () => {
     setLoading(true);
@@ -137,6 +151,25 @@ export const ProjectEdit: React.FC = () => {
         setImageUrl(foundProject.imageUrl || foundProject.coverImageUrl || "");
         setCurrentLevelId(foundProject.currentLevelId || "");
         setCurrentLevelName(foundProject.currentLevelName || "");
+        const existingBim = foundProject.bimSettings || {};
+        const loadedBim: Required<BimModuleSettings> = {
+          enable2D: existingBim.enable2D ?? DEFAULT_BIM_SETTINGS.enable2D,
+          enable3D: existingBim.enable3D ?? DEFAULT_BIM_SETTINGS.enable3D,
+          enable4D: existingBim.enable4D ?? DEFAULT_BIM_SETTINGS.enable4D,
+          enable5D: existingBim.enable5D ?? DEFAULT_BIM_SETTINGS.enable5D,
+          enable6D: existingBim.enable6D ?? DEFAULT_BIM_SETTINGS.enable6D,
+          enable7D: existingBim.enable7D ?? DEFAULT_BIM_SETTINGS.enable7D,
+          enableMTO: existingBim.enableMTO ?? DEFAULT_BIM_SETTINGS.enableMTO,
+          enableGridlines: existingBim.enableGridlines ?? DEFAULT_BIM_SETTINGS.enableGridlines,
+          enableLevels: existingBim.enableLevels ?? DEFAULT_BIM_SETTINGS.enableLevels,
+          enablePackages: existingBim.enablePackages ?? DEFAULT_BIM_SETTINGS.enablePackages,
+        };
+        setBimSettings(loadedBim);
+        setEnableBim(
+          foundProject.bimSettings
+            ? Object.values(loadedBim).some(Boolean)
+            : (foundProject.enableBim ?? true),
+        );
 
         // Load assigned staff with defaults
         let staff =
@@ -281,6 +314,8 @@ export const ProjectEdit: React.FC = () => {
         excludedStaffIds,
         currentLevelId,
         currentLevelName,
+        enableBim: Object.values(bimSettings).some(Boolean),
+        bimSettings: { ...bimSettings },
         companyId: project.companyId || currentCompId,
         companyName: project.companyName || company?.name || "",
         updatedAt: new Date().toISOString(),
@@ -381,9 +416,24 @@ export const ProjectEdit: React.FC = () => {
       }
 
       await loadProjects();
-      if (activeProject?.id === project.id) {
+      const isTargetActive =
+        activeProject?.id === project.id ||
+        activeProject?.code === project.code ||
+        localStorage.getItem("jqms_active_project_id") === project.id;
+
+      if (isTargetActive) {
         setActiveProject(updated);
       }
+
+      const { projects: currentProjects } = useProjectStore.getState();
+      useProjectStore.setState({
+        projects: currentProjects.map((p) =>
+          p.id === updated.id ? updated : p,
+        ),
+        activeProject: isTargetActive
+          ? updated
+          : useProjectStore.getState().activeProject,
+      });
 
       toast.success(`Project ${updated.name} updated successfully`);
       setProject(updated);
@@ -425,7 +475,259 @@ export const ProjectEdit: React.FC = () => {
     );
   }
 
-  const isCurrentActive = activeProject?.id === project.id;
+  const isCurrentActive =
+    activeProject?.id === project.id ||
+    activeProject?.code === project.code ||
+    localStorage.getItem("jqms_active_project_id") === project.id;
+  const activeBimCount = Object.values(bimSettings).filter(Boolean).length;
+
+  // Persists BIM module changes immediately to Cloud Firestore and syncs useProjectStore
+  const applyAndPersistBimSettings = async (
+    nextBimSettings: Required<BimModuleSettings>,
+    successMessage: string,
+  ) => {
+    if (!canManageBim || !project) return;
+
+    setBimSettings(nextBimSettings);
+    const anyEnabled = Object.values(nextBimSettings).some(Boolean);
+    setEnableBim(anyEnabled);
+
+    const updatedProject: Project = {
+      ...project,
+      enableBim: anyEnabled,
+      bimSettings: { ...nextBimSettings },
+      updatedAt: new Date().toISOString(),
+    };
+
+    setProject(updatedProject);
+
+    try {
+      // 1. Immediately persist to Cloud Firestore & Local Cache
+      await dbService.saveProject(updatedProject);
+
+      // 2. Immediately update useProjectStore activeProject and projects list
+      const isTargetActive =
+        activeProject?.id === project.id ||
+        activeProject?.code === project.code ||
+        localStorage.getItem("jqms_active_project_id") === project.id ||
+        !activeProject;
+
+      if (isTargetActive) {
+        setActiveProject(updatedProject);
+      }
+
+      const { projects: currentProjects } = useProjectStore.getState();
+      useProjectStore.setState({
+        projects: currentProjects.map((p) =>
+          p.id === updatedProject.id ? updatedProject : p,
+        ),
+        activeProject: isTargetActive
+          ? updatedProject
+          : useProjectStore.getState().activeProject,
+      });
+
+      toast.success(successMessage);
+    } catch (saveErr) {
+      console.error("Could not persist BIM settings:", saveErr);
+      toast.error("Failed to persist BIM configuration to cloud database.");
+    }
+  };
+
+  const handleResetBimDefaults = () => {
+    if (!canManageBim) {
+      toast.error("Permission Denied: Only Level 5 authority or Project Admin can configure BIM modules.");
+      return;
+    }
+    applyAndPersistBimSettings(
+      { ...DEFAULT_BIM_SETTINGS },
+      "BIM modules reset to defaults (2D, 3D, 7D, MTO, Gridlines, Levels, Packages ON; 4D, 5D, 6D OFF)",
+    );
+  };
+
+  const handleEnableAllBim = () => {
+    if (!canManageBim) {
+      toast.error("Permission Denied: Only Level 5 authority or Project Admin can configure BIM modules.");
+      return;
+    }
+    applyAndPersistBimSettings(
+      {
+        enable2D: true,
+        enable3D: true,
+        enable4D: true,
+        enable5D: true,
+        enable6D: true,
+        enable7D: true,
+        enableMTO: true,
+        enableGridlines: true,
+        enableLevels: true,
+        enablePackages: true,
+      },
+      "All 10 BIM modules enabled and active across navigation & routing",
+    );
+  };
+
+  const handleDisableAllBim = () => {
+    if (!canManageBim) {
+      toast.error("Permission Denied: Only Level 5 authority or Project Admin can configure BIM modules.");
+      return;
+    }
+    applyAndPersistBimSettings(
+      {
+        enable2D: false,
+        enable3D: false,
+        enable4D: false,
+        enable5D: false,
+        enable6D: false,
+        enable7D: false,
+        enableMTO: false,
+        enableGridlines: false,
+        enableLevels: false,
+        enablePackages: false,
+      },
+      "All 10 BIM modules disabled and blocked across navigation & routing",
+    );
+  };
+
+  const handleToggleBimModule = (key: keyof BimModuleSettings) => {
+    if (!canManageBim) {
+      toast.error("Permission Denied: Only Level 5 authority or Project Admin can configure BIM modules.");
+      return;
+    }
+    const nextVal = !bimSettings[key];
+    const nextBim: Required<BimModuleSettings> = {
+      ...bimSettings,
+      [key]: nextVal,
+    };
+    const config = BIM_MODULE_CONFIGS.find((c) => c.key === key);
+    const label = config ? `${config.dimension} (${config.title})` : key;
+    applyAndPersistBimSettings(
+      nextBim,
+      `${label} ${nextVal ? "enabled" : "disabled and blocked"} across navigation`,
+    );
+  };
+
+  const BIM_MODULE_CONFIGS: {
+    key: keyof BimModuleSettings;
+    dimension: string;
+    title: string;
+    description: string;
+    route: string;
+    defaultState: boolean;
+    color: string;
+    badgeBg: string;
+    badgeText: string;
+  }[] = [
+    {
+      key: "enable2D",
+      dimension: "2D BIM",
+      title: "Interactive Grid Plan",
+      description: "Interactive architectural/structural CAD floor plans with live element pins.",
+      route: "/project/grid-plan",
+      defaultState: true,
+      color: "border-blue-500/30 dark:border-blue-500/20",
+      badgeBg: "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300",
+      badgeText: "CAD & Plans",
+    },
+    {
+      key: "enable3D",
+      dimension: "3D BIM",
+      title: "3D Structural Twin Viewer",
+      description: "WebGL Three.js 3D structural model with quality status overlays and inspection pins.",
+      route: "/project/bim-3d",
+      defaultState: true,
+      color: "border-indigo-500/30 dark:border-indigo-500/20",
+      badgeBg: "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300",
+      badgeText: "Digital Twin",
+    },
+    {
+      key: "enable7D",
+      dimension: "7D BIM",
+      title: "Asset Register & Passports",
+      description: "Master structural element directory, physical QR asset passports, and lifecycle logs.",
+      route: "/project/elements",
+      defaultState: true,
+      color: "border-purple-500/30 dark:border-purple-500/20",
+      badgeBg: "bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300",
+      badgeText: "Asset Register",
+    },
+    {
+      key: "enableMTO",
+      dimension: "MTO",
+      title: "Material Take-Off (MTO)",
+      description: "Concrete pour volume schedules, element dimension matrices, and rebar schedules.",
+      route: "/project/mto",
+      defaultState: true,
+      color: "border-sky-500/30 dark:border-sky-500/20",
+      badgeBg: "bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300",
+      badgeText: "Take-Off",
+    },
+    {
+      key: "enableGridlines",
+      dimension: "Spatial Matrix",
+      title: "Gridlines & Axis Matrix",
+      description: "Structural coordinate axis grid, column coordinates, and gridline spacing.",
+      route: "/project/gridlines",
+      defaultState: true,
+      color: "border-teal-500/30 dark:border-teal-500/20",
+      badgeBg: "bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300",
+      badgeText: "Axis Matrix",
+    },
+    {
+      key: "enableLevels",
+      dimension: "Spatial Matrix",
+      title: "Floor Levels & Vertical Zones",
+      description: "Building elevation hierarchy, storeys, datum heights, and floor sequences.",
+      route: "/project/levels",
+      defaultState: true,
+      color: "border-cyan-500/30 dark:border-cyan-500/20",
+      badgeBg: "bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300",
+      badgeText: "Levels",
+    },
+    {
+      key: "enablePackages",
+      dimension: "Spatial Matrix",
+      title: "Work Packages & Disciplines",
+      description: "Contractor discipline scopes, trades decomposition, and package assignments.",
+      route: "/project/packages",
+      defaultState: true,
+      color: "border-rose-500/30 dark:border-rose-500/20",
+      badgeBg: "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300",
+      badgeText: "Packages",
+    },
+    {
+      key: "enable4D",
+      dimension: "4D BIM",
+      title: "4D Construction Planner",
+      description: "Milestone timeline schedule, lookahead Gantt, and background planner reminders.",
+      route: "/project/planner",
+      defaultState: false,
+      color: "border-orange-500/30 dark:border-orange-500/20",
+      badgeBg: "bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-300",
+      badgeText: "Planner & Time",
+    },
+    {
+      key: "enable5D",
+      dimension: "5D BIM",
+      title: "5D Cost Takeoff & BOQ",
+      description: "Bill of quantities, elemental unit rates, cost projections, and commercial modeling.",
+      route: "/project/5d-cost",
+      defaultState: false,
+      color: "border-amber-500/30 dark:border-amber-500/20",
+      badgeBg: "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300",
+      badgeText: "Cost & BOQ",
+    },
+    {
+      key: "enable6D",
+      dimension: "6D BIM",
+      title: "6D Carbon & Sustainability ESG",
+      description: "Embodied carbon calculations, concrete & rebar CO2 footprints, and green rating metrics.",
+      route: "/project/6d-carbon",
+      defaultState: false,
+      color: "border-emerald-500/30 dark:border-emerald-500/20",
+      badgeBg: "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300",
+      badgeText: "Carbon & ESG",
+    },
+  ];
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-20 animate-in fade-in duration-200">
@@ -535,6 +837,28 @@ export const ProjectEdit: React.FC = () => {
           <span>Structural Levels</span>
           <span className="px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-[10px] font-bold">
             {levels.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("bim")}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 ${
+            activeTab === "bim"
+              ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-800 shadow-sm"
+              : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+          }`}
+        >
+          <Box className="w-4 h-4 text-amber-500" />
+          <span>BIM (2D - 7D) Controls</span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              activeBimCount > 0
+                ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800"
+                : "bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-300 dark:border-slate-700"
+            }`}
+          >
+            {activeBimCount > 0 ? `${activeBimCount}/10 ACTIVE` : "ALL DISABLED"}
           </span>
         </button>
       </div>
@@ -1099,6 +1423,217 @@ export const ProjectEdit: React.FC = () => {
               <Save className="w-4 h-4" />
               <span>{saving ? "Saving..." : "Save Configuration"}</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ TAB 4: BIM (2D-7D) Feature Controls ═══ */}
+      {activeTab === "bim" && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
+            {/* Header & Quick Presets */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    <Box className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+                      <span>BIM &amp; Spatial Twin Governance (2D - 7D)</span>
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Configure granular per-page accessibility for {project.name}. You can keep 2D or any dimension on and turn off the rest.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Actions & Status Pill */}
+              <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+                <div className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold uppercase text-slate-400">
+                    Active Suite:
+                  </span>
+                  <span className="text-xs font-mono font-black text-brand-600 dark:text-brand-400">
+                    {activeBimCount} / 10 Modules
+                  </span>
+                </div>
+
+                {canManageBim && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleResetBimDefaults}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1"
+                      title="Reset to Recommended: 2D, 3D, 7D, MTO, Gridlines, Levels, Packages ON; 4D, 5D, 6D OFF"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Reset Defaults</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleEnableAllBim}
+                      className="px-2.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 text-xs font-bold border border-emerald-200 dark:border-emerald-800/60 transition flex items-center gap-1"
+                    >
+                      <CheckCheck className="w-3.5 h-3.5" />
+                      <span>Enable All</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDisableAllBim}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 text-xs font-bold transition"
+                    >
+                      <span>Disable All</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Permission Guard Notice */}
+            {!canManageBim && (
+              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-start gap-3">
+                <Lock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <div className="font-bold text-amber-900 dark:text-amber-200">
+                    Restricted Feature Management
+                  </div>
+                  <div className="text-amber-700 dark:text-amber-400 leading-relaxed">
+                    Only the <strong>Project Administrator</strong> (Project Manager or Creator) or someone on <strong>Level 5</strong> (Super Admin, Quality Director, Executive Management, Quality Manager, QAQC Manager) is authorized to toggle BIM dimensions on this project.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Policy Banner */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-start gap-3.5">
+              <ShieldAlert className="w-5 h-5 text-brand-600 dark:text-brand-400 shrink-0 mt-0.5" />
+              <div className="text-xs space-y-1 text-slate-600 dark:text-slate-400 leading-relaxed">
+                <div className="font-bold text-slate-900 dark:text-white">
+                  Individual Navigation &amp; Routing Isolation
+                </div>
+                <p>
+                  Any page switched OFF is <strong>immediately hidden and blocked</strong> across all navigation systems (Sidebar rail, secondary drawer, mobile bottom nav, Mega Directory catalog, dashboard quick links, and BIM dimension tabs). Direct URL attempts are stopped with an authorized notice.
+                </p>
+              </div>
+            </div>
+
+            {/* Controlled BIM Modules Cards Grid */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Individual BIM Pages &amp; Dimensions (10 Total)
+                </h3>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  Defaults: 2D, 3D, 7D, MTO, Gridlines, Levels, Packages ON • 4D, 5D, 6D OFF
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {BIM_MODULE_CONFIGS.map((config) => {
+                  const isEnabled = Boolean(bimSettings[config.key]);
+                  return (
+                    <div
+                      key={config.key}
+                      className={`p-4 sm:p-5 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
+                        isEnabled
+                          ? "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 shadow-sm ring-1 ring-slate-200 dark:ring-slate-800"
+                          : "bg-slate-50/70 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800/80 opacity-70"
+                      }`}
+                    >
+                      {/* Top Row: Badges & Switch */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold ${config.badgeBg}`}
+                          >
+                            {config.dimension}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-400">
+                            {config.badgeText}
+                          </span>
+                        </div>
+
+                        {/* Interactive Toggle */}
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-[11px] font-bold uppercase ${
+                              isEnabled
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-slate-400"
+                            }`}
+                          >
+                            {isEnabled ? "Visible" : "Hidden"}
+                          </span>
+
+                          <button
+                            type="button"
+                            disabled={!canManageBim}
+                            onClick={() => handleToggleBimModule(config.key)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
+                              isEnabled
+                                ? "bg-emerald-600"
+                                : "bg-slate-300 dark:bg-slate-700"
+                            }`}
+                            role="switch"
+                            aria-checked={isEnabled}
+                            title={
+                              canManageBim
+                                ? isEnabled
+                                  ? `Click to disable ${config.title}`
+                                  : `Click to enable ${config.title}`
+                                : "Only Project Administrator or Level 5 Authorities can toggle this page"
+                            }
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out flex items-center justify-center ${
+                                isEnabled ? "translate-x-5" : "translate-x-0"
+                              }`}
+                            >
+                              {isEnabled ? (
+                                <Eye className="w-2.5 h-2.5 text-emerald-600" />
+                              ) : (
+                                <EyeOff className="w-2.5 h-2.5 text-slate-400" />
+                              )}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center justify-between">
+                          <span>{config.title}</span>
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                          {config.description}
+                        </p>
+                      </div>
+
+                      {/* Route Footer */}
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                        <span>{config.route}</span>
+                        <span>{config.defaultState ? "Default: ON" : "Default: OFF"}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={saving || !canManageBim}
+                className="px-6 py-2.5 rounded-xl bg-[#ea580c] hover:bg-[#c2410c] text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-orange-600/30 transition disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                <span>{saving ? "Saving..." : "Save Configuration"}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

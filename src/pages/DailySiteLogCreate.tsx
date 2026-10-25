@@ -85,87 +85,9 @@ export const DailySiteLogCreate: React.FC = () => {
   const [siteStatusNotes, setSiteStatusNotes] = useState("");
 
   // 2. Execution & Manpower
-  const [manpower, setManpower] = useState<DailyManpowerEntry[]>([
-    {
-      id: "mp-1",
-      tradeName: "Carpentry & Formwork",
-      tradeCategory: "Civil",
-      companyOrSubcontractor: "Main Contractor",
-      headCount: 8,
-      hoursWorked: 10,
-      totalManHours: 80,
-    },
-    {
-      id: "mp-2",
-      tradeName: "Steel Fixing & Rebar",
-      tradeCategory: "Structural",
-      companyOrSubcontractor: "Steel Subcontractor",
-      headCount: 12,
-      hoursWorked: 10,
-      totalManHours: 120,
-    },
-    {
-      id: "mp-3",
-      tradeName: "MEP Electrical / Plumbers",
-      tradeCategory: "MEP",
-      companyOrSubcontractor: "MEP Specialist",
-      headCount: 6,
-      hoursWorked: 10,
-      totalManHours: 60,
-    },
-    {
-      id: "mp-4",
-      tradeName: "General Site Laborers",
-      tradeCategory: "General",
-      companyOrSubcontractor: "Direct Labor",
-      headCount: 10,
-      hoursWorked: 10,
-      totalManHours: 100,
-    },
-  ]);
-
-  const [activities, setActivities] = useState<DailyWorkActivity[]>([
-    {
-      id: "act-1",
-      levelName: "Level 02",
-      elementName: "Slab & Beams Grid B-E",
-      trade: "Carpentry & Formwork",
-      description: "Erection of soffit formwork and falsework support props.",
-      progressPercentage: 65,
-      quantityDone: "180 m²",
-      status: "IN_PROGRESS",
-    },
-    {
-      id: "act-2",
-      levelName: "Level 02",
-      elementName: "Columns C1 to C8",
-      trade: "Steel Fixing",
-      description: "Tying column main bars and shear link spacing check.",
-      progressPercentage: 100,
-      quantityDone: "8 Columns",
-      status: "COMPLETED",
-    },
-  ]);
-
-  const [equipment, setEquipment] = useState<DailyEquipmentEntry[]>([
-    {
-      id: "eq-1",
-      equipmentType: "Tower Crane #1",
-      plantNumber: "TC-01",
-      quantity: 1,
-      status: "OPERATIONAL",
-      hoursUsed: 9,
-      operatorName: "Certified Crane Operator",
-    },
-    {
-      id: "eq-2",
-      equipmentType: "Stationary Concrete Pump",
-      plantNumber: "CP-02",
-      quantity: 1,
-      status: "STANDBY",
-      hoursUsed: 4,
-    },
-  ]);
+  const [manpower, setManpower] = useState<DailyManpowerEntry[]>([]);
+  const [activities, setActivities] = useState<DailyWorkActivity[]>([]);
+  const [equipment, setEquipment] = useState<DailyEquipmentEntry[]>([]);
 
   const [delays, setDelays] = useState<DailyDelayEntry[]>([]);
 
@@ -460,17 +382,28 @@ export const DailySiteLogCreate: React.FC = () => {
   );
 
   const handleSave = async (submitForReview = false) => {
-    if (!currentProjId) {
+    if (saving) return;
+    if (!currentProjId || !currentCompId) {
       toast.error("Active project workspace required.");
       return;
     }
 
     setSaving(true);
     try {
+      let finalLogNumber = logNumber;
+      if (!isEditMode) {
+        try {
+          const seq = await dbService.getNextSequenceNumber(currentCompId, currentProjId, "DSL");
+          finalLogNumber = seq.formattedCode;
+        } catch {
+          finalLogNumber = logNumber || generateDailyLogNumber(activeProject?.code, date);
+        }
+      }
+
       const recordId = id || `dsl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const logRecord: DailySiteLog = {
         id: recordId,
-        logNumber: logNumber || generateDailyLogNumber(activeProject?.code, date),
+        logNumber: finalLogNumber,
         projectId: currentProjId,
         projectName: activeProject?.name || "Project",
         projectCode: activeProject?.code || "PRJ",

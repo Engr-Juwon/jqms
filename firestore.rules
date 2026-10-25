@@ -1,0 +1,1547 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model (Jay-QMS Multi-Tenant QA/QC Platform)
+// Project: benchmark-jescode-2e842 | Edition: Standard ((default))
+// ===============================================================
+//
+// This security rules file assumes and enforces the following data structures:
+//
+// 1. Collection: companies/{companyId}
+//    Document ID: companyId (e.g., "comp-<uuid>")
+//    Fields:
+//      - id: string (required, immutable, == companyId, 1..128 chars)
+//      - name: string (required, 1..200 chars) - Organization display name
+//      - legalName: string (optional, <= 200 chars)
+//      - ownerId: string (required, immutable, 1..128 chars) - Founder Auth UID
+//      - logo, logoUrl: string (optional, HTTP/HTTPS URL <= 4096 chars)
+//      - address: string (optional, <= 500 chars)
+//      - phone: string (optional, <= 64 chars)
+//      - email: string (optional, email <= 320 chars)
+//      - website: string (optional, <= 512 chars)
+//      - registrationNo, taxNumber: string (optional, <= 120 chars)
+//      - projects: int|float (optional, 0..100000)
+//      - standards: list<string> (optional, <= 100 items)
+//      - settings: map (optional, <= 30 keys; plaintext smtpServer.password forbidden)
+//      - createdAt: int|float|string|timestamp (optional, immutable once set)
+//      - updatedAt: int|float|string|timestamp (optional)
+//
+// 2. Collection: userInvites/{emailLower}
+//    Document ID: lowercase normalized email address
+//    Fields:
+//      - email: string (required, immutable, == emailLower, valid email <= 320 chars)
+//      - companyId: string (required, immutable, 1..128 chars)
+//      - role: string (required, valid 5-tier UserRole enum)
+//      - status: string (optional, <= 40 chars)
+//      - isActive: bool (optional)
+//      - fullName, displayName, title, designation, department, companyName: string (optional, <= 200 chars)
+//      - phone: string (optional, <= 64 chars)
+//      - projectIds: list<string> (optional, <= 500 items)
+//      - projectAccess: map (optional, <= 500 keys)
+//      - claimedByUid: string (optional, <= 128 chars)
+//      - claimedAt, createdAt, updatedAt: int|float|string|timestamp (optional)
+//      - legacyUserDocId, invitedBy: string (optional, <= 128 chars)
+//
+// 3. Collection: users/{userId}
+//    Document ID: Firebase Auth UID (or "usr-<id>" for legacy admin pre-provisioned records)
+//    Fields:
+//      - uid: string (required, immutable, == userId, 1..128 chars)
+//      - id: string (optional, immutable, == userId)
+//      - email: string (required, <= 320 chars, valid email when non-empty)
+//      - fullName: string (required, 1..200 chars)
+//      - displayName, title, designation, department, companyName: string (optional, <= 200 chars)
+//      - phone: string (optional, <= 64 chars)
+//      - role: string (required, valid 5-tier UserRole enum; locked against self-escalation)
+//      - companyId: string (required, 0..128 chars; '' only for unprovisioned fallback accounts)
+//      - status: string (optional, <= 40 chars; locked against self-modification)
+//      - isActive: bool (optional; locked against self-modification)
+//      - projectIds: list<string> (optional, <= 500 items; locked against self-modification)
+//      - projectAccess: map (optional, <= 500 keys; locked against self-modification)
+//      - avatarUrl: string (optional, HTTP/HTTPS URL <= 4096 chars)
+//      - lastActiveProjectId: string (optional, <= 128 chars)
+//      - smtpCredentials: map (optional; AES-256-GCM encryptedPassword only, raw password forbidden)
+//      - emailSignature: string (optional, <= 5000 chars)
+//      - createdAt: int|float|string|timestamp (optional, immutable once set)
+//      - updatedAt: int|float|string|timestamp (optional)
+//
+// 4. Collection: projects/{projectId}
+//    Document ID: projectId
+//    Fields:
+//      - id: string (required, immutable, == projectId, 1..128 chars)
+//      - companyId: string (required, immutable, 1..128 chars)
+//      - name: string (required, 1..300 chars)
+//      - code: string (required, 1..64 chars)
+//      - clientName, contractorName, consultantName, companyName: string (optional, <= 300 chars)
+//      - assignedStaff, assignedStaffIds, excludedStaffIds: list<string> (optional, <= 1000 items; L4+ governance)
+//      - currentLevelId, currentLevelName, costRates, currency, carbonFactors, progress: L3+ updatable
+//      - bimSettings: map (optional, <= 50 keys; L4+ governance)
+//      - createdAt, updatedAt: int|float|string|timestamp (optional)
+//
+// 5. Tenant-Isolated Engineering, BIM & QA/QC Collections:
+//    projectLevels, structuralElements, gridlines, workPackages, site_comments, siteComments,
+//    ncrs, siteInstructions, dailySiteLogs, rfis, submittals, mars, mirs, inspections,
+//    permitsToPour, permitToPour, cubeSamples, steelTests, barCuttingSchedules,
+//    materialDeliveries, sitePhotos, photos, calendarEvents, plannerEvents, documents,
+//    trades, inspectionTemplates, weeklyReports, itpPlans, roomPunchItems,
+//    takingOverCertificates, methodStatements, documentCounters, notifications
+//    Fields:
+//      - companyId: string (required, non-empty, immutable, == getUserCompanyId(), 1..128 chars)
+//      - projectId: string (required on project-scoped collections, immutable once set, 1..128 chars)
+//      - id: string (when present, immutable, == document ID, 1..128 chars)
+//      - Bounded string, URL, array, and key-count limits enforced on create and update
+//
+// 6. Collection: ai_copilot_sessions/{sessionId}
+//    Fields:
+//      - id: string (required, immutable, == sessionId, 1..128 chars)
+//      - userId: string (required, immutable, == request.auth.uid, 1..128 chars)
+//      - companyId: string (required on write, immutable, == getUserCompanyId(), 1..128 chars)
+//      - projectId: string (optional, <= 128 chars)
+//      - projectName: string (optional, <= 300 chars)
+//      - title: string (required, 1..500 chars)
+//      - messages: list<map> (required, <= 500 items)
+//      - createdAt, updatedAt: int|float|string|timestamp (optional)
+//
+// 7. Collections: chatChannels/{channelId} & chatChannels/{channelId}/messages/{messageId}
+//    Fields (chatChannels):
+//      - id, companyId (immutable), projectId, name, description, type, isPrivate, createdBy,
+//        memberIds (list <= 1000), members (list <= 1000), permissions, lastMessage, createdAt, updatedAt
+//    Fields (messages):
+//      - id, channelId (immutable), companyId (immutable), senderId (immutable, == auth.uid on create),
+//        senderName, content (<= 20000 chars), attachments (list <= 50), reactions, pinned, readBy, timestamp
+//
+// 8. Append-Only Immutable Audit Collections:
+//    - auditLogs/{logId}: id, companyId, projectId, userId (== auth.uid), userName, userRole,
+//      action, module, details, targetId, previousValue, newValue, timestamp (update/delete: false)
+//    - emailCommunications/{logId}: id, companyId, projectId, senderUid / sentByUserId (== auth.uid),
+//      senderName, senderEmail, recipients, cc, bcc, subject, bodyText, bodyHtml, status, sentAt (update/delete: false)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Core Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasAuthEmail() {
+      return isAuthenticated()
+        && ('email' in request.auth.token)
+        && request.auth.token.email is string
+        && request.auth.token.email.size() > 0
+        && request.auth.token.email.size() <= 320;
+    }
+
+    function authEmailLower() {
+      return request.auth.token.email.lower();
+    }
+
+    function isNumber(val) {
+      return val is int || val is float;
+    }
+
+    function isValidBoundedString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidOptionalStringField(data, field, minLen, maxLen) {
+      return !(field in data)
+        || data[field] == null
+        || (data[field] is string && data[field].size() >= minLen && data[field].size() <= maxLen);
+    }
+
+    function isValidOptionalBoolField(data, field) {
+      return !(field in data) || data[field] == null || data[field] is bool;
+    }
+
+    function isValidOptionalListField(data, field, maxSize) {
+      return !(field in data)
+        || data[field] == null
+        || (data[field] is list && data[field].size() <= maxSize);
+    }
+
+    function isValidOptionalMapField(data, field, maxKeys) {
+      return !(field in data)
+        || data[field] == null
+        || (data[field] is map && data[field].keys().size() <= maxKeys);
+    }
+
+    function isValidUrl(url) {
+      return url is string
+        && url.size() <= 4096
+        && (url.matches('^https://.*') || url.matches('^http://.*'));
+    }
+
+    function isValidOptionalUrlField(data, field) {
+      return !(field in data)
+        || data[field] == null
+        || data[field] == ''
+        || isValidUrl(data[field]);
+    }
+
+    // Allows HTTPS/HTTP URLs or bounded PNG/JPEG/WEBP canvas signature data URIs (blocks SVG/HTML/JS XSS & 1MB DoS)
+    function isValidOptionalMediaOrSignatureField(data, field, maxLen) {
+      return !(field in data)
+        || data[field] == null
+        || data[field] == ''
+        || (
+          data[field] is string
+          && data[field].size() <= maxLen
+          && (
+            data[field].matches('^https://.*')
+            || data[field].matches('^http://.*')
+            || data[field].matches('^data:image/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$')
+          )
+        );
+    }
+
+    function isValidEmail(email) {
+      return email is string
+        && email.size() >= 3
+        && email.size() <= 320
+        && email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+
+    function isValidTimeValue(val) {
+      return (val is int && val > 0)
+        || (val is float && val > 0)
+        || (val is string && val.size() >= 4 && val.size() <= 64)
+        || (val is timestamp);
+    }
+
+    function isValidOptionalTimeField(data, field) {
+      return !(field in data) || data[field] == null || isValidTimeValue(data[field]);
+    }
+
+    function hasRequiredFields(data, fields) {
+      return data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isExistingFieldImmutable(field) {
+      return !(field in resource.data)
+        || resource.data[field] == null
+        || resource.data[field] == ''
+        || (field in request.resource.data && request.resource.data[field] == resource.data[field]);
+    }
+
+    function uidNotModified() {
+      return !('uid' in resource.data)
+        || ('uid' in request.resource.data && request.resource.data.uid == resource.data.uid);
+    }
+
+    // ===============================================================
+    // Authoritative User Profile, Active Status & 5-Tier RBAC Helpers
+    // ===============================================================
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function getCallerDoc() {
+      return get(userDocPath());
+    }
+
+    function isUserRecordActive(data) {
+      return data != null
+        && !(data.get('status', 'ACTIVE') in [
+          'INACTIVE', 'SUSPENDED', 'DISABLED',
+          'inactive', 'suspended', 'disabled'
+        ])
+        && data.get('isActive', true) != false;
+    }
+
+    function isActiveUser() {
+      return isAuthenticated()
+        && getCallerDoc() != null
+        && isUserRecordActive(getCallerDoc().data);
+    }
+
+    function getUserCompanyId() {
+      return getCallerDoc().data.get('companyId', '');
+    }
+
+    function hasActiveTenant() {
+      return isActiveUser()
+        && getUserCompanyId() is string
+        && getUserCompanyId().size() > 0
+        && getUserCompanyId().size() <= 128;
+    }
+
+    function belongsToTenant(companyId) {
+      return hasActiveTenant()
+        && companyId is string
+        && companyId.size() > 0
+        && companyId == getUserCompanyId();
+    }
+
+    // Maps all 32 statutory Jay-QMS engineering & governance roles to Levels 1..5 (0 if invalid)
+    function roleLevelOf(role) {
+      return role in [
+        'SUPER_ADMIN',
+        'QUALITY_DIRECTOR',
+        'EXECUTIVE_MANAGEMENT',
+        'QUALITY_MANAGER',
+        'QAQC_MANAGER'
+      ] ? 5 : (
+        role in [
+          'PROJECT_MANAGER',
+          'DEPUTY_QUALITY_MANAGER',
+          'LEAD_QUALITY_AUDITOR',
+          'SENIOR_QAQC_ENGINEER',
+          'QAQC_ENGINEER'
+        ] ? 4 : (
+          role in [
+            'OPERATIONS_MANAGER',
+            'CONSTRUCTION_MANAGER',
+            'MATERIALS_ENGINEER',
+            'LAB_MANAGER',
+            'DOCUMENT_CONTROLLER',
+            'PROJECT_ENGINEER',
+            'MEP_COORDINATOR',
+            'MECHANICAL_ENGINEER',
+            'ELECTRICAL_ENGINEER',
+            'PLUMBING_ENGINEER',
+            'SAFETY_MANAGER',
+            'QUALITY_AUDITOR',
+            'QAQC_INSPECTOR'
+          ] ? 3 : (
+            role in [
+              'SITE_ENGINEER',
+              'MATERIALS_TECHNICIAN',
+              'SURVEYOR',
+              'FOREMAN'
+            ] ? 2 : (
+              role in [
+                'CLIENT_REPRESENTATIVE',
+                'CONSULTANT',
+                'THIRD_PARTY_INSPECTOR',
+                'SUB_CONTRACTOR',
+                'SUPPLIER_VENDOR'
+              ] ? 1 : 0
+            )
+          )
+        )
+      );
+    }
+
+    function isValidRole(role) {
+      return role is string && roleLevelOf(role) >= 1;
+    }
+
+    function callerRole() {
+      return getCallerDoc().data.get('role', '');
+    }
+
+    function callerRoleLevel() {
+      return isActiveUser() ? roleLevelOf(callerRole()) : 0;
+    }
+
+    function isCallerSuperAdmin() {
+      return isActiveUser() && callerRole() == 'SUPER_ADMIN';
+    }
+
+    function hasMinRoleLevel(minLevel) {
+      return callerRoleLevel() >= minLevel;
+    }
+
+    function isTenantMemberWithMinRole(companyId, minLevel) {
+      return belongsToTenant(companyId) && hasMinRoleLevel(minLevel);
+    }
+
+    function isCallerTenantOwner(companyId) {
+      return belongsToTenant(companyId)
+        && hasMinRoleLevel(5)
+        && get(/databases/$(database)/documents/companies/$(companyId)) != null
+        && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerId == request.auth.uid;
+    }
+
+    // Role assignment rules for invites & pre-provisioning:
+    // - Must be Level >= 4
+    // - Never grant 'SUPER_ADMIN' unless caller is 'SUPER_ADMIN'
+    // - Level 4 managers can only assign roles strictly below Level 4 (Levels 1..3)
+    // - Level 5 governance leaders / SUPER_ADMIN can assign up to Level 5
+    function canManagerAssignInviteRole(targetRole) {
+      return isValidRole(targetRole)
+        && hasMinRoleLevel(4)
+        && (targetRole != 'SUPER_ADMIN' || isCallerSuperAdmin())
+        && (
+          isCallerSuperAdmin()
+          || callerRoleLevel() == 5
+          || roleLevelOf(targetRole) < callerRoleLevel()
+        );
+    }
+
+    // ===============================================================
+    // Domain Validators (Called in BOTH create and update rules)
+    // ===============================================================
+
+    function isValidCompany(data, companyId) {
+      return hasRequiredFields(data, ['id', 'name', 'ownerId'])
+        && hasOnlyAllowedFields(data, [
+          'id', 'name', 'legalName', 'logo', 'logoUrl', 'ownerId', 'projects',
+          'address', 'phone', 'email', 'website', 'registrationNo', 'taxNumber',
+          'standards', 'settings', 'createdAt', 'updatedAt'
+        ])
+        && data.id == companyId
+        && isValidBoundedString(data.id, 1, 128)
+        && isValidBoundedString(data.name, 1, 200)
+        && isValidBoundedString(data.ownerId, 1, 128)
+        && isValidOptionalStringField(data, 'legalName', 0, 200)
+        && isValidOptionalUrlField(data, 'logo')
+        && isValidOptionalUrlField(data, 'logoUrl')
+        && isValidOptionalStringField(data, 'address', 0, 500)
+        && isValidOptionalStringField(data, 'phone', 0, 64)
+        && (!('email' in data) || data.email == null || data.email == '' || isValidEmail(data.email))
+        && isValidOptionalStringField(data, 'website', 0, 512)
+        && isValidOptionalStringField(data, 'registrationNo', 0, 120)
+        && isValidOptionalStringField(data, 'taxNumber', 0, 120)
+        && (!('projects' in data) || data.projects == null || (isNumber(data.projects) && data.projects >= 0 && data.projects <= 100000))
+        && isValidOptionalListField(data, 'standards', 100)
+        && isValidOptionalMapField(data, 'settings', 30)
+        && (
+          !('settings' in data)
+          || !(data.settings is map)
+          || !('smtpServer' in data.settings)
+          || !(data.settings.smtpServer is map)
+          || !('password' in data.settings.smtpServer)
+          || data.settings.smtpServer.password == null
+          || data.settings.smtpServer.password == ''
+        )
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt');
+    }
+
+    function isValidUserInvite(data, emailLower) {
+      return hasRequiredFields(data, ['email', 'companyId', 'role'])
+        && hasOnlyAllowedFields(data, [
+          'id', 'uid', 'email', 'fullName', 'displayName', 'phone', 'role',
+          'title', 'designation', 'department', 'companyId', 'companyName',
+          'projectIds', 'projectAccess', 'status', 'isActive', 'avatarUrl',
+          'invitedBy', 'invitedByName', 'claimedByUid', 'claimedAt',
+          'legacyUserDocId', 'createdAt', 'updatedAt'
+        ])
+        && data.email == emailLower
+        && isValidEmail(data.email)
+        && isValidBoundedString(data.companyId, 1, 128)
+        && isValidRole(data.role)
+        && isValidOptionalStringField(data, 'id', 0, 320)
+        && isValidOptionalStringField(data, 'uid', 0, 128)
+        && isValidOptionalStringField(data, 'fullName', 0, 200)
+        && isValidOptionalStringField(data, 'displayName', 0, 200)
+        && isValidOptionalStringField(data, 'phone', 0, 64)
+        && isValidOptionalStringField(data, 'title', 0, 200)
+        && isValidOptionalStringField(data, 'designation', 0, 200)
+        && isValidOptionalStringField(data, 'department', 0, 200)
+        && isValidOptionalStringField(data, 'companyName', 0, 200)
+        && isValidOptionalStringField(data, 'status', 0, 40)
+        && isValidOptionalBoolField(data, 'isActive')
+        && isValidOptionalUrlField(data, 'avatarUrl')
+        && isValidOptionalStringField(data, 'invitedBy', 0, 128)
+        && isValidOptionalStringField(data, 'invitedByName', 0, 200)
+        && isValidOptionalStringField(data, 'claimedByUid', 0, 128)
+        && isValidOptionalStringField(data, 'legacyUserDocId', 0, 128)
+        && isValidOptionalListField(data, 'projectIds', 500)
+        && isValidOptionalMapField(data, 'projectAccess', 500)
+        && isValidOptionalTimeField(data, 'claimedAt')
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt');
+    }
+
+    function isValidSmtpCredentials(smtp) {
+      return smtp is map
+        && hasOnlyAllowedFields(smtp, [
+          'username', 'encryptedPassword', 'hasSavedPassword', 'password',
+          'senderEmail', 'senderDisplayName', 'emailSignature',
+          'saveSentToImap', 'includeCompanyLogoInSignature'
+        ])
+        && (!('password' in smtp) || smtp.password == null || smtp.password == '')
+        && isValidOptionalStringField(smtp, 'username', 0, 320)
+        && isValidOptionalStringField(smtp, 'encryptedPassword', 0, 2048)
+        && isValidOptionalBoolField(smtp, 'hasSavedPassword')
+        && (!('senderEmail' in smtp) || smtp.senderEmail == null || smtp.senderEmail == '' || isValidEmail(smtp.senderEmail))
+        && isValidOptionalStringField(smtp, 'senderDisplayName', 0, 200)
+        && isValidOptionalStringField(smtp, 'emailSignature', 0, 5000)
+        && isValidOptionalBoolField(smtp, 'saveSentToImap')
+        && isValidOptionalBoolField(smtp, 'includeCompanyLogoInSignature');
+    }
+
+    function isValidUserProfile(data, userId) {
+      return hasRequiredFields(data, ['uid', 'fullName', 'role', 'companyId'])
+        && hasOnlyAllowedFields(data, [
+          'id', 'uid', 'email', 'fullName', 'displayName', 'phone', 'role',
+          'title', 'designation', 'companyId', 'companyName', 'status',
+          'projectIds', 'projectAccess', 'avatarUrl', 'department', 'isActive',
+          'lastActiveProjectId', 'smtpCredentials', 'emailSignature',
+          'createdAt', 'updatedAt'
+        ])
+        && data.uid == userId
+        && isValidBoundedString(data.uid, 1, 128)
+        && (!('id' in data) || data.id == userId)
+        && (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 320 && (data.email == '' || isValidEmail(data.email))))
+        && isValidBoundedString(data.fullName, 1, 200)
+        && isValidRole(data.role)
+        && data.companyId is string
+        && data.companyId.size() <= 128
+        && isValidOptionalStringField(data, 'displayName', 0, 200)
+        && isValidOptionalStringField(data, 'phone', 0, 64)
+        && isValidOptionalStringField(data, 'title', 0, 200)
+        && isValidOptionalStringField(data, 'designation', 0, 200)
+        && isValidOptionalStringField(data, 'companyName', 0, 200)
+        && isValidOptionalStringField(data, 'department', 0, 200)
+        && isValidOptionalStringField(data, 'status', 0, 40)
+        && isValidOptionalBoolField(data, 'isActive')
+        && isValidOptionalUrlField(data, 'avatarUrl')
+        && isValidOptionalStringField(data, 'lastActiveProjectId', 0, 128)
+        && isValidOptionalStringField(data, 'emailSignature', 0, 5000)
+        && isValidOptionalListField(data, 'projectIds', 500)
+        && (
+          !('projectIds' in data)
+          || data.projectIds.size() == 0
+          || (
+            data.projectIds[0] is string
+            && data.projectIds[0].size() <= 128
+            && data.projectIds[data.projectIds.size() - 1] is string
+            && data.projectIds[data.projectIds.size() - 1].size() <= 128
+          )
+        )
+        && isValidOptionalMapField(data, 'projectAccess', 500)
+        && (!('smtpCredentials' in data) || data.smtpCredentials == null || isValidSmtpCredentials(data.smtpCredentials))
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt');
+    }
+
+    function isValidProject(data, projectId) {
+      return hasRequiredFields(data, ['id', 'name', 'code', 'companyId'])
+        && data.keys().size() <= 50
+        && data.id == projectId
+        && isValidBoundedString(data.id, 1, 128)
+        && isValidBoundedString(data.companyId, 1, 128)
+        && isValidBoundedString(data.name, 1, 300)
+        && isValidBoundedString(data.code, 1, 64)
+        && isValidOptionalStringField(data, 'type', 0, 120)
+        && isValidOptionalStringField(data, 'location', 0, 500)
+        && isValidOptionalStringField(data, 'address', 0, 500)
+        && isValidOptionalStringField(data, 'country', 0, 120)
+        && isValidOptionalStringField(data, 'clientName', 0, 300)
+        && isValidOptionalStringField(data, 'contractorName', 0, 300)
+        && isValidOptionalStringField(data, 'consultantName', 0, 300)
+        && isValidOptionalStringField(data, 'startDate', 0, 64)
+        && isValidOptionalStringField(data, 'endDate', 0, 64)
+        && isValidOptionalStringField(data, 'description', 0, 10000)
+        && isValidOptionalStringField(data, 'status', 0, 64)
+        && (!('progress' in data) || data.progress == null || (isNumber(data.progress) && data.progress >= 0 && data.progress <= 100))
+        && (!('totalBudget' in data) || data.totalBudget == null || (isNumber(data.totalBudget) && data.totalBudget >= 0))
+        && isValidOptionalStringField(data, 'companyName', 0, 300)
+        && isValidOptionalUrlField(data, 'iconUrl')
+        && isValidOptionalUrlField(data, 'imageUrl')
+        && isValidOptionalUrlField(data, 'coverImageUrl')
+        && isValidOptionalListField(data, 'assignedStaff', 1000)
+        && isValidOptionalListField(data, 'assignedStaffIds', 1000)
+        && isValidOptionalListField(data, 'excludedStaffIds', 1000)
+        && isValidOptionalStringField(data, 'createdBy', 0, 128)
+        && isValidOptionalStringField(data, 'icon', 0, 120)
+        && isValidOptionalStringField(data, 'color', 0, 120)
+        && isValidOptionalStringField(data, 'currency', 0, 16)
+        && isValidOptionalMapField(data, 'costRates', 50)
+        && isValidOptionalMapField(data, 'carbonFactors', 50)
+        && isValidOptionalStringField(data, 'currentLevelId', 0, 128)
+        && isValidOptionalStringField(data, 'currentLevelName', 0, 200)
+        && isValidOptionalBoolField(data, 'enableBim')
+        && isValidOptionalMapField(data, 'bimSettings', 30)
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt');
+    }
+
+    // Shared validator for company-scoped engineering & QA/QC records (trades, inspectionTemplates, etc.)
+    function isValidCompanyScopedRecord(data, docId, maxKeys) {
+      return hasRequiredFields(data, ['companyId'])
+        && data.keys().size() <= maxKeys
+        && isValidBoundedString(data.companyId, 1, 128)
+        && (!('id' in data) || (data.id is string && data.id == docId && data.id.size() >= 1 && data.id.size() <= 128))
+        && isValidOptionalStringField(data, 'projectId', 0, 128)
+        && isValidOptionalStringField(data, 'projectName', 0, 300)
+        && isValidOptionalStringField(data, 'companyName', 0, 300)
+        && isValidOptionalStringField(data, 'name', 0, 500)
+        && isValidOptionalStringField(data, 'title', 0, 500)
+        && isValidOptionalStringField(data, 'subject', 0, 500)
+        && isValidOptionalStringField(data, 'status', 0, 100)
+        && isValidOptionalStringField(data, 'description', 0, 50000)
+        && isValidOptionalStringField(data, 'notes', 0, 50000)
+        && isValidOptionalStringField(data, 'remarks', 0, 50000)
+        && isValidOptionalStringField(data, 'comments', 0, 50000)
+        && isValidOptionalStringField(data, 'summary', 0, 50000)
+        && isValidOptionalMediaOrSignatureField(data, 'url', 250000)
+        && isValidOptionalMediaOrSignatureField(data, 'photoUrl', 250000)
+        && isValidOptionalMediaOrSignatureField(data, 'imageUrl', 250000)
+        && isValidOptionalUrlField(data, 'fileUrl')
+        && isValidOptionalUrlField(data, 'documentUrl')
+        && isValidOptionalMediaOrSignatureField(data, 'signatureUrl', 100000)
+        && isValidOptionalListField(data, 'items', 1000)
+        && isValidOptionalListField(data, 'photos', 500)
+        && isValidOptionalListField(data, 'attachments', 500)
+        && isValidOptionalListField(data, 'beforePhotos', 200)
+        && isValidOptionalListField(data, 'rectificationPhotos', 200)
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt');
+    }
+
+    // Validator for project-scoped BIM, laboratory, field QA/QC & handover collections
+    function isValidProjectScopedRecord(data, docId, maxKeys) {
+      return hasRequiredFields(data, ['companyId', 'projectId'])
+        && isValidBoundedString(data.projectId, 1, 128)
+        && isValidCompanyScopedRecord(data, docId, maxKeys);
+    }
+
+    function isValidProjectRecordUpdate(docId, maxKeys) {
+      return isValidProjectScopedRecord(request.resource.data, docId, maxKeys)
+        && request.resource.data.companyId == resource.data.companyId
+        && isExistingFieldImmutable('id')
+        && isExistingFieldImmutable('projectId')
+        && isExistingFieldImmutable('createdAt');
+    }
+
+    function isValidCompanyRecordUpdate(docId, maxKeys) {
+      return isValidCompanyScopedRecord(request.resource.data, docId, maxKeys)
+        && request.resource.data.companyId == resource.data.companyId
+        && isExistingFieldImmutable('id')
+        && isExistingFieldImmutable('projectId')
+        && isExistingFieldImmutable('createdAt');
+    }
+
+    function isValidCounterIntField(data, field) {
+      return !(field in data)
+        || (data[field] is int && data[field] >= 0 && data[field] <= 1000000000);
+    }
+
+    function isCounterFieldMonotonic(field) {
+      return !(field in resource.data)
+        || (field in request.resource.data && request.resource.data[field] >= resource.data[field]);
+    }
+
+    function isValidDocumentCounter(data, counterId) {
+      return hasRequiredFields(data, ['companyId'])
+        && ('current' in data || 'count' in data || 'seq' in data || 'sequence' in data || 'lastNumber' in data)
+        && hasOnlyAllowedFields(data, [
+          'id', 'companyId', 'projectId', 'prefix', 'module', 'year',
+          'current', 'count', 'seq', 'sequence', 'lastNumber',
+          'createdAt', 'updatedAt'
+        ])
+        && (!('id' in data) || data.id == counterId)
+        && isValidBoundedString(data.companyId, 1, 128)
+        && isValidCounterIntField(data, 'current')
+        && isValidCounterIntField(data, 'count')
+        && isValidCounterIntField(data, 'seq')
+        && isValidCounterIntField(data, 'sequence')
+        && isValidCounterIntField(data, 'lastNumber')
+        && isValidOptionalStringField(data, 'projectId', 0, 128)
+        && isValidOptionalStringField(data, 'prefix', 0, 64)
+        && isValidOptionalStringField(data, 'module', 0, 64)
+        && (!('year' in data) || data.year == null || (data.year is int && data.year >= 1970 && data.year <= 2200))
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt');
+    }
+
+    function isValidNotification(data, notifId) {
+      return hasRequiredFields(data, ['companyId', 'title', 'message'])
+        && data.keys().size() <= 20
+        && (!('id' in data) || data.id == notifId)
+        && isValidBoundedString(data.companyId, 1, 128)
+        && isValidBoundedString(data.title, 1, 300)
+        && isValidBoundedString(data.message, 1, 5000)
+        && isValidOptionalStringField(data, 'projectId', 0, 128)
+        && isValidOptionalStringField(data, 'userId', 0, 128)
+        && isValidOptionalStringField(data, 'recipientId', 0, 128)
+        && isValidOptionalStringField(data, 'type', 0, 64)
+        && isValidOptionalStringField(data, 'link', 0, 1024)
+        && isValidOptionalBoolField(data, 'read')
+        && isValidOptionalBoolField(data, 'isRead')
+        && isValidOptionalListField(data, 'readBy', 500)
+        && isValidOptionalTimeField(data, 'timestamp')
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt');
+    }
+
+    function isValidAICopilotSession(data, sessionId) {
+      return hasRequiredFields(data, ['id', 'userId', 'companyId', 'title', 'messages'])
+        && hasOnlyAllowedFields(data, [
+          'id', 'userId', 'companyId', 'projectId', 'projectName',
+          'title', 'messages', 'createdAt', 'updatedAt'
+        ])
+        && data.id == sessionId
+        && isValidBoundedString(data.id, 1, 128)
+        && data.userId == request.auth.uid
+        && isValidBoundedString(data.userId, 1, 128)
+        && isValidBoundedString(data.companyId, 1, 128)
+        && isValidBoundedString(data.title, 1, 500)
+        && isValidOptionalStringField(data, 'projectId', 0, 128)
+        && isValidOptionalStringField(data, 'projectName', 0, 300)
+        && data.messages is list
+        && data.messages.size() <= 500
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt');
+    }
+
+    function isValidChatChannel(data, channelId) {
+      return hasRequiredFields(data, ['companyId', 'name'])
+        && hasOnlyAllowedFields(data, [
+          'id', 'companyId', 'projectId', 'projectName', 'name', 'description',
+          'type', 'avatarUrl', 'color', 'isPrivate', 'isDefaultProjectGroup',
+          'createdBy', 'createdByName', 'createdAt', 'updatedAt', 'memberIds',
+          'members', 'permissions', 'lastMessage', 'unreadCount', 'topic',
+          'tradeId', 'pinned'
+        ])
+        && (!('id' in data) || data.id == channelId)
+        && isValidBoundedString(data.companyId, 1, 128)
+        && isValidBoundedString(data.name, 1, 200)
+        && isValidOptionalStringField(data, 'projectId', 0, 128)
+        && isValidOptionalStringField(data, 'projectName', 0, 300)
+        && isValidOptionalStringField(data, 'description', 0, 2000)
+        && isValidOptionalStringField(data, 'type', 0, 64)
+        && isValidOptionalUrlField(data, 'avatarUrl')
+        && isValidOptionalStringField(data, 'color', 0, 64)
+        && isValidOptionalBoolField(data, 'isPrivate')
+        && isValidOptionalBoolField(data, 'isDefaultProjectGroup')
+        && isValidOptionalBoolField(data, 'pinned')
+        && isValidOptionalStringField(data, 'createdBy', 0, 128)
+        && isValidOptionalStringField(data, 'createdByName', 0, 200)
+        && isValidOptionalStringField(data, 'topic', 0, 500)
+        && isValidOptionalStringField(data, 'tradeId', 0, 128)
+        && isValidOptionalListField(data, 'memberIds', 1000)
+        && isValidOptionalListField(data, 'members', 1000)
+        && isValidOptionalMapField(data, 'permissions', 10)
+        && isValidOptionalMapField(data, 'lastMessage', 10)
+        && (!('unreadCount' in data) || data.unreadCount == null || (data.unreadCount is int && data.unreadCount >= 0))
+        // Direct / private channels can never be marked isPrivate == false
+        && (!(data.get('type', 'GROUP') in ['DIRECT', 'PRIVATE']) || data.get('isPrivate', true) == true)
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt');
+    }
+
+    function isValidChatMessage(data, channelId, messageId) {
+      return hasRequiredFields(data, ['senderId', 'content', 'timestamp'])
+        && hasOnlyAllowedFields(data, [
+          'id', 'channelId', 'companyId', 'projectId', 'senderId', 'senderName',
+          'senderRole', 'senderTitle', 'senderDesignation', 'senderAvatarUrl',
+          'content', 'attachments', 'timestamp', 'createdAt', 'updatedAt',
+          'isEdited', 'pinned', 'status', 'replyToMessageId',
+          'replyToMessageText', 'replyToSenderName', 'readBy', 'reactions',
+          'isSystemMessage'
+        ])
+        && (!('id' in data) || data.id == messageId)
+        && (!('channelId' in data) || data.channelId == channelId)
+        && isValidBoundedString(data.senderId, 1, 128)
+        && data.content is string
+        && data.content.size() <= 20000
+        && isValidOptionalStringField(data, 'companyId', 1, 128)
+        && isValidOptionalStringField(data, 'projectId', 0, 128)
+        && isValidOptionalStringField(data, 'senderName', 0, 200)
+        && isValidOptionalStringField(data, 'senderRole', 0, 100)
+        && isValidOptionalStringField(data, 'senderTitle', 0, 200)
+        && isValidOptionalStringField(data, 'senderDesignation', 0, 200)
+        && isValidOptionalUrlField(data, 'senderAvatarUrl')
+        && isValidOptionalListField(data, 'attachments', 50)
+        && isValidTimeValue(data.timestamp)
+        && isValidOptionalTimeField(data, 'createdAt')
+        && isValidOptionalTimeField(data, 'updatedAt')
+        && isValidOptionalBoolField(data, 'isEdited')
+        && isValidOptionalBoolField(data, 'pinned')
+        && isValidOptionalBoolField(data, 'isSystemMessage')
+        && isValidOptionalStringField(data, 'status', 0, 32)
+        && isValidOptionalStringField(data, 'replyToMessageId', 0, 128)
+        && isValidOptionalStringField(data, 'replyToMessageText', 0, 2000)
+        && isValidOptionalStringField(data, 'replyToSenderName', 0, 200)
+        && isValidOptionalListField(data, 'readBy', 1000)
+        && isValidOptionalMapField(data, 'reactions', 100);
+    }
+
+    function isValidAuditLog(data, logId) {
+      return hasRequiredFields(data, ['id', 'userId', 'action', 'module', 'details', 'companyId', 'timestamp'])
+        && hasOnlyAllowedFields(data, [
+          'id', 'targetId', 'userId', 'userName', 'userRole', 'action',
+          'module', 'details', 'previousValue', 'newValue', 'companyId',
+          'projectId', 'timestamp', 'createdAt'
+        ])
+        && data.id == logId
+        && isValidBoundedString(data.id, 1, 128)
+        && data.userId == request.auth.uid
+        && isValidBoundedString(data.userId, 1, 128)
+        && isValidBoundedString(data.companyId, 1, 128)
+        && isValidBoundedString(data.action, 1, 200)
+        && isValidBoundedString(data.module, 1, 120)
+        && data.details is string
+        && data.details.size() <= 15000
+        && isValidOptionalStringField(data, 'userName', 0, 200)
+        && isValidOptionalStringField(data, 'userRole', 0, 100)
+        && isValidOptionalStringField(data, 'targetId', 0, 128)
+        && isValidOptionalStringField(data, 'projectId', 0, 128)
+        && isValidTimeValue(data.timestamp)
+        && isValidOptionalTimeField(data, 'createdAt');
+    }
+
+    function isValidEmailCommunication(data, logId) {
+      return hasRequiredFields(data, ['id', 'companyId', 'recipients', 'subject', 'status', 'sentAt'])
+        && hasOnlyAllowedFields(data, [
+          'id', 'companyId', 'projectId', 'senderUid', 'sentByUserId',
+          'senderName', 'senderEmail', 'recipients', 'cc', 'bcc', 'subject',
+          'bodyText', 'bodyHtml', 'module', 'referenceId', 'referenceTitle',
+          'status', 'errorMessage', 'hasAttachments', 'attachmentNames',
+          'sentAt', 'createdAt'
+        ])
+        && data.id == logId
+        && isValidBoundedString(data.id, 1, 128)
+        && isValidBoundedString(data.companyId, 1, 128)
+        // Require authenticated caller UID in senderUid and/or sentByUserId without mismatch
+        && (('senderUid' in data && data.senderUid == request.auth.uid)
+          || ('sentByUserId' in data && data.sentByUserId == request.auth.uid))
+        && (!('senderUid' in data) || data.senderUid == request.auth.uid)
+        && (!('sentByUserId' in data) || data.sentByUserId == request.auth.uid)
+        && isValidOptionalStringField(data, 'projectId', 0, 128)
+        && isValidOptionalStringField(data, 'senderName', 0, 200)
+        && (!('senderEmail' in data) || data.senderEmail == null || data.senderEmail == '' || isValidEmail(data.senderEmail))
+        && data.recipients is list
+        && data.recipients.size() >= 1
+        && data.recipients.size() <= 100
+        && isValidOptionalListField(data, 'cc', 100)
+        && isValidOptionalListField(data, 'bcc', 100)
+        && isValidBoundedString(data.subject, 1, 500)
+        && isValidOptionalStringField(data, 'bodyText', 0, 25000)
+        && isValidOptionalStringField(data, 'bodyHtml', 0, 50000)
+        && isValidOptionalStringField(data, 'module', 0, 100)
+        && isValidOptionalStringField(data, 'referenceId', 0, 128)
+        && isValidOptionalStringField(data, 'referenceTitle', 0, 500)
+        && data.status in ['SENT', 'FAILED', 'DELIVERED']
+        && isValidOptionalStringField(data, 'errorMessage', 0, 2000)
+        && isValidOptionalBoolField(data, 'hasAttachments')
+        && isValidOptionalListField(data, 'attachmentNames', 50)
+        && isValidTimeValue(data.sentAt)
+        && isValidOptionalTimeField(data, 'createdAt');
+    }
+
+    // ===============================================================
+    // Chat Channel Access Helpers
+    // ===============================================================
+
+    function canAccessChannelData(channelData) {
+      return channelData != null
+        && belongsToTenant(channelData.companyId)
+        && (
+          (channelData.get('isPrivate', false) != true
+            && !(channelData.get('type', 'GROUP') in ['DIRECT', 'PRIVATE']))
+          || (channelData.get('memberIds', []) is list
+            && request.auth.uid in channelData.get('memberIds', []))
+        );
+    }
+
+    function canAccessParentChannel(channelId) {
+      return get(/databases/$(database)/documents/chatChannels/$(channelId)) != null
+        && canAccessChannelData(get(/databases/$(database)/documents/chatChannels/$(channelId)).data);
+    }
+
+    // ===============================================================
+    // 1. Multi-Tenant Onboarding & Identity Governance Collections
+    // ===============================================================
+
+    // --- Organizations / Tenant Workspaces ---
+    match /companies/{companyId} {
+      allow read: if belongsToTenant(companyId)
+        || (
+          isAuthenticated()
+          && resource != null
+          && resource.data.ownerId == request.auth.uid
+          && (getCallerDoc() == null || isUserRecordActive(getCallerDoc().data))
+        );
+
+      allow create: if isAuthenticated()
+        && isValidCompany(request.resource.data, companyId)
+        && request.resource.data.ownerId == request.auth.uid;
+
+      allow update: if isValidCompany(request.resource.data, companyId)
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.ownerId == resource.data.ownerId
+        && isExistingFieldImmutable('createdAt')
+        && (
+          isTenantMemberWithMinRole(companyId, 4)
+          || (isActiveUser() && resource.data.ownerId == request.auth.uid)
+        );
+
+      // Prevent accidental or malicious tenant wipe from any client SDK
+      allow delete: if false;
+    }
+
+    // --- Deterministic Pre-Provisioned Email Invitations ---
+    match /userInvites/{emailLower} {
+      allow get: if (hasAuthEmail() && authEmailLower() == emailLower)
+        || (resource != null && isTenantMemberWithMinRole(resource.data.companyId, 3));
+
+      allow list: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+
+      allow create: if isValidUserInvite(request.resource.data, emailLower)
+        && isTenantMemberWithMinRole(request.resource.data.companyId, 4)
+        && canManagerAssignInviteRole(request.resource.data.role);
+
+      allow update: if isValidUserInvite(request.resource.data, emailLower)
+        && request.resource.data.companyId == resource.data.companyId
+        && request.resource.data.email == resource.data.email
+        && isExistingFieldImmutable('createdAt')
+        && (
+          // Path A: Active tenant manager (L4+) updating invitation details within hierarchy
+          (
+            isTenantMemberWithMinRole(resource.data.companyId, 4)
+            && canManagerAssignInviteRole(request.resource.data.role)
+            && (resource.data.role != 'SUPER_ADMIN' || isCallerSuperAdmin())
+          )
+          // Path B: Invited user claiming their own invitation without altering role/tenant/status
+          || (
+            hasAuthEmail()
+            && authEmailLower() == emailLower
+            && isUserRecordActive(resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'claimedByUid', 'claimedAt', 'updatedAt'
+            ])
+            && request.resource.data.claimedByUid == request.auth.uid
+            && (
+              !('claimedByUid' in resource.data)
+              || resource.data.claimedByUid == null
+              || resource.data.claimedByUid == ''
+              || resource.data.claimedByUid == request.auth.uid
+            )
+          )
+        );
+
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4)
+        && (resource.data.role != 'SUPER_ADMIN' || isCallerSuperAdmin());
+    }
+
+    // --- User Profiles & 5-Tier RBAC Directory ---
+    match /users/{userId} {
+      allow read: if isOwner(userId)
+        || (resource != null && belongsToTenant(resource.data.get('companyId', '')))
+        || (resource != null && hasAuthEmail() && resource.data.get('email', '') == authEmailLower());
+
+      allow create: if isValidUserProfile(request.resource.data, userId)
+        && (
+          // Case A: New Organization Atomic Batch Sign-Up (Founder = QUALITY_DIRECTOR)
+          (
+            isOwner(userId)
+            && request.resource.data.companyId.size() > 0
+            && request.resource.data.role == 'QUALITY_DIRECTOR'
+            && isUserRecordActive(request.resource.data)
+            && (!hasAuthEmail() || request.resource.data.email == authEmailLower())
+            && getAfter(/databases/$(database)/documents/companies/$(request.resource.data.companyId)) != null
+            && getAfter(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerId == request.auth.uid
+          )
+          // Case B: Pre-Invited Staff Claiming Account via userInvites/{emailLower}
+          || (
+            isOwner(userId)
+            && hasAuthEmail()
+            && request.resource.data.email == authEmailLower()
+            && get(/databases/$(database)/documents/userInvites/$(authEmailLower())) != null
+            && isUserRecordActive(get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data)
+            && (
+              !('claimedByUid' in get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data)
+              || get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.claimedByUid == null
+              || get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.claimedByUid == ''
+              || get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.claimedByUid == request.auth.uid
+            )
+            && request.resource.data.companyId == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.companyId
+            && request.resource.data.role == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.role
+            && request.resource.data.get('projectIds', []) == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.get('projectIds', [])
+            && request.resource.data.get('projectAccess', {}) == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.get('projectAccess', {})
+          )
+          // Case C: Unprovisioned Fallback Account (Least-Privilege Level 1, No Tenant/Projects)
+          || (
+            isOwner(userId)
+            && request.resource.data.companyId == ''
+            && request.resource.data.role == 'CLIENT_REPRESENTATIVE'
+            && request.resource.data.get('projectIds', []).size() == 0
+            && request.resource.data.get('projectAccess', {}).keys().size() == 0
+            && (!hasAuthEmail() || request.resource.data.email == authEmailLower())
+          )
+          // Case D: Active Tenant Manager (L4+) Pre-Provisioning Staff Profile in Own Tenant
+          || (
+            userId != request.auth.uid
+            && isTenantMemberWithMinRole(request.resource.data.companyId, 4)
+            && canManagerAssignInviteRole(request.resource.data.role)
+          )
+        );
+
+      allow update: if isValidUserProfile(request.resource.data, userId)
+        && uidNotModified()
+        && isExistingFieldImmutable('createdAt')
+        && (
+          // Self-Update A: Standard personal profile & encrypted SMTP preferences (strictly no RBAC/tenant changes)
+          (
+            isOwner(userId)
+            && isUserRecordActive(resource.data)
+            && areImmutableFieldsUnchanged([
+              'uid', 'id', 'role', 'companyId', 'status', 'isActive',
+              'projectIds', 'projectAccess', 'createdAt'
+            ])
+            && (
+              request.resource.data.get('email', '') == resource.data.get('email', '')
+              || (resource.data.get('email', '') == '' && hasAuthEmail() && request.resource.data.email == authEmailLower())
+            )
+          )
+          // Self-Update B: Unprovisioned account (companyId == '') adopting a verified userInvites invitation
+          || (
+            isOwner(userId)
+            && isUserRecordActive(resource.data)
+            && resource.data.companyId == ''
+            && hasAuthEmail()
+            && request.resource.data.email == authEmailLower()
+            && get(/databases/$(database)/documents/userInvites/$(authEmailLower())) != null
+            && isUserRecordActive(get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data)
+            && (
+              !('claimedByUid' in get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data)
+              || get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.claimedByUid == null
+              || get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.claimedByUid == ''
+              || get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.claimedByUid == request.auth.uid
+            )
+            && request.resource.data.companyId == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.companyId
+            && request.resource.data.role == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.role
+            && request.resource.data.get('projectIds', []) == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.get('projectIds', [])
+            && request.resource.data.get('projectAccess', {}) == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.get('projectAccess', {})
+            && request.resource.data.get('status', 'ACTIVE') == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.get('status', 'ACTIVE')
+            && request.resource.data.get('isActive', true) == get(/databases/$(database)/documents/userInvites/$(authEmailLower())).data.get('isActive', true)
+          )
+          // Self-Update C: Healing legacy accounts where companyId is missing or empty
+          || (
+            isOwner(userId)
+            && isUserRecordActive(resource.data)
+            && (!('companyId' in resource.data) || resource.data.companyId == null || resource.data.companyId == '')
+            && request.resource.data.companyId is string
+            && request.resource.data.companyId.size() > 0
+            && request.resource.data.companyId.size() <= 128
+            && get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)) != null
+            && areImmutableFieldsUnchanged([
+              'uid', 'id', 'role', 'status', 'isActive', 'createdAt'
+            ])
+            && (
+              request.resource.data.get('email', '') == resource.data.get('email', '')
+              || (resource.data.get('email', '') == '' && hasAuthEmail() && request.resource.data.email == authEmailLower())
+            )
+          )
+          // Manager Update: Active manager (L4+) managing subordinate staff in the same tenant
+          || (
+            userId != request.auth.uid
+            && isTenantMemberWithMinRole(resource.data.companyId, 4)
+            && request.resource.data.companyId == resource.data.companyId
+            && request.resource.data.email == resource.data.email
+            && (resource.data.role != 'SUPER_ADMIN' || isCallerSuperAdmin())
+            && (request.resource.data.role != 'SUPER_ADMIN' || isCallerSuperAdmin())
+            && (
+              isCallerSuperAdmin()
+              || isCallerTenantOwner(resource.data.companyId)
+              || (
+                roleLevelOf(resource.data.role) < callerRoleLevel()
+                && roleLevelOf(request.resource.data.role) < callerRoleLevel()
+              )
+            )
+          )
+        );
+
+      allow delete: if (
+          userId != request.auth.uid
+          && isTenantMemberWithMinRole(resource.data.companyId, 4)
+          && (resource.data.role != 'SUPER_ADMIN' || isCallerSuperAdmin())
+          && (
+            isCallerSuperAdmin()
+            || isCallerTenantOwner(resource.data.companyId)
+            || roleLevelOf(resource.data.role) < callerRoleLevel()
+          )
+        )
+        // Invited user cleaning up their own legacy pre-provisioned usr-... record upon claim
+        || (
+          userId != request.auth.uid
+          && hasAuthEmail()
+          && resource.data.email == authEmailLower()
+        );
+    }
+
+    // ===============================================================
+    // 2. Projects & Multi-Tenant Engineering / BIM / QA/QC Collections
+    // ===============================================================
+
+    match /projects/{projectId} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 4)
+        && isValidProject(request.resource.data, projectId);
+
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 3)
+        && isValidProject(request.resource.data, projectId)
+        && request.resource.data.companyId == resource.data.companyId
+        && request.resource.data.id == resource.data.id
+        && isExistingFieldImmutable('createdAt')
+        && (
+          // Level 4+ manages full project configuration, staff rosters & BIM governance
+          hasMinRoleLevel(4)
+          // Level 3 updates active floor level, 5D cost rates, 6D carbon factors, or progress only
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'currentLevelId', 'currentLevelName', 'costRates', 'currency',
+            'carbonFactors', 'progress', 'updatedAt'
+          ])
+        );
+
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 5);
+    }
+
+    // --- BIM Spatial & Work Breakdown Collections (Read: L1+, Create/Update: L2+, Delete: L3+) ---
+    match /projectLevels/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 60);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 60);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    match /structuralElements/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 120);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 120);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    match /gridlines/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 60);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 60);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    match /workPackages/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 80);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 80);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    // --- Site Comments & RFIs (Read: L1+, Create/Update: L1+ for Consultant/Stakeholder Workflow, Delete: L3+/L4+) ---
+    match /site_comments/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 1)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    match /siteComments/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 1)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    match /rfis/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 1)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    // --- Statutory QA/QC Workflows with Multi-Party L1+ Stakeholder Sign-Offs (Create: L2+, Update: L1+, Delete: L4+) ---
+    match /ncrs/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 120);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 120);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /siteInstructions/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /dailySiteLogs/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /submittals/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 120);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 120);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /mars/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 120);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 120);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /mirs/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 120);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 120);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /inspections/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 120);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 120);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /permitsToPour/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 120);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 120);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /permitToPour/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 120);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 120);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /itpPlans/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /roomPunchItems/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /takingOverCertificates/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 3)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /methodStatements/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    // --- Materials Lab, Rebar, Deliveries, Docs & Reports (Read: L1+, Create/Update: L2+, Delete: L4+) ---
+    match /cubeSamples/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /steelTests/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /barCuttingSchedules/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /materialDeliveries/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /documents/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 100);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 100);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /weeklyReports/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 140);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 140);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    // --- Site Photos & 4D Construction Planner (Read: L1+, Create/Update: L2+, Delete: L3+) ---
+    match /sitePhotos/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 80);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 80);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    match /photos/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 80);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 80);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    match /calendarEvents/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 80);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 80);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    match /plannerEvents/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 80);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 80);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
+    // --- Organization Master Data: Trades & Inspection Templates (Read: L1+, Create/Update: L3+, Delete: L4+) ---
+    match /trades/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 3)
+        && isValidCompanyScopedRecord(request.resource.data, id, 60);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 3)
+        && isValidCompanyRecordUpdate(id, 60);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    match /inspectionTemplates/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 3)
+        && isValidCompanyScopedRecord(request.resource.data, id, 60);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 3)
+        && isValidCompanyRecordUpdate(id, 60);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 4);
+    }
+
+    // --- Monotonic Document Sequence Counters (No Rollbacks / No Deletes) ---
+    match /documentCounters/{counterId} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 1)
+        && isValidDocumentCounter(request.resource.data, counterId);
+
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidDocumentCounter(request.resource.data, counterId)
+        && request.resource.data.companyId == resource.data.companyId
+        && isExistingFieldImmutable('projectId')
+        && isExistingFieldImmutable('prefix')
+        && isExistingFieldImmutable('module')
+        && isCounterFieldMonotonic('current')
+        && isCounterFieldMonotonic('count')
+        && isCounterFieldMonotonic('seq')
+        && isCounterFieldMonotonic('sequence')
+        && isCounterFieldMonotonic('lastNumber');
+
+      allow delete: if false;
+    }
+
+    // --- Tenant-Scoped In-App Notifications ---
+    match /notifications/{notifId} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 1)
+        && isValidNotification(request.resource.data, notifId);
+
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 1)
+        && isValidNotification(request.resource.data, notifId)
+        && request.resource.data.companyId == resource.data.companyId
+        && isExistingFieldImmutable('id')
+        && isExistingFieldImmutable('createdAt');
+
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+    }
+
+    // ===============================================================
+    // 3. Personal AI Copilot Conversation Sessions
+    // ===============================================================
+
+    match /ai_copilot_sessions/{sessionId} {
+      allow read, delete: if isActiveUser()
+        && resource.data.userId == request.auth.uid
+        && (!('companyId' in resource.data) || belongsToTenant(resource.data.companyId));
+
+      allow create: if belongsToTenant(request.resource.data.companyId)
+        && isValidAICopilotSession(request.resource.data, sessionId);
+
+      allow update: if belongsToTenant(request.resource.data.companyId)
+        && resource.data.userId == request.auth.uid
+        && (!('companyId' in resource.data) || resource.data.companyId == request.resource.data.companyId)
+        && isValidAICopilotSession(request.resource.data, sessionId)
+        && areImmutableFieldsUnchanged(['id', 'userId', 'createdAt']);
+    }
+
+    // ===============================================================
+    // 4. Real-Time Team Chat & Private Channel Isolation
+    // ===============================================================
+
+    match /chatChannels/{channelId} {
+      allow get: if canAccessChannelData(resource.data);
+
+      allow list: if belongsToTenant(resource.data.companyId)
+        && (
+          resource.data.isPrivate == false
+          || request.auth.uid in resource.data.memberIds
+        );
+
+      allow create: if belongsToTenant(request.resource.data.companyId)
+        && isValidChatChannel(request.resource.data, channelId)
+        && (!('createdBy' in request.resource.data) || request.resource.data.createdBy == request.auth.uid)
+        && (
+          (request.resource.data.get('isPrivate', false) != true
+            && !(request.resource.data.get('type', 'GROUP') in ['DIRECT', 'PRIVATE']))
+          || (request.resource.data.get('memberIds', []) is list
+            && request.auth.uid in request.resource.data.get('memberIds', []))
+        );
+
+      allow update: if canAccessChannelData(resource.data)
+        && isValidChatChannel(request.resource.data, channelId)
+        && request.resource.data.companyId == resource.data.companyId
+        && isExistingFieldImmutable('id')
+        && isExistingFieldImmutable('createdBy')
+        && isExistingFieldImmutable('createdAt');
+
+      allow delete: if belongsToTenant(resource.data.companyId)
+        && (resource.data.get('createdBy', '') == request.auth.uid || hasMinRoleLevel(4));
+
+      // --- Channel Messages Subcollection ---
+      match /messages/{messageId} {
+        allow read: if canAccessParentChannel(channelId);
+
+        allow create: if canAccessParentChannel(channelId)
+          && isValidChatMessage(request.resource.data, channelId, messageId)
+          && request.resource.data.senderId == request.auth.uid
+          && (!('companyId' in request.resource.data) || request.resource.data.companyId == getUserCompanyId());
+
+        allow update: if canAccessParentChannel(channelId)
+          && isValidChatMessage(request.resource.data, channelId, messageId)
+          && request.resource.data.senderId == resource.data.senderId
+          && isExistingFieldImmutable('id')
+          && isExistingFieldImmutable('channelId')
+          && isExistingFieldImmutable('companyId')
+          && isExistingFieldImmutable('createdAt')
+          && (
+            resource.data.senderId == request.auth.uid
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'reactions', 'pinned', 'readBy', 'status', 'updatedAt'
+            ])
+          );
+
+        allow delete: if canAccessParentChannel(channelId)
+          && (resource.data.senderId == request.auth.uid || hasMinRoleLevel(4));
+      }
+    }
+
+    // ===============================================================
+    // 5. Append-Only Immutable Enterprise Audit & Email Logs
+    // ===============================================================
+
+    match /auditLogs/{logId} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+
+      allow create: if belongsToTenant(request.resource.data.companyId)
+        && isValidAuditLog(request.resource.data, logId);
+
+      allow update, delete: if false;
+    }
+
+    match /emailCommunications/{logId} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+
+      allow create: if belongsToTenant(request.resource.data.companyId)
+        && isValidEmailCommunication(request.resource.data, logId);
+
+      allow update, delete: if false;
+    }
+
+    // ===============================================================
+    // 6. Default Deny Catch-All
+    // ===============================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

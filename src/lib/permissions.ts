@@ -1,4 +1,12 @@
-import { UserRole, ROLE_LEVELS, ROLE_LABELS, ROLE_TITLES } from "@/types";
+import {
+  UserRole,
+  ROLE_LEVELS,
+  ROLE_LABELS,
+  ROLE_TITLES,
+  BimModuleKey,
+  BimModuleSettings,
+  DEFAULT_BIM_SETTINGS,
+} from "@/types";
 
 export { ROLE_LEVELS, ROLE_LABELS, ROLE_TITLES };
 
@@ -39,6 +47,19 @@ export function canManageCompany(userRole: UserRole | undefined): boolean {
 }
 
 /**
+ * Checks whether an account has been suspended or deactivated by an administrator.
+ */
+export function isUserSuspended(
+  user?: { status?: string; isActive?: boolean } | null,
+): boolean {
+  if (!user) return false;
+  const s = (user.status || "").trim().toUpperCase();
+  if (s === "INACTIVE" || s === "SUSPENDED" || s === "DISABLED") return true;
+  if (user.isActive === false) return true;
+  return false;
+}
+
+/**
  * Corporate Executives & Enterprise Governance Managers automatically assigned to all projects.
  * Roles: Super Admin, Quality Director, Executive Management, Project Manager, Operations Manager.
  * NOTE: QA/QC Managers, QA/QC Engineers, and Inspectors are project-specific and NOT automatically added to all projects.
@@ -49,6 +70,8 @@ export function isGlobalManagerRole(role?: UserRole): boolean {
     "SUPER_ADMIN",
     "QUALITY_DIRECTOR",
     "EXECUTIVE_MANAGEMENT",
+    "QUALITY_MANAGER",
+    "QAQC_MANAGER",
     "PROJECT_MANAGER",
     "OPERATIONS_MANAGER",
   ];
@@ -183,7 +206,9 @@ export function isStaffAssignedToProject(
         id?: string;
         assignedStaff?: string[];
         assignedStaffIds?: string[];
+        assignedUserIds?: string[];
         excludedStaffIds?: string[];
+        createdBy?: string;
       }
     | null
     | undefined,
@@ -199,8 +224,8 @@ export function isStaffAssignedToProject(
   projectId?: string,
 ): boolean {
   if (!user) return false;
-  // 1. Corporate Executive Managers have automatic company-wide access
-  if (isGlobalManagerRole(user.role)) return true;
+  // 1. Corporate Executive Managers & Level 5 Governance Leaders have automatic company-wide access
+  if (isGlobalManagerRole(user.role) || (user.role && getRoleLevel(user.role) >= 5)) return true;
 
   const targetProjId = project?.id || projectId;
   if (!targetProjId) return false;
@@ -214,16 +239,23 @@ export function isStaffAssignedToProject(
     return false;
   }
 
-  // 3. Project Roster Check
+  // 3. Project Creator / Author has immediate access
+  if (project?.createdBy && project.createdBy === user.uid) {
+    return true;
+  }
+
+  // 4. Project Roster Check (supporting assignedStaff, assignedStaffIds, and legacy assignedUserIds)
+  const projAny = project as any;
   const inProjectRoster =
     Boolean(project?.assignedStaff?.includes(user.uid)) ||
-    Boolean(project?.assignedStaffIds?.includes(user.uid));
+    Boolean(project?.assignedStaffIds?.includes(user.uid)) ||
+    Boolean(projAny?.assignedUserIds?.includes(user.uid));
 
   if (inProjectRoster) {
     return true;
   }
 
-  // 4. User Profile Project Access / ProjectIds Check
+  // 5. User Profile Project Access / ProjectIds Check
   if (
     user.projectAccess &&
     typeof user.projectAccess === "object" &&
@@ -429,7 +461,244 @@ export function isUserEligibleForStakeholderRole(
 export function canEditElementRegistry(
   user?: { role?: UserRole; designation?: string; department?: string } | null,
 ): boolean {
-  return isQAQCUser(user);
+  if (!user) return false;
+  return isQAQCUser(user) || getRoleLevel(user.role) >= 4;
+}
+
+/**
+ * Normalizes any route path across the application, stripping project IDs/codes
+ * so that routes like /project/PRJ-123/elements or /projects/PRJ-123/elements
+ * correctly normalize to /project/elements.
+ */
+export function normalizeAppPath(path: string): string {
+  if (!path) return "";
+  const clean = path.toLowerCase().trim().split("?")[0].split("#")[0];
+  const parts = clean.split("/").filter(Boolean);
+
+  if (parts.length === 0) return "/";
+
+  // Check if it's a project route
+  if (parts[0] === "project" || parts[0] === "projects") {
+    if (parts.length === 1) {
+      return `/${parts[0]}`;
+    }
+
+    const KNOWN_PROJECT_SUBPATHS = new Set([
+      "dashboard",
+      "elements",
+      "registry",
+      "grid-plan",
+      "bim-3d",
+      "3d-twin",
+      "5d-cost",
+      "cost-takeoff",
+      "6d-carbon",
+      "sustainability",
+      "levels",
+      "packages",
+      "gridlines",
+      "mto",
+      "size-schedule",
+      "site-comments",
+      "ncrs",
+      "ncr",
+      "site-instructions",
+      "daily-logs",
+      "daily-log",
+      "inspections",
+      "permit-to-pour",
+      "concrete",
+      "steel",
+      "bar-cutting",
+      "deliveries",
+      "mar",
+      "mir",
+      "rfis",
+      "rfi",
+      "method-statements",
+      "rams",
+      "itp",
+      "documents",
+      "site-instruction",
+      "site-instructions",
+      "punch-list",
+      "handover",
+      "photos",
+      "planner",
+      "chat",
+      "calculators",
+      "reporting",
+      "weekly-reports",
+      "approvals",
+      "action-center",
+      "notifications",
+      "profile",
+      "settings",
+      "edit",
+      "new",
+      "assignments",
+      "team",
+      "staff",
+      "qaqc-handbook",
+    ]);
+
+    if (KNOWN_PROJECT_SUBPATHS.has(parts[1])) {
+      return `/project/${parts.slice(1).join("/")}`;
+    }
+
+    // If parts[1] is a project ID or code: /project/PRJ-001/grid-plan -> /project/grid-plan
+    if (parts.length >= 3) {
+      return `/project/${parts.slice(2).join("/")}`;
+    }
+
+    return "/project";
+  }
+
+  return `/${parts.join("/")}`;
+}
+
+/**
+ * Resolves which individual BIM module a route belongs to.
+ */
+export function getBimModuleForRoute(path: string): BimModuleKey | null {
+  if (!path) return null;
+  const clean = path.toLowerCase().trim().split("?")[0].split("#")[0];
+  const parts = clean.split("/").filter(Boolean);
+
+  // Check if any segment matches individual BIM modules
+  if (parts.includes("grid-plan")) return "2d";
+  if (parts.includes("bim-3d") || parts.includes("3d-twin")) return "3d";
+  if (parts.includes("planner")) return "4d";
+  if (parts.includes("5d-cost") || parts.includes("cost-takeoff")) return "5d";
+  if (parts.includes("6d-carbon") || parts.includes("sustainability")) return "6d";
+  if (parts.includes("elements") || (parts.includes("registry") && parts.includes("element"))) return "7d";
+  if (parts.includes("mto") || parts.includes("size-schedule")) return "mto";
+  if (parts.includes("gridlines")) return "gridlines";
+  if (parts.includes("levels")) return "levels";
+  if (parts.includes("packages")) return "packages";
+
+  return null;
+}
+
+/**
+ * Checks if a given URL path belongs to any of the BIM Dimensions / Pages.
+ */
+export function isBimRoute(path: string): boolean {
+  return getBimModuleForRoute(path) !== null;
+}
+
+/**
+ * Maps BimModuleKey to its property in BimModuleSettings.
+ */
+export function getModuleSettingField(key: BimModuleKey): keyof BimModuleSettings {
+  switch (key) {
+    case "2d": return "enable2D";
+    case "3d": return "enable3D";
+    case "4d": return "enable4D";
+    case "5d": return "enable5D";
+    case "6d": return "enable6D";
+    case "7d": return "enable7D";
+    case "mto": return "enableMTO";
+    case "gridlines": return "enableGridlines";
+    case "levels": return "enableLevels";
+    case "packages": return "enablePackages";
+  }
+}
+
+/**
+ * Checks whether an individual BIM module/page is enabled for a given project.
+ * By default: 2D, 3D, 7D, MTO, Gridlines, Floor Levels, and Work Packages are ON.
+ * 4D, 5D, 6D are OFF by default.
+ */
+export function isBimModuleEnabled(
+  project?: { enableBim?: boolean; bimSettings?: BimModuleSettings } | null,
+  moduleKey?: BimModuleKey | null,
+): boolean {
+  if (!moduleKey) return false;
+  const field = getModuleSettingField(moduleKey);
+
+  // Fallback to active project in store if project was omitted or null
+  let effectiveProject = project;
+  if (effectiveProject === undefined || effectiveProject === null) {
+    try {
+      if (typeof window !== "undefined") {
+        const store = (window as any).__JQMS_PROJECT_STORE__;
+        if (store?.getState?.()?.activeProject) {
+          effectiveProject = store.getState().activeProject;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 1. If project has master enableBim explicitly set to false, ALL BIM modules are disabled!
+  if (effectiveProject && effectiveProject.enableBim === false) {
+    return false;
+  }
+
+  // 2. If granular settings exist on the project and explicitly define this module:
+  if (effectiveProject?.bimSettings && typeof effectiveProject.bimSettings[field] === "boolean") {
+    return effectiveProject.bimSettings[field]!;
+  }
+
+  // 3. Fallback to strict defaults requested:
+  // 2D: true, 3D: true, 7D: true, MTO: true, Gridlines: true, Levels: true, Packages: true
+  // 4D: false, 5D: false, 6D: false
+  return DEFAULT_BIM_SETTINGS[field] ?? false;
+}
+
+/**
+ * Checks if at least ONE BIM module is currently enabled for this project.
+ * Used to determine whether the "BIM & Spatial Twin" navigation domain should be visible at all.
+ */
+export function isBimEnabledForProject(
+  project?: { enableBim?: boolean; bimSettings?: BimModuleSettings } | null,
+): boolean {
+  let effectiveProject = project;
+  if (effectiveProject === undefined || effectiveProject === null) {
+    try {
+      if (typeof window !== "undefined") {
+        const store = (window as any).__JQMS_PROJECT_STORE__;
+        if (store?.getState?.()?.activeProject) {
+          effectiveProject = store.getState().activeProject;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (effectiveProject && effectiveProject.enableBim === false) {
+    return false;
+  }
+
+  const allKeys: BimModuleKey[] = [
+    "2d", "3d", "4d", "5d", "6d", "7d", "mto", "gridlines", "levels", "packages"
+  ];
+  return allKeys.some((k) => isBimModuleEnabled(effectiveProject, k));
+}
+
+/**
+ * Checks if the user is authorized to toggle or manage project-level BIM features.
+ * Only the Project Administrator (Level 4 Project Manager / Creator) or someone on Level 5
+ * (Super Admin, Quality Director, Executive Management, Quality Manager, QAQC Manager) is authorized.
+ */
+export function canManageProjectFeatures(
+  user?: { role?: UserRole; uid?: string; email?: string } | null,
+  project?: { createdBy?: string } | null,
+): boolean {
+  if (!user) return false;
+  // 1. Level 4+ Project / Quality Governance Authority (matches CompanyGuard / ProjectEdit)
+  if (getRoleLevel(user.role) >= 4) return true;
+
+  // 2. Explicit Project Administrator role
+  if ((user.role as string) === "PROJECT_ADMIN") return true;
+
+  // 3. Project creator
+  if (project?.createdBy && (project.createdBy === user.uid || project.createdBy === user.email)) return true;
+
+  return false;
 }
 
 /**
@@ -440,19 +709,38 @@ export function canEditElementRegistry(
  * and Route Access Guards.
  */
 export function canAccessRoute(
-  user: { role?: UserRole; designation?: string; department?: string } | null | undefined,
+  user: { role?: UserRole; designation?: string; department?: string; status?: string; isActive?: boolean } | null | undefined,
   path: string,
+  project?: { enableBim?: boolean; bimSettings?: BimModuleSettings } | null,
 ): boolean {
-  if (!user) return false;
+  if (!user || isUserSuspended(user)) return false;
+
+  let effectiveProject = project;
+  if (effectiveProject === undefined || effectiveProject === null) {
+    try {
+      if (typeof window !== "undefined") {
+        const store = (window as any).__JQMS_PROJECT_STORE__;
+        if (store?.getState?.()?.activeProject) {
+          effectiveProject = store.getState().activeProject;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // If the route belongs to BIM and this specific BIM module is disabled on the project, block access!
+  const bimModule = getBimModuleForRoute(path);
+  if (bimModule && !isBimModuleEnabled(effectiveProject, bimModule)) {
+    return false;
+  }
+
   const role = user.role;
   const isQAQC = isQAQCUser(user);
   const lvl = getRoleLevel(role);
 
   // Normalize path removing project-id variables: /projects/123/elements -> /project/elements
-  const cleanPath = path.toLowerCase().trim();
-  const normalized = cleanPath
-    .replace(/^\/project\/[^\/]+/, "/project")
-    .replace(/^\/projects\/[^\/]+/, "/project");
+  const normalized = normalizeAppPath(path);
 
   // Profile & Personal Settings (Accessible to all logged in users)
   if (
@@ -463,21 +751,32 @@ export function canAccessRoute(
     return true;
   }
 
-  // 1. Element Registry & 3D BIM (STRICT QA/QC ONLY)
+  // 1. Element Registry, Passports & 3D BIM Twin (2D-7D BIM Dimensions)
   if (
     normalized.startsWith("/project/elements") ||
     normalized.startsWith("/project/registry/element") ||
-    normalized === "/project/elements"
+    normalized.startsWith("/project/bim-3d") ||
+    normalized.startsWith("/project/3d-twin")
   ) {
-    return isQAQC;
+    return isQAQC || lvl >= 2 || isUserEligibleForStakeholderRole(user, "Consultant");
   }
 
-  // 2. QA/QC Field SOP Handbook (STRICT QA/QC ONLY)
+  // 2. 5D Cost Takeoff & 6D Carbon ESG BIM Dimensions
+  if (
+    normalized.startsWith("/project/5d-cost") ||
+    normalized.startsWith("/project/cost-takeoff") ||
+    normalized.startsWith("/project/6d-carbon") ||
+    normalized.startsWith("/project/sustainability")
+  ) {
+    return isQAQC || lvl >= 2 || isUserEligibleForStakeholderRole(user, "Consultant");
+  }
+
+  // 3. QA/QC Field SOP Handbook (STRICT QA/QC ONLY)
   if (normalized.startsWith("/project/qaqc-handbook")) {
     return isQAQC;
   }
 
-  // 3. Project Settings, Matrix & Company Administration (Level 4+ Managers & Directors)
+  // 4. Project Settings, Matrix & Company Administration (Level 4+ Managers & Directors)
   if (
     (normalized.startsWith("/company/projects") && normalized.includes("/edit")) ||
     normalized.startsWith("/project/settings") ||

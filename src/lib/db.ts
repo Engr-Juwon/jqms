@@ -1,4 +1,4 @@
-import { firestore } from "@/firebase";
+import { firestore, auth } from "@/firebase";
 import {
   collection,
   doc,
@@ -9,8 +9,13 @@ import {
   writeBatch,
   query,
   where,
+  orderBy,
+  limit,
   onSnapshot,
+  runTransaction,
+  arrayUnion,
   QueryConstraint,
+  WriteBatch,
 } from "firebase/firestore";
 import { BUILTIN_TEMPLATES } from "./defaultInspectionTemplates";
 import { DEFAULT_TRADES } from "./defaultTrades";
@@ -50,17 +55,40 @@ import {
   TakingOverCertificate,
   MethodStatement,
 } from "@/types";
-import { generateInitialSchedules } from "./sampleBBSData";
-import { generateDefaultITPPlans } from "./defaultITPTemplates";
 import {
   getVaultRecord,
   setVaultRecord,
-  deleteVaultRecord,
   removeFromAllVaultCaches,
-  upsertInVaultCache,
+  hydrateVaultFromIDB,
+  queueOfflineAction,
+  OfflineSyncEntityType,
 } from "./idbVault";
+import { registerLogoutCleanup, useAuthStore } from "@/stores/useAuthStore";
 
-// High-speed L1 in-memory + L2 IndexedDB record cache (crash-proof with unlimited quota)
+export interface AppNotification {
+  id: string;
+  companyId: string;
+  projectId?: string;
+  userId?: string; // target user or undefined for tenant broadcast
+  targetRoles?: string[];
+  type:
+    | "ACTION_REQUIRED"
+    | "NCR_RAISED"
+    | "PERMIT_PENDING"
+    | "INSPECTION_SCHEDULED"
+    | "SYSTEM"
+    | "CHAT";
+  title: string;
+  message: string;
+  linkUrl?: string;
+  readBy?: string[];
+  isRead?: boolean;
+  createdAt: number;
+  metadata?: Record<string, any>;
+}
+
+// ─── HIGH-SPEED MEMORY & VAULT CACHING ──────────────────────────────────
+
 function getCache<T>(key: string, defaultVal: T): T {
   return getVaultRecord<T>(key, defaultVal);
 }
@@ -72,8 +100,111 @@ function setCache<T>(key: string, data: T): void {
 // In-memory runtime cache for WeeklyReports to guarantee zero-loss session persistence
 const inMemoryWeeklyReports = new Map<string, WeeklyReport>();
 
-// Helper to recursively strip undefined properties before sending to Firestore
-// Firestore strictly rejects writes if ANY property, nested object, or array element contains undefined
+export function clearInMemoryCaches(): void {
+  inMemoryWeeklyReports.clear();
+}
+
+// Hook into auth store logout cleanup
+if (typeof queueMicrotask === "function") {
+  queueMicrotask(() => {
+    try {
+      registerLogoutCleanup(() => clearInMemoryCaches());
+    } catch {
+      // Ignore if store not yet bound
+    }
+  });
+}
+
+// ─── TENANT IDENTITY RESOLUTION ─────────────────────────────────────────
+
+const GHOST_COMPANY_IDS = new Set(["all", "undefined", "null", "none", ""]);
+
+export function resolveEffectiveCompanyId(explicitCompanyId?: string): string {
+  if (explicitCompanyId && !GHOST_COMPANY_IDS.has(explicitCompanyId.trim())) {
+    return explicitCompanyId.trim();
+  }
+  try {
+    const authState = useAuthStore.getState();
+    const userCompId = authState.currentUser?.companyId?.trim();
+    if (userCompId && !GHOST_COMPANY_IDS.has(userCompId)) {
+      return userCompId;
+    }
+    const storeCompId = authState.company?.id?.trim();
+    if (storeCompId && !GHOST_COMPANY_IDS.has(storeCompId)) {
+      return storeCompId;
+    }
+  } catch {
+    // Auth store not yet mounted
+  }
+  return "";
+}
+
+function scopedCacheKey(
+  entity: string,
+  projectId?: string,
+  companyId?: string,
+): string {
+  const comp = companyId || "default";
+  const proj = projectId || "global";
+  return `jqms_${entity}_${comp}_${proj}`;
+}
+
+// ─── TRANSIENT NETWORK DETECTOR ─────────────────────────────────────────
+
+export function isTransientNetworkError(err: any): boolean {
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    return true;
+  }
+  if (!err) return false;
+  const code = String(err.code || "").toLowerCase();
+  const msg = String(err.message || "").toLowerCase();
+
+  // Definite security/validation/quota errors MUST NOT be treated as offline network loss
+  if (
+    code.includes("permission-denied") ||
+    code.includes("unauthenticated") ||
+    code.includes("invalid-argument") ||
+    code.includes("resource-exhausted") ||
+    code.includes("failed-precondition") ||
+    code.includes("not-found") ||
+    code.includes("already-exists")
+  ) {
+    return false;
+  }
+
+  return (
+    code === "unavailable" ||
+    code === "deadline-exceeded" ||
+    code === "cancelled" ||
+    code.includes("network") ||
+    msg.includes("network") ||
+    msg.includes("failed to fetch") ||
+    msg.includes("offline") ||
+    msg.includes("internet") ||
+    msg.includes("client is offline")
+  );
+}
+
+// ─── CHUNKED BATCH COMMITTER (<= 450 OPS PER BATCH) ────────────────────
+
+export async function commitInChunks<T>(
+  items: T[],
+  applyOp: (batch: WriteBatch, item: T) => void,
+  chunkSize = 450,
+): Promise<void> {
+  if (!items || items.length === 0) return;
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const chunk = items.slice(i, i + chunkSize);
+    const batch = writeBatch(firestore);
+    for (const item of chunk) {
+      applyOp(batch, item);
+    }
+    await batch.commit();
+  }
+}
+
+// ─── SANITIZATION & SORT HELPERS ────────────────────────────────────────
+
 export function cleanForFirestore<T>(input: T): T {
   if (input === null || input === undefined) {
     return {} as T;
@@ -121,7 +252,7 @@ export function cleanForFirestore<T>(input: T): T {
     return JSON.parse(
       JSON.stringify(cleaned, (_k, v) => (v === undefined ? null : v)),
     ) as T;
-  } catch (_) {
+  } catch {
     return cleaned as T;
   }
 }
@@ -208,16 +339,17 @@ export function sanitizeLevelForFirestore(
   return cleanForFirestore(cleanLevel);
 }
 
-// Helper to safely convert any date, timestamp, or id into an epoch millisecond number for descending sort
 export function parseSortTimestamp(item: any): number {
   if (!item || typeof item !== "object") return 0;
 
   const candidate =
+    item.timestamp ??
     item.createdAt ??
     item.createdDate ??
     item.uploadedAt ??
     item.deliveryDate ??
     item.castDate ??
+    item.castingDate ??
     item.samplingDate ??
     item.inspectionDate ??
     item.startDate ??
@@ -258,84 +390,195 @@ export function sortByNewestFirst<T>(list: T[]): T[] {
   );
 }
 
-// Persistent set of deleted cube sample IDs to prevent resurrection by cache-merge or stale queries
-const getDeletedCubeIds = (): Set<string> => {
-  try {
-    const raw = localStorage.getItem("jqms_deleted_cube_ids");
-    if (raw) return new Set(JSON.parse(raw));
-  } catch (_) {}
-  return new Set<string>();
-};
+// ─── PERSISTENCE HELPER WITH OFFLINE FALLBACK ───────────────────────────
 
-const markCubeAsDeleted = (id: string, sampleId?: string): void => {
+async function persistRecord<
+  T extends { id: string; projectId?: string; companyId?: string },
+>(
+  collectionName: string,
+  entityType: OfflineSyncEntityType,
+  item: T,
+  cacheKey: string,
+  sortFn?: (a: T, b: T) => number,
+): Promise<void> {
+  const effectiveCompId = resolveEffectiveCompanyId(item.companyId);
+  const targetDoc = cleanForFirestore({
+    ...item,
+    companyId: effectiveCompId || item.companyId || "",
+  });
+
+  const previousCache = getCache<T[]>(cacheKey, []);
+  const nextCache = [...previousCache];
+  const idx = nextCache.findIndex((x) => x.id === item.id);
+  if (idx >= 0) nextCache[idx] = targetDoc;
+  else nextCache.unshift(targetDoc);
+  if (sortFn) nextCache.sort(sortFn);
+  else nextCache.sort((a, b) => parseSortTimestamp(b) - parseSortTimestamp(a));
+  setCache(cacheKey, nextCache);
+
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    await queueOfflineAction({
+      type: entityType,
+      projectId: item.projectId || "global",
+      companyId: effectiveCompId,
+      payload: targetDoc,
+    });
+    return;
+  }
+
   try {
-    const set = getDeletedCubeIds();
-    if (id) set.add(id);
-    if (sampleId) set.add(sampleId);
-    localStorage.setItem(
-      "jqms_deleted_cube_ids",
-      JSON.stringify(Array.from(set)),
+    await setDoc(doc(firestore, collectionName, targetDoc.id), targetDoc, {
+      merge: true,
+    });
+  } catch (err: any) {
+    if (isTransientNetworkError(err)) {
+      console.warn(
+        `[dbService] Transient network error while saving ${collectionName}/${targetDoc.id}. Queueing offline.`,
+        err,
+      );
+      await queueOfflineAction({
+        type: entityType,
+        projectId: item.projectId || "global",
+        companyId: effectiveCompId,
+        payload: targetDoc,
+      });
+      return;
+    }
+    // Revert optimistic cache on hard rejection (e.g. permission-denied) and rethrow
+    setCache(cacheKey, previousCache);
+    console.error(
+      `[dbService] Cloud write rejected for ${collectionName}/${targetDoc.id}:`,
+      err,
     );
-  } catch (_) {}
-};
+    throw err;
+  }
+}
 
-const isCubeDeleted = (id?: string, sampleId?: string): boolean => {
-  const set = getDeletedCubeIds();
-  return Boolean((id && set.has(id)) || (sampleId && set.has(sampleId)));
-};
+// ─── DBSERVICE IMPLEMENTATION ───────────────────────────────────────────
 
 export const dbService = {
-  // Initialization - ensures no fake dummy records are seeded
+  // Initialization - ensures no fake dummy records are seeded and pre-warms IDB cache
   async initDefaults() {
+    try {
+      await hydrateVaultFromIDB();
+    } catch (_) {}
     console.log("[JQMS Enterprise] Connected to Live Cloud Firestore Database");
+  },
+
+  clearInMemoryCaches() {
+    clearInMemoryCaches();
+  },
+
+  // ─── MONOTONIC SEQUENCE NUMBER GENERATOR ──────────────────────────────
+  async getNextSequenceNumber(
+    companyId: string,
+    projectId: string,
+    prefix: string,
+    padLength = 3,
+  ): Promise<{ sequence: number; formattedCode: string }> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) {
+      throw new Error(
+        "Active company workspace is required to generate sequential numbering.",
+      );
+    }
+    const cleanPrefix = (prefix || "DOC").trim().toUpperCase();
+    const counterDocId = `${effectiveCompId}_${projectId || "global"}_${cleanPrefix}`;
+    const counterRef = doc(firestore, "documentCounters", counterDocId);
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const fallbackSeq = Date.now() % 10000;
+      return {
+        sequence: fallbackSeq,
+        formattedCode: `${cleanPrefix}-OFF-${fallbackSeq}`,
+      };
+    }
+
+    try {
+      const nextSeq = await runTransaction(firestore, async (transaction) => {
+        const snap = await transaction.get(counterRef);
+        const current = snap.exists() ? Number(snap.data()?.current ?? 0) : 0;
+        const next = current + 1;
+        transaction.set(
+          counterRef,
+          {
+            id: counterDocId,
+            companyId: effectiveCompId,
+            projectId: projectId || "global",
+            prefix: cleanPrefix,
+            current: next,
+            updatedAt: Date.now(),
+          },
+          { merge: true },
+        );
+        return next;
+      });
+
+      return {
+        sequence: nextSeq,
+        formattedCode: `${cleanPrefix}-${String(nextSeq).padStart(padLength, "0")}`,
+      };
+    } catch (e) {
+      if (isTransientNetworkError(e)) {
+        const fallbackSeq = Date.now() % 10000;
+        return {
+          sequence: fallbackSeq,
+          formattedCode: `${cleanPrefix}-OFF-${fallbackSeq}`,
+        };
+      }
+      throw e;
+    }
   },
 
   // --- Companies ---
   async getCompany(companyId: string): Promise<Company | null> {
-    if (!companyId) return null;
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return null;
+    const cacheKey = `jqms_company_${effectiveCompId}`;
     try {
-      const snap = await getDoc(doc(firestore, "companies", companyId));
+      const snap = await getDoc(doc(firestore, "companies", effectiveCompId));
       if (snap.exists()) {
         const comp = { ...snap.data(), id: snap.id } as Company;
-        setCache(`jqms_company_${companyId}`, comp);
+        setCache(cacheKey, comp);
         return comp;
       }
-      return getCache<Company | null>(`jqms_company_${companyId}`, null);
+      return getCache<Company | null>(cacheKey, null);
     } catch (e) {
-      console.warn(`Firestore getCompany warning for ${companyId}:`, e);
-      return getCache<Company | null>(`jqms_company_${companyId}`, null);
+      console.warn(`Firestore getCompany warning for ${effectiveCompId}:`, e);
+      return getCache<Company | null>(cacheKey, null);
     }
   },
 
   async saveCompany(company: Partial<Company> & { id: string }): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(company.id);
+    if (!effectiveCompId) {
+      throw new Error("Cannot save company without a valid workspace ID.");
+    }
     const cleaned = cleanForFirestore({
       ...company,
+      id: effectiveCompId,
       updatedAt: Date.now(),
     });
-    setCache(`jqms_company_${cleaned.id}`, cleaned);
+    setCache(`jqms_company_${effectiveCompId}`, cleaned as Company);
+
     try {
-      localStorage.setItem("jqms_current_company", JSON.stringify(cleaned));
-    } catch (_) {}
-    try {
-      await setDoc(doc(firestore, "companies", cleaned.id), cleaned, {
+      await setDoc(doc(firestore, "companies", effectiveCompId), cleaned, {
         merge: true,
       });
-    } catch (e) {
+    } catch (e: any) {
       console.error("Firestore saveCompany error:", e);
+      throw e;
     }
   },
 
-  async getCompanies(): Promise<Company[]> {
+  async getCompanies(companyId?: string): Promise<Company[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
     try {
-      const snap = await getDocs(collection(firestore, "companies"));
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id }) as Company);
-      if (list.length > 0) {
-        setCache("jqms_all_companies", list);
-      }
-      return list;
-    } catch (e) {
-      console.warn("Firestore getCompanies warning:", e);
-      return getCache<Company[]>("jqms_all_companies", []);
+      const single = await this.getCompany(effectiveCompId);
+      return single ? [single] : [];
+    } catch {
+      return [];
     }
   },
 
@@ -343,17 +586,18 @@ export const dbService = {
     companyId: string,
     callback: (company: Company | null) => void,
   ): () => void {
-    if (!companyId) {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) {
       callback(null);
       return () => {};
     }
     try {
       const unsub = onSnapshot(
-        doc(firestore, "companies", companyId),
+        doc(firestore, "companies", effectiveCompId),
         (snap) => {
           if (snap.exists()) {
             const comp = { ...snap.data(), id: snap.id } as Company;
-            setCache(`jqms_company_${companyId}`, comp);
+            setCache(`jqms_company_${effectiveCompId}`, comp);
             callback(comp);
           } else {
             callback(null);
@@ -372,43 +616,75 @@ export const dbService = {
 
   // --- Projects (Queried by companyId) ---
   async getProjects(companyId?: string): Promise<Project[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
+    const cacheKey = `jqms_projects_${effectiveCompId}`;
     try {
-      const constraints: QueryConstraint[] = [];
-      if (companyId) {
-        constraints.push(where("companyId", "==", companyId));
-      }
-      const q =
-        constraints.length > 0
-          ? query(collection(firestore, "projects"), ...constraints)
-          : collection(firestore, "projects");
+      const q = query(
+        collection(firestore, "projects"),
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const list = snap.docs.map((d) => ({ ...d.data(), id: d.id }) as Project);
       if (list.length > 0) {
-        setCache(`jqms_projects_${companyId || "all"}`, list);
+        setCache(cacheKey, list);
+        return list;
       }
+      // If Firestore query returned 0 docs, check local vault cache in case offline/offline-synced
+      const cached = getCache<Project[]>(cacheKey, []);
+      if (cached.length > 0) return cached;
       return list;
     } catch (e) {
       console.warn("Firestore getProjects warning, reading local cache:", e);
-      return getCache<Project[]>(`jqms_projects_${companyId || "all"}`, []);
+      const cached = getCache<Project[]>(cacheKey, []);
+      if (cached.length > 0) return cached;
+      return getCache<Project[]>("jqms_projects_all", []);
     }
   },
 
   async saveProject(project: Project): Promise<void> {
-    const cleaned = cleanForFirestore(project);
-    const cacheKey = `jqms_projects_${cleaned.companyId || "all"}`;
-    const list = getCache<Project[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, list);
+    const effectiveCompId = resolveEffectiveCompanyId(project.companyId);
+    if (!effectiveCompId) {
+      throw new Error("Project must belong to an active company workspace.");
+    }
+    const cleaned = cleanForFirestore({
+      ...project,
+      companyId: effectiveCompId,
+      updatedAt: new Date().toISOString(),
+    });
+    const cacheKey = `jqms_projects_${effectiveCompId}`;
+    const previous = getCache<Project[]>(cacheKey, []);
+    const next = [...previous];
+    const idx = next.findIndex((p) => p.id === cleaned.id);
+    if (idx >= 0) next[idx] = cleaned;
+    else next.unshift(cleaned);
+    setCache(cacheKey, next);
 
     try {
       await setDoc(doc(firestore, "projects", cleaned.id), cleaned, {
         merge: true,
       });
-    } catch (e) {
+    } catch (e: any) {
+      setCache(cacheKey, previous);
       console.error("Firestore saveProject error:", e);
+      throw new Error(
+        e?.message || "Failed to persist project changes to cloud database.",
+      );
     }
+  },
+
+  async deleteProject(projectId: string, companyId?: string): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (effectiveCompId) {
+      const cacheKey = `jqms_projects_${effectiveCompId}`;
+      const list = getCache<Project[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((p) => p.id !== projectId),
+      );
+    }
+    removeFromAllVaultCaches("jqms_projects_", projectId);
+    await deleteDoc(doc(firestore, "projects", projectId));
   },
 
   async updateProjectCurrentLevel(
@@ -417,30 +693,31 @@ export const dbService = {
     levelName?: string,
     companyId?: string,
   ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     const payload = cleanForFirestore({
       currentLevelId: levelId,
       currentLevelName: levelName || "",
       updatedAt: new Date().toISOString(),
     });
-    const cacheKey = `jqms_projects_${companyId || "all"}`;
-    const list = getCache<Project[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === projectId);
-    if (idx >= 0) {
-      list[idx] = {
-        ...list[idx],
-        currentLevelId: levelId,
-        currentLevelName: levelName || list[idx].currentLevelName,
-        updatedAt: new Date().toISOString(),
-      };
-      setCache(cacheKey, list);
+    if (effectiveCompId) {
+      const cacheKey = `jqms_projects_${effectiveCompId}`;
+      const list = getCache<Project[]>(cacheKey, []);
+      const idx = list.findIndex((p) => p.id === projectId);
+      if (idx >= 0) {
+        list[idx] = {
+          ...list[idx],
+          currentLevelId: levelId,
+          currentLevelName: levelName || list[idx].currentLevelName,
+          updatedAt: new Date().toISOString(),
+        };
+        setCache(cacheKey, list);
+      }
     }
 
     try {
-      await setDoc(
-        doc(firestore, "projects", projectId),
-        payload,
-        { merge: true },
-      );
+      await setDoc(doc(firestore, "projects", projectId), payload, {
+        merge: true,
+      });
     } catch (e) {
       console.error("Firestore updateProjectCurrentLevel error:", e);
     }
@@ -451,30 +728,31 @@ export const dbService = {
     costRates: any,
     companyId?: string,
   ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     const payload = cleanForFirestore({
       costRates,
       currency: costRates?.currencySymbol || "$",
       updatedAt: new Date().toISOString(),
     });
-    const cacheKey = `jqms_projects_${companyId || "all"}`;
-    const list = getCache<Project[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === projectId);
-    if (idx >= 0) {
-      list[idx] = {
-        ...list[idx],
-        costRates,
-        currency: costRates?.currencySymbol || list[idx].currency || "$",
-        updatedAt: new Date().toISOString(),
-      };
-      setCache(cacheKey, list);
+    if (effectiveCompId) {
+      const cacheKey = `jqms_projects_${effectiveCompId}`;
+      const list = getCache<Project[]>(cacheKey, []);
+      const idx = list.findIndex((p) => p.id === projectId);
+      if (idx >= 0) {
+        list[idx] = {
+          ...list[idx],
+          costRates,
+          currency: costRates?.currencySymbol || list[idx].currency || "$",
+          updatedAt: new Date().toISOString(),
+        };
+        setCache(cacheKey, list);
+      }
     }
 
     try {
-      await setDoc(
-        doc(firestore, "projects", projectId),
-        payload,
-        { merge: true },
-      );
+      await setDoc(doc(firestore, "projects", projectId), payload, {
+        merge: true,
+      });
     } catch (e) {
       console.error("Firestore updateProjectCostRates error:", e);
     }
@@ -485,45 +763,48 @@ export const dbService = {
     carbonFactors: any,
     companyId?: string,
   ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     const payload = cleanForFirestore({
       carbonFactors,
       updatedAt: new Date().toISOString(),
     });
-    const cacheKey = `jqms_projects_${companyId || "all"}`;
-    const list = getCache<Project[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === projectId);
-    if (idx >= 0) {
-      list[idx] = {
-        ...list[idx],
-        carbonFactors,
-        updatedAt: new Date().toISOString(),
-      };
-      setCache(cacheKey, list);
+    if (effectiveCompId) {
+      const cacheKey = `jqms_projects_${effectiveCompId}`;
+      const list = getCache<Project[]>(cacheKey, []);
+      const idx = list.findIndex((p) => p.id === projectId);
+      if (idx >= 0) {
+        list[idx] = {
+          ...list[idx],
+          carbonFactors,
+          updatedAt: new Date().toISOString(),
+        };
+        setCache(cacheKey, list);
+      }
     }
 
     try {
-      await setDoc(
-        doc(firestore, "projects", projectId),
-        payload,
-        { merge: true },
-      );
+      await setDoc(doc(firestore, "projects", projectId), payload, {
+        merge: true,
+      });
     } catch (e) {
       console.error("Firestore updateProjectCarbonFactors error:", e);
     }
   },
 
-  // --- Project Levels (Dual Scoped: projectId AND companyId) ---
+  // --- Project Levels ---
   async getLevels(
     projectId: string,
     companyId?: string,
   ): Promise<ProjectLevel[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("levels", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "projectLevels"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "projectLevels"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const list = snap.docs
         .map((d) => ({ ...d.data(), id: d.id }) as ProjectLevel)
@@ -532,44 +813,69 @@ export const dbService = {
             (a.order ?? 0) - (b.order ?? 0) ||
             (a.elevation ?? 0) - (b.elevation ?? 0),
         );
-      if (list.length > 0) {
-        setCache(`jqms_levels_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getLevels warning, reading local cache:", e);
-      return getCache<ProjectLevel[]>(`jqms_levels_${projectId}`, []);
+      return getCache<ProjectLevel[]>(cacheKey, []);
     }
   },
 
   async saveLevel(level: ProjectLevel): Promise<void> {
-    const cleaned = sanitizeLevelForFirestore(level);
-    const cacheKey = `jqms_levels_${cleaned.projectId}`;
-    const list = getCache<ProjectLevel[]>(cacheKey, []);
-    const idx = list.findIndex((l) => l.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.push(cleaned);
-    list.sort(
+    const effectiveCompId = resolveEffectiveCompanyId(level.companyId);
+    const cleaned = sanitizeLevelForFirestore({
+      ...level,
+      companyId: effectiveCompId,
+    });
+    const cacheKey = scopedCacheKey(
+      "levels",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord(
+      "projectLevels",
+      "PROJECT_LEVELS",
+      cleaned,
+      cacheKey,
       (a, b) =>
         (a.order ?? 0) - (b.order ?? 0) ||
         (a.elevation ?? 0) - (b.elevation ?? 0),
     );
-    setCache(cacheKey, list);
-
-    try {
-      await setDoc(doc(firestore, "projectLevels", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveLevel error:", e);
-    }
   },
 
-  async saveLevels(levels: ProjectLevel[]): Promise<void> {
-    const cleanedLevels = levels.map((l) => sanitizeLevelForFirestore(l));
-    if (cleanedLevels.length > 0) {
-      const projectId = cleanedLevels[0].projectId;
-      const cacheKey = `jqms_levels_${projectId}`;
+  async saveLevels(
+    levelsOrProjectId: ProjectLevel[] | string,
+    maybeLevels?: ProjectLevel[] | string,
+    maybeCompanyId?: string,
+  ): Promise<void> {
+    let levels: ProjectLevel[] = [];
+    let projectId = "";
+    let companyId = "";
+
+    if (Array.isArray(levelsOrProjectId)) {
+      levels = levelsOrProjectId;
+      projectId = levels[0]?.projectId || "";
+      companyId =
+        (typeof maybeLevels === "string" ? maybeLevels : "") ||
+        levels[0]?.companyId ||
+        "";
+    } else {
+      projectId = levelsOrProjectId;
+      levels = Array.isArray(maybeLevels) ? maybeLevels : [];
+      companyId = maybeCompanyId || levels[0]?.companyId || "";
+    }
+
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    const cleanedLevels = levels.map((l) =>
+      sanitizeLevelForFirestore({
+        ...l,
+        projectId,
+        companyId: effectiveCompId,
+      }),
+    );
+
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("levels", projectId, effectiveCompId);
       const sorted = [...cleanedLevels].sort(
         (a, b) =>
           (a.order ?? 0) - (b.order ?? 0) ||
@@ -578,70 +884,85 @@ export const dbService = {
       setCache(cacheKey, sorted);
     }
 
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      await queueOfflineAction({
+        type: "PROJECT_LEVELS",
+        projectId,
+        companyId: effectiveCompId,
+        payload: {
+          projectId,
+          companyId: effectiveCompId,
+          levels: cleanedLevels,
+        },
+      });
+      return;
+    }
+
     try {
-      const batch = writeBatch(firestore);
-      cleanedLevels.forEach((lvl) => {
+      await commitInChunks(cleanedLevels, (batch, lvl) => {
         batch.set(doc(firestore, "projectLevels", lvl.id), lvl, {
           merge: true,
         });
       });
-      await batch.commit();
-    } catch (e) {
-      console.error(
-        "Firestore saveLevels batch error, trying sequential write:",
-        e,
-      );
-      await Promise.all(
-        cleanedLevels.map((lvl) =>
-          setDoc(doc(firestore, "projectLevels", lvl.id), lvl, { merge: true }),
-        ),
-      );
+    } catch (err: any) {
+      if (isTransientNetworkError(err)) {
+        await queueOfflineAction({
+          type: "PROJECT_LEVELS",
+          projectId,
+          companyId: effectiveCompId,
+          payload: {
+            projectId,
+            companyId: effectiveCompId,
+            levels: cleanedLevels,
+          },
+        });
+        return;
+      }
+      throw err;
     }
   },
 
-  async deleteLevel(levelId: string, projectId?: string): Promise<void> {
+  async deleteLevel(
+    levelId: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_levels_", levelId);
-    if (projectId) {
-      const cacheKey = `jqms_levels_${projectId}`;
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("levels", projectId, effectiveCompId);
       const list = getCache<ProjectLevel[]>(cacheKey, []);
       setCache(
         cacheKey,
         list.filter((l) => l.id !== levelId),
       );
     }
-    try {
-      await deleteDoc(doc(firestore, "projectLevels", levelId));
-    } catch (e) {
-      console.error("Firestore deleteLevel error:", e);
-    }
+    await deleteDoc(doc(firestore, "projectLevels", levelId));
   },
 
-  // --- Structural Elements & 3D BIM (Dual Scoped: projectId AND companyId) ---
+  // --- Structural Elements & 3D BIM ---
   async getElements(
     projectId: string,
     companyId?: string,
   ): Promise<StructuralElement[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("elements", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
-        where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
       const q = query(
         collection(firestore, "structuralElements"),
-        ...constraints,
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
       const snap = await getDocs(q);
       const list = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as StructuralElement,
       );
-      if (list.length > 0) {
-        setCache(`jqms_elements_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getElements warning, reading local cache:", e);
-      return getCache<StructuralElement[]>(`jqms_elements_${projectId}`, []);
+      return getCache<StructuralElement[]>(cacheKey, []);
     }
   },
 
@@ -650,19 +971,17 @@ export const dbService = {
     callback: (elements: StructuralElement[]) => void,
     companyId?: string,
   ): () => void {
-    if (!projectId) {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) {
       callback([]);
       return () => {};
     }
+    const cacheKey = scopedCacheKey("elements", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
-        where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
       const q = query(
         collection(firestore, "structuralElements"),
-        ...constraints,
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
 
       const unsub = onSnapshot(
@@ -671,9 +990,7 @@ export const dbService = {
           const list = snap.docs.map(
             (d) => ({ ...d.data(), id: d.id }) as StructuralElement,
           );
-          if (list.length > 0) {
-            setCache(`jqms_elements_${projectId}`, list);
-          }
+          setCache(cacheKey, list);
           callback(list);
         },
         (err) => {
@@ -688,375 +1005,428 @@ export const dbService = {
   },
 
   async saveElement(element: StructuralElement): Promise<void> {
-    const cleaned = cleanForFirestore(element);
-    const cacheKey = `jqms_elements_${cleaned.projectId}`;
-    const list = getCache<StructuralElement[]>(cacheKey, []);
-    const idx = list.findIndex((e) => e.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.push(cleaned);
-    setCache(cacheKey, list);
-
-    try {
-      await setDoc(doc(firestore, "structuralElements", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveElement error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(element.companyId);
+    const cleaned = cleanForFirestore({
+      ...element,
+      companyId: effectiveCompId,
+    });
+    const cacheKey = scopedCacheKey(
+      "elements",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord(
+      "structuralElements",
+      "STRUCTURAL_ELEMENTS",
+      cleaned,
+      cacheKey,
+    );
   },
 
-  async saveElements(elements: StructuralElement[]): Promise<void> {
-    const cleanedList = elements.map((e) => cleanForFirestore(e));
-    if (cleanedList.length > 0) {
-      const projectId = cleanedList[0].projectId;
-      const cacheKey = `jqms_elements_${projectId}`;
+  async saveElements(
+    elementsOrProjectId: StructuralElement[] | string,
+    maybeElements?: StructuralElement[] | string,
+    maybeCompanyId?: string,
+  ): Promise<void> {
+    let elements: StructuralElement[] = [];
+    let projectId = "";
+    let companyId = "";
+
+    if (Array.isArray(elementsOrProjectId)) {
+      elements = elementsOrProjectId;
+      projectId = elements[0]?.projectId || "";
+      companyId =
+        (typeof maybeElements === "string"
+          ? maybeLevelsToComp(maybeElements)
+          : "") ||
+        elements[0]?.companyId ||
+        "";
+    } else {
+      projectId = elementsOrProjectId;
+      elements = Array.isArray(maybeElements) ? maybeElements : [];
+      companyId = maybeCompanyId || elements[0]?.companyId || "";
+    }
+
+    function maybeLevelsToComp(val: string): string {
+      return val;
+    }
+
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    const cleanedList = elements.map((e) =>
+      cleanForFirestore({ ...e, projectId, companyId: effectiveCompId }),
+    );
+
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("elements", projectId, effectiveCompId);
       const list = getCache<StructuralElement[]>(cacheKey, []);
       const map = new Map(list.map((e) => [e.id, e]));
       cleanedList.forEach((e) => map.set(e.id, e));
       setCache(cacheKey, Array.from(map.values()));
     }
 
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      await queueOfflineAction({
+        type: "STRUCTURAL_ELEMENTS",
+        projectId,
+        companyId: effectiveCompId,
+        payload: {
+          projectId,
+          companyId: effectiveCompId,
+          elements: cleanedList,
+        },
+      });
+      return;
+    }
+
     try {
-      const batch = writeBatch(firestore);
-      cleanedList.forEach((e) => {
-        batch.set(doc(firestore, "structuralElements", e.id), e, {
+      await commitInChunks(cleanedList, (batch, el) => {
+        batch.set(doc(firestore, "structuralElements", el.id), el, {
           merge: true,
         });
       });
-      await batch.commit();
-    } catch (e) {
-      console.error(
-        "Firestore saveElements batch error, trying sequential:",
-        e,
-      );
-      await Promise.all(
-        cleanedList.map((e) =>
-          setDoc(doc(firestore, "structuralElements", e.id), e, {
-            merge: true,
-          }),
-        ),
-      );
+    } catch (err: any) {
+      if (isTransientNetworkError(err)) {
+        await queueOfflineAction({
+          type: "STRUCTURAL_ELEMENTS",
+          projectId,
+          companyId: effectiveCompId,
+          payload: {
+            projectId,
+            companyId: effectiveCompId,
+            elements: cleanedList,
+          },
+        });
+        return;
+      }
+      throw err;
     }
   },
 
-  async deleteElement(elementId: string, projectId?: string): Promise<void> {
+  async deleteElement(
+    elementId: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_elements_", elementId);
-    if (projectId) {
-      const cacheKey = `jqms_elements_${projectId}`;
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("elements", projectId, effectiveCompId);
       const list = getCache<StructuralElement[]>(cacheKey, []);
       setCache(
         cacheKey,
         list.filter((e) => e.id !== elementId),
       );
     }
-    try {
-      await deleteDoc(doc(firestore, "structuralElements", elementId));
-    } catch (e) {
-      console.error("Firestore deleteElement error:", e);
-    }
+    await deleteDoc(doc(firestore, "structuralElements", elementId));
   },
 
   async bulkUpdateElements(
     elementIds: string[],
     updates: Partial<StructuralElement>,
     projectId: string,
+    companyId?: string,
   ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     const cleanedUpdates = cleanForFirestore(updates);
-    const cacheKey = `jqms_elements_${projectId}`;
+    const cacheKey = scopedCacheKey("elements", projectId, effectiveCompId);
     const list = getCache<StructuralElement[]>(cacheKey, []);
     const updatedList = list.map((e) =>
       elementIds.includes(e.id) ? { ...e, ...cleanedUpdates } : e,
     );
     setCache(cacheKey, updatedList);
 
-    try {
-      const batch = writeBatch(firestore);
-      elementIds.forEach((id) => {
-        batch.set(doc(firestore, "structuralElements", id), cleanedUpdates, {
-          merge: true,
-        });
+    await commitInChunks(elementIds, (batch, id) => {
+      batch.set(doc(firestore, "structuralElements", id), cleanedUpdates, {
+        merge: true,
       });
-      await batch.commit();
-    } catch (e) {
-      console.error(
-        "Firestore bulkUpdateElements error, fallback to sequential:",
-        e,
-      );
-      await Promise.all(
-        elementIds.map((id) =>
-          setDoc(doc(firestore, "structuralElements", id), cleanedUpdates, {
-            merge: true,
-          }),
-        ),
-      );
-    }
+    });
   },
 
   async bulkDeleteElements(
     elementIds: string[],
     projectId: string,
+    companyId?: string,
   ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     elementIds.forEach((id) => removeFromAllVaultCaches("jqms_elements_", id));
-    const cacheKey = `jqms_elements_${projectId}`;
+    const cacheKey = scopedCacheKey("elements", projectId, effectiveCompId);
     const list = getCache<StructuralElement[]>(cacheKey, []);
     setCache(
       cacheKey,
       list.filter((e) => !elementIds.includes(e.id)),
     );
 
-    try {
-      const batch = writeBatch(firestore);
-      elementIds.forEach((id) => {
-        batch.delete(doc(firestore, "structuralElements", id));
-      });
-      await batch.commit();
-    } catch (e) {
-      console.error(
-        "Firestore bulkDeleteElements error, fallback to sequential:",
-        e,
-      );
-      await Promise.all(
-        elementIds.map((id) =>
-          deleteDoc(doc(firestore, "structuralElements", id)),
-        ),
-      );
-    }
+    await commitInChunks(elementIds, (batch, id) => {
+      batch.delete(doc(firestore, "structuralElements", id));
+    });
   },
 
-  // --- Gridlines (Dual Scoped: projectId AND companyId) ---
+  // --- Gridlines ---
   async getGridlines(
     projectId: string,
     companyId?: string,
   ): Promise<Gridline[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("gridlines", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "gridlines"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "gridlines"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const list = snap.docs
         .map((d) => ({ ...d.data(), id: d.id }) as Gridline)
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-      if (list.length > 0) {
-        setCache(`jqms_gridlines_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getGridlines warning, reading local cache:", e);
-      return getCache<Gridline[]>(`jqms_gridlines_${projectId}`, []);
+      return getCache<Gridline[]>(cacheKey, []);
     }
   },
 
   async saveGridline(gridline: Gridline): Promise<void> {
-    const cleaned = cleanForFirestore(gridline);
-    const cacheKey = `jqms_gridlines_${cleaned.projectId}`;
-    const list = getCache<Gridline[]>(cacheKey, []);
-    const idx = list.findIndex((g) => g.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.push(cleaned);
-    list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    setCache(cacheKey, list);
-
-    try {
-      await setDoc(doc(firestore, "gridlines", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveGridline error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(gridline.companyId);
+    const cleaned = cleanForFirestore({
+      ...gridline,
+      companyId: effectiveCompId,
+    });
+    const cacheKey = scopedCacheKey(
+      "gridlines",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord(
+      "gridlines",
+      "GRIDLINES",
+      cleaned,
+      cacheKey,
+      (a, b) => (a.order ?? 0) - (b.order ?? 0),
+    );
   },
 
-  async saveGridlines(gridlines: Gridline[]): Promise<void> {
-    const cleaned = gridlines.map((g) => cleanForFirestore(g));
-    if (cleaned.length > 0) {
-      const projectId = cleaned[0].projectId;
-      const cacheKey = `jqms_gridlines_${projectId}`;
+  async saveGridlines(
+    gridlinesOrProjectId: Gridline[] | string,
+    maybeGridlines?: Gridline[] | string,
+    maybeCompanyId?: string,
+  ): Promise<void> {
+    let gridlines: Gridline[] = [];
+    let projectId = "";
+    let companyId = "";
+
+    if (Array.isArray(gridlinesOrProjectId)) {
+      gridlines = gridlinesOrProjectId;
+      projectId = gridlines[0]?.projectId || "";
+      companyId =
+        (typeof maybeGridlines === "string" ? maybeGridlines : "") ||
+        gridlines[0]?.companyId ||
+        "";
+    } else {
+      projectId = gridlinesOrProjectId;
+      gridlines = Array.isArray(maybeGridlines) ? maybeGridlines : [];
+      companyId = maybeCompanyId || gridlines[0]?.companyId || "";
+    }
+
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    const cleaned = gridlines.map((g) =>
+      cleanForFirestore({ ...g, projectId, companyId: effectiveCompId }),
+    );
+
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("gridlines", projectId, effectiveCompId);
       const sorted = [...cleaned].sort(
         (a, b) => (a.order ?? 0) - (b.order ?? 0),
       );
       setCache(cacheKey, sorted);
     }
 
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      await queueOfflineAction({
+        type: "GRIDLINES",
+        projectId,
+        companyId: effectiveCompId,
+        payload: { projectId, companyId: effectiveCompId, gridlines: cleaned },
+      });
+      return;
+    }
+
     try {
-      const batch = writeBatch(firestore);
-      cleaned.forEach((g) => {
+      await commitInChunks(cleaned, (batch, g) => {
         batch.set(doc(firestore, "gridlines", g.id), g, { merge: true });
       });
-      await batch.commit();
-    } catch (e) {
-      console.error("Firestore saveGridlines error:", e);
-      await Promise.all(
-        cleaned.map((g) =>
-          setDoc(doc(firestore, "gridlines", g.id), g, { merge: true }),
-        ),
-      );
+    } catch (err: any) {
+      if (isTransientNetworkError(err)) {
+        await queueOfflineAction({
+          type: "GRIDLINES",
+          projectId,
+          companyId: effectiveCompId,
+          payload: {
+            projectId,
+            companyId: effectiveCompId,
+            gridlines: cleaned,
+          },
+        });
+        return;
+      }
+      throw err;
     }
   },
 
-  async deleteGridline(gridlineId: string, projectId?: string): Promise<void> {
+  async deleteGridline(
+    gridlineId: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_gridlines_", gridlineId);
-    if (projectId) {
-      const cacheKey = `jqms_gridlines_${projectId}`;
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("gridlines", projectId, effectiveCompId);
       const list = getCache<Gridline[]>(cacheKey, []);
       setCache(
         cacheKey,
         list.filter((g) => g.id !== gridlineId),
       );
     }
-    try {
-      await deleteDoc(doc(firestore, "gridlines", gridlineId));
-    } catch (e) {
-      console.error("Firestore deleteGridline error:", e);
-    }
+    await deleteDoc(doc(firestore, "gridlines", gridlineId));
   },
 
-  // --- Work Packages (Dual Scoped: projectId AND companyId) ---
+  // --- Work Packages ---
   async getWorkPackages(
     projectId: string,
     companyId?: string,
   ): Promise<WorkPackage[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey(
+      "work_packages",
+      projectId,
+      effectiveCompId,
+    );
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "workPackages"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "workPackages"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const list = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as WorkPackage,
       );
-      if (list.length > 0) {
-        setCache(`jqms_work_packages_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn(
         "Firestore getWorkPackages warning, reading local cache:",
         e,
       );
-      return getCache<WorkPackage[]>(`jqms_work_packages_${projectId}`, []);
+      return getCache<WorkPackage[]>(cacheKey, []);
     }
   },
 
   async saveWorkPackage(pkg: WorkPackage): Promise<void> {
-    const cleaned = cleanForFirestore(pkg);
-    const cacheKey = `jqms_work_packages_${cleaned.projectId}`;
-    const list = getCache<WorkPackage[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.push(cleaned);
-    setCache(cacheKey, list);
-
-    try {
-      await setDoc(doc(firestore, "workPackages", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveWorkPackage error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(pkg.companyId);
+    const cleaned = cleanForFirestore({ ...pkg, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "work_packages",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("workPackages", "WORK_PACKAGE", cleaned, cacheKey);
   },
 
-  async deleteWorkPackage(pkgId: string, projectId?: string): Promise<void> {
+  async deleteWorkPackage(
+    pkgId: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_work_packages_", pkgId);
-    if (projectId) {
-      const cacheKey = `jqms_work_packages_${projectId}`;
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey(
+        "work_packages",
+        projectId,
+        effectiveCompId,
+      );
       const list = getCache<WorkPackage[]>(cacheKey, []);
       setCache(
         cacheKey,
         list.filter((p) => p.id !== pkgId),
       );
     }
-    try {
-      await deleteDoc(doc(firestore, "workPackages", pkgId));
-    } catch (e) {
-      console.error("Firestore deleteWorkPackage error:", e);
-    }
+    await deleteDoc(doc(firestore, "workPackages", pkgId));
   },
 
-  // --- Site Observations / Comments (Dual Scoped: projectId AND companyId) ---
+  // --- Site Comments / Observations ---
   async getSiteComments(
     projectId: string,
     companyId?: string,
   ): Promise<SiteCommentReport[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey(
+      "site_comments",
+      projectId,
+      effectiveCompId,
+    );
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "site_comments"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "site_comments"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
-      if (!snap.empty) {
-        const rawList = snap.docs.map(
-          (d) => ({ ...d.data(), id: d.id }) as SiteCommentReport,
-        );
-        const list = sortByNewestFirst(rawList);
-        setCache(`jqms_site_comments_${projectId}`, list);
-        return list;
-      }
-
-      const qAlt = query(collection(firestore, "siteComments"), ...constraints);
-      const snapAlt = await getDocs(qAlt);
-      const rawListAlt = snapAlt.docs.map(
+      const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as SiteCommentReport,
       );
-      const listAlt = sortByNewestFirst(rawListAlt);
-      if (listAlt.length > 0) {
-        setCache(`jqms_site_comments_${projectId}`, listAlt);
-      }
-      return listAlt;
+      const list = sortByNewestFirst(rawList);
+      setCache(cacheKey, list);
+      return list;
     } catch (e) {
       console.warn(
         "Firestore getSiteComments warning, reading local cache:",
         e,
       );
-      const cached = getCache<SiteCommentReport[]>(
-        `jqms_site_comments_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<SiteCommentReport[]>(cacheKey, []);
     }
   },
 
   async saveSiteComment(report: SiteCommentReport): Promise<void> {
-    const cleaned = cleanForFirestore(report);
-    const cacheKey = `jqms_site_comments_${cleaned.projectId}`;
-    const list = getCache<SiteCommentReport[]>(cacheKey, []);
-    const idx = list.findIndex((c) => c.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "site_comments", cleaned.id), cleaned, {
-        merge: true,
-      });
-      await setDoc(doc(firestore, "siteComments", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveSiteComment error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(report.companyId);
+    const cleaned = cleanForFirestore({
+      ...report,
+      companyId: effectiveCompId,
+    });
+    const cacheKey = scopedCacheKey(
+      "site_comments",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("site_comments", "SITE_COMMENT", cleaned, cacheKey);
   },
 
-  async deleteSiteComment(id: string, projectId?: string): Promise<void> {
+  async deleteSiteComment(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_site_comments_", id);
-    if (projectId) {
-      const cacheKey = `jqms_site_comments_${projectId}`;
-      const list = getCache<SiteCommentReport[]>(cacheKey, []).filter(
-        (c) => c.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey(
+        "site_comments",
+        projectId,
+        effectiveCompId,
       );
-      setCache(cacheKey, list);
+      const list = getCache<SiteCommentReport[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((c) => c.id !== id),
+      );
     }
-    try {
-      await deleteDoc(doc(firestore, "site_comments", id));
-      await deleteDoc(doc(firestore, "siteComments", id));
-    } catch (e) {
-      console.warn("Firestore deleteSiteComment warning:", e);
-    }
+    await deleteDoc(doc(firestore, "site_comments", id));
+    await deleteDoc(doc(firestore, "siteComments", id)).catch(() => {});
   },
 
   subscribeSiteComments(
@@ -1064,17 +1434,22 @@ export const dbService = {
     callback: (reports: SiteCommentReport[]) => void,
     companyId?: string,
   ): () => void {
-    if (!projectId) {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) {
       callback([]);
       return () => {};
     }
+    const cacheKey = scopedCacheKey(
+      "site_comments",
+      projectId,
+      effectiveCompId,
+    );
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "site_comments"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "site_comments"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const unsub = onSnapshot(
         q,
         (snap) => {
@@ -1082,9 +1457,7 @@ export const dbService = {
             (d) => ({ ...d.data(), id: d.id }) as SiteCommentReport,
           );
           const list = sortByNewestFirst(rawList);
-          if (list.length > 0) {
-            setCache(`jqms_site_comments_${projectId}`, list);
-          }
+          setCache(cacheKey, list);
           callback(list);
         },
         (err) => {
@@ -1099,85 +1472,72 @@ export const dbService = {
   },
 
   // --- Non-Conformance Reports (NCR) ---
-  async getNCR(id: string): Promise<NonConformanceReport | null> {
+  async getNCR(
+    id: string,
+    companyId?: string,
+  ): Promise<NonConformanceReport | null> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     try {
       const snap = await getDoc(doc(firestore, "ncrs", id));
-      if (snap.exists())
-        return { ...snap.data(), id: snap.id } as NonConformanceReport;
+      if (snap.exists()) {
+        const item = { ...snap.data(), id: snap.id } as NonConformanceReport;
+        if (!effectiveCompId || item.companyId === effectiveCompId) return item;
+      }
     } catch (e) {
       console.warn("Firestore getNCR error:", e);
     }
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith("jqms_ncrs_")) {
-        const list = getCache<NonConformanceReport[]>(k, []);
-        const item = list.find((n) => n.id === id);
-        if (item) return item;
-      }
-    }
     return null;
-  },
-
-  async deleteNCR(id: string, projectId?: string): Promise<void> {
-    removeFromAllVaultCaches("jqms_ncrs_", id);
-    if (projectId) {
-      const cacheKey = `jqms_ncrs_${projectId}`;
-      const list = getCache<NonConformanceReport[]>(cacheKey, []).filter(
-        (n) => n.id !== id,
-      );
-      setCache(cacheKey, list);
-    }
-    try {
-      await deleteDoc(doc(firestore, "ncrs", id));
-    } catch (e) {
-      console.warn("Firestore deleteNCR warning:", e);
-    }
   },
 
   async getNCRs(
     projectId: string,
     companyId?: string,
   ): Promise<NonConformanceReport[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("ncrs", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "ncrs"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "ncrs"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as NonConformanceReport,
       );
       const list = sortByNewestFirst(rawList);
-      if (list.length > 0) {
-        setCache(`jqms_ncrs_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getNCRs warning, reading local cache:", e);
-      const cached = getCache<NonConformanceReport[]>(
-        `jqms_ncrs_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<NonConformanceReport[]>(cacheKey, []);
     }
   },
 
   async saveNCR(ncr: NonConformanceReport): Promise<void> {
-    const cleaned = cleanForFirestore(ncr);
-    const cacheKey = `jqms_ncrs_${cleaned.projectId}`;
-    const list = getCache<NonConformanceReport[]>(cacheKey, []);
-    const idx = list.findIndex((n) => n.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
+    const effectiveCompId = resolveEffectiveCompanyId(ncr.companyId);
+    const cleaned = cleanForFirestore({ ...ncr, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey("ncrs", cleaned.projectId, effectiveCompId);
+    await persistRecord("ncrs", "NCR", cleaned, cacheKey);
+  },
 
-    try {
-      await setDoc(doc(firestore, "ncrs", cleaned.id), cleaned, { merge: true });
-    } catch (e) {
-      console.warn("Firestore saveNCR error:", e);
+  async deleteNCR(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    removeFromAllVaultCaches("jqms_ncrs_", id);
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("ncrs", projectId, effectiveCompId);
+      const list = getCache<NonConformanceReport[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((n) => n.id !== id),
+      );
     }
+    await deleteDoc(doc(firestore, "ncrs", id));
   },
 
   subscribeNCRs(
@@ -1185,17 +1545,18 @@ export const dbService = {
     callback: (ncrs: NonConformanceReport[]) => void,
     companyId?: string,
   ): () => void {
-    if (!projectId) {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) {
       callback([]);
       return () => {};
     }
+    const cacheKey = scopedCacheKey("ncrs", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "ncrs"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "ncrs"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const unsub = onSnapshot(
         q,
         (snap) => {
@@ -1203,9 +1564,7 @@ export const dbService = {
             (d) => ({ ...d.data(), id: d.id }) as NonConformanceReport,
           );
           const list = sortByNewestFirst(rawList);
-          if (list.length > 0) {
-            setCache(`jqms_ncrs_${projectId}`, list);
-          }
+          setCache(cacheKey, list);
           callback(list);
         },
         (err) => {
@@ -1219,95 +1578,93 @@ export const dbService = {
     }
   },
 
-  // --- Site Instructions / Directives ---
+  // --- Site Instructions ---
   async getSiteInstructions(
     projectId: string,
     companyId?: string,
   ): Promise<SiteInstruction[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey(
+      "site_instructions",
+      projectId,
+      effectiveCompId,
+    );
     try {
-      const constraints: QueryConstraint[] = [
-        where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
       const q = query(
         collection(firestore, "siteInstructions"),
-        ...constraints,
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as SiteInstruction,
       );
       const list = sortByNewestFirst(rawList);
-      if (list.length > 0) {
-        setCache(`jqms_site_instructions_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn(
         "Firestore getSiteInstructions warning, reading local cache:",
         e,
       );
-      const cached = getCache<SiteInstruction[]>(
-        `jqms_site_instructions_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<SiteInstruction[]>(cacheKey, []);
     }
   },
 
-  async getSiteInstruction(id: string): Promise<SiteInstruction | null> {
+  async getSiteInstruction(
+    id: string,
+    companyId?: string,
+  ): Promise<SiteInstruction | null> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     try {
       const snap = await getDoc(doc(firestore, "siteInstructions", id));
       if (snap.exists()) {
-        return { ...snap.data(), id: snap.id } as SiteInstruction;
+        const item = { ...snap.data(), id: snap.id } as SiteInstruction;
+        if (!effectiveCompId || item.companyId === effectiveCompId) return item;
       }
     } catch (e) {
       console.warn("Firestore getSiteInstruction error:", e);
-    }
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith("jqms_site_instructions_")) {
-        const list = getCache<SiteInstruction[]>(k, []);
-        const item = list.find((si) => si.id === id);
-        if (item) return item;
-      }
     }
     return null;
   },
 
   async saveSiteInstruction(si: SiteInstruction): Promise<void> {
-    const cleaned = cleanForFirestore(si);
-    const cacheKey = `jqms_site_instructions_${cleaned.projectId}`;
-    const list = getCache<SiteInstruction[]>(cacheKey, []);
-    const idx = list.findIndex((item) => item.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "siteInstructions", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveSiteInstruction error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(si.companyId);
+    const cleaned = cleanForFirestore({ ...si, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "site_instructions",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord(
+      "siteInstructions",
+      "SITE_INSTRUCTION",
+      cleaned,
+      cacheKey,
+    );
   },
 
-  async deleteSiteInstruction(id: string, projectId?: string): Promise<void> {
+  async deleteSiteInstruction(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_site_instructions_", id);
-    if (projectId) {
-      const cacheKey = `jqms_site_instructions_${projectId}`;
-      const list = getCache<SiteInstruction[]>(cacheKey, []).filter(
-        (si) => si.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey(
+        "site_instructions",
+        projectId,
+        effectiveCompId,
       );
-      setCache(cacheKey, list);
+      const list = getCache<SiteInstruction[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((s) => s.id !== id),
+      );
     }
-    try {
-      await deleteDoc(doc(firestore, "siteInstructions", id));
-    } catch (e) {
-      console.warn("Firestore deleteSiteInstruction error:", e);
-    }
+    await deleteDoc(doc(firestore, "siteInstructions", id));
   },
 
   // --- Daily Site Logs ---
@@ -1315,87 +1672,83 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<DailySiteLog[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey(
+      "daily_site_logs",
+      projectId,
+      effectiveCompId,
+    );
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "dailySiteLogs"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "dailySiteLogs"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as DailySiteLog,
       );
       const list = sortByNewestFirst(rawList);
-      if (list.length > 0) {
-        setCache(`jqms_daily_site_logs_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn(
         "Firestore getDailySiteLogs warning, reading local cache:",
         e,
       );
-      const cached = getCache<DailySiteLog[]>(
-        `jqms_daily_site_logs_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<DailySiteLog[]>(cacheKey, []);
     }
   },
 
-  async getDailySiteLog(id: string): Promise<DailySiteLog | null> {
+  async getDailySiteLog(
+    id: string,
+    companyId?: string,
+  ): Promise<DailySiteLog | null> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     try {
       const snap = await getDoc(doc(firestore, "dailySiteLogs", id));
       if (snap.exists()) {
-        return { ...snap.data(), id: snap.id } as DailySiteLog;
+        const item = { ...snap.data(), id: snap.id } as DailySiteLog;
+        if (!effectiveCompId || item.companyId === effectiveCompId) return item;
       }
     } catch (e) {
       console.warn("Firestore getDailySiteLog error:", e);
-    }
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith("jqms_daily_site_logs_")) {
-        const list = getCache<DailySiteLog[]>(k, []);
-        const item = list.find((log) => log.id === id);
-        if (item) return item;
-      }
     }
     return null;
   },
 
   async saveDailySiteLog(log: DailySiteLog): Promise<void> {
-    const cleaned = cleanForFirestore(log);
-    const cacheKey = `jqms_daily_site_logs_${cleaned.projectId}`;
-    const list = getCache<DailySiteLog[]>(cacheKey, []);
-    const idx = list.findIndex((item) => item.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "dailySiteLogs", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveDailySiteLog error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(log.companyId);
+    const cleaned = cleanForFirestore({ ...log, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "daily_site_logs",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("dailySiteLogs", "DAILY_LOG", cleaned, cacheKey);
   },
 
-  async deleteDailySiteLog(id: string, projectId?: string): Promise<void> {
+  async deleteDailySiteLog(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_daily_site_logs_", id);
-    if (projectId) {
-      const cacheKey = `jqms_daily_site_logs_${projectId}`;
-      const list = getCache<DailySiteLog[]>(cacheKey, []).filter(
-        (log) => log.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey(
+        "daily_site_logs",
+        projectId,
+        effectiveCompId,
       );
-      setCache(cacheKey, list);
+      const list = getCache<DailySiteLog[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((l) => l.id !== id),
+      );
     }
-    try {
-      await deleteDoc(doc(firestore, "dailySiteLogs", id));
-    } catch (e) {
-      console.warn("Firestore deleteDailySiteLog error:", e);
-    }
+    await deleteDoc(doc(firestore, "dailySiteLogs", id));
   },
 
   // --- Requests for Information (RFI) ---
@@ -1403,62 +1756,51 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<RequestForInformation[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("rfis", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "rfis"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "rfis"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as RequestForInformation,
       );
       const list = sortByNewestFirst(rawList);
-      if (list.length > 0) {
-        setCache(`jqms_rfis_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getRFIs warning, reading local cache:", e);
-      const cached = getCache<RequestForInformation[]>(
-        `jqms_rfis_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<RequestForInformation[]>(cacheKey, []);
     }
   },
 
   async saveRFI(rfi: RequestForInformation): Promise<void> {
-    const cleaned = cleanForFirestore(rfi);
-    const cacheKey = `jqms_rfis_${cleaned.projectId}`;
-    const list = getCache<RequestForInformation[]>(cacheKey, []);
-    const idx = list.findIndex((r) => r.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "rfis", cleaned.id), cleaned, { merge: true });
-    } catch (e) {
-      console.warn("Firestore saveRFI error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(rfi.companyId);
+    const cleaned = cleanForFirestore({ ...rfi, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey("rfis", cleaned.projectId, effectiveCompId);
+    await persistRecord("rfis", "RFI", cleaned, cacheKey);
   },
 
-  async deleteRFI(id: string, projectId?: string): Promise<void> {
+  async deleteRFI(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_rfis_", id);
-    if (projectId) {
-      const cacheKey = `jqms_rfis_${projectId}`;
-      const list = getCache<RequestForInformation[]>(cacheKey, []).filter(
-        (r) => r.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("rfis", projectId, effectiveCompId);
+      const list = getCache<RequestForInformation[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((r) => r.id !== id),
       );
-      setCache(cacheKey, list);
     }
-    try {
-      await deleteDoc(doc(firestore, "rfis", id));
-    } catch (e) {
-      console.warn("Firestore deleteRFI error:", e);
-    }
+    await deleteDoc(doc(firestore, "rfis", id));
   },
 
   // --- Material Approval Requests (MAR / Submittals) ---
@@ -1466,74 +1808,52 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<MaterialApprovalRequest[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("mars", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "submittals"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "submittals"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
-      if (!snap.empty) {
-        const rawList = snap.docs.map(
-          (d) => ({ ...d.data(), id: d.id }) as MaterialApprovalRequest,
-        );
-        const list = sortByNewestFirst(rawList);
-        setCache(`jqms_mars_${projectId}`, list);
-        return list;
-      }
-      const qAlt = query(collection(firestore, "mars"), ...constraints);
-      const snapAlt = await getDocs(qAlt);
-      const rawListAlt = snapAlt.docs.map(
+      const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as MaterialApprovalRequest,
       );
-      const listAlt = sortByNewestFirst(rawListAlt);
-      if (listAlt.length > 0) {
-        setCache(`jqms_mars_${projectId}`, listAlt);
-      }
-      return listAlt;
+      const list = sortByNewestFirst(rawList);
+      setCache(cacheKey, list);
+      return list;
     } catch (e) {
       console.warn("Firestore getMARs warning, reading local cache:", e);
-      const cached = getCache<MaterialApprovalRequest[]>(
-        `jqms_mars_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<MaterialApprovalRequest[]>(cacheKey, []);
     }
   },
 
   async saveMAR(mar: MaterialApprovalRequest): Promise<void> {
-    const cleaned = cleanForFirestore(mar);
-    const cacheKey = `jqms_mars_${cleaned.projectId}`;
-    const list = getCache<MaterialApprovalRequest[]>(cacheKey, []);
-    const idx = list.findIndex((m) => m.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "submittals", cleaned.id), cleaned, { merge: true });
-      await setDoc(doc(firestore, "mars", cleaned.id), cleaned, { merge: true });
-    } catch (e) {
-      console.warn("Firestore saveMAR error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(mar.companyId);
+    const cleaned = cleanForFirestore({ ...mar, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey("mars", cleaned.projectId, effectiveCompId);
+    await persistRecord("submittals", "MAR", cleaned, cacheKey);
   },
 
-  async deleteMAR(id: string, projectId?: string): Promise<void> {
+  async deleteMAR(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_mars_", id);
-    if (projectId) {
-      const cacheKey = `jqms_mars_${projectId}`;
-      const list = getCache<MaterialApprovalRequest[]>(cacheKey, []).filter(
-        (m) => m.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("mars", projectId, effectiveCompId);
+      const list = getCache<MaterialApprovalRequest[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((m) => m.id !== id),
       );
-      setCache(cacheKey, list);
     }
-    try {
-      await deleteDoc(doc(firestore, "submittals", id));
-      await deleteDoc(doc(firestore, "mars", id));
-    } catch (e) {
-      console.warn("Firestore deleteMAR error:", e);
-    }
+    await deleteDoc(doc(firestore, "submittals", id));
+    await deleteDoc(doc(firestore, "mars", id)).catch(() => {});
   },
 
   // --- Material Inspection Reports (MIR) ---
@@ -1541,169 +1861,149 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<MaterialInspectionReport[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("mirs", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "mirs"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "mirs"), ...constraints);
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const rawList = snap.docs.map(
-          (d) => ({ ...d.data(), id: d.id }) as MaterialInspectionReport,
-        );
-        const list = sortByNewestFirst(rawList);
-        setCache(`jqms_mirs_${projectId}`, list);
-        return list;
-      }
-
-      const cached = getCache<MaterialInspectionReport[]>(
-        `jqms_mirs_${projectId}`,
-        [],
+        where("companyId", "==", effectiveCompId),
       );
-      return sortByNewestFirst(cached);
+      const snap = await getDocs(q);
+      const rawList = snap.docs.map(
+        (d) => ({ ...d.data(), id: d.id }) as MaterialInspectionReport,
+      );
+      const list = sortByNewestFirst(rawList);
+      setCache(cacheKey, list);
+      return list;
     } catch (e) {
       console.warn("Firestore getMIRs warning, reading local cache:", e);
-      const cached = getCache<MaterialInspectionReport[]>(
-        `jqms_mirs_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<MaterialInspectionReport[]>(cacheKey, []);
     }
   },
 
   async getMIR(
     id: string,
-    projectId: string,
+    projectId?: string,
     companyId?: string,
   ): Promise<MaterialInspectionReport | null> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     try {
-      const docRef = doc(firestore, "mirs", id);
-      const snap = await getDoc(docRef);
+      const snap = await getDoc(doc(firestore, "mirs", id));
       if (snap.exists()) {
-        return { ...snap.data(), id: snap.id } as MaterialInspectionReport;
+        const item = {
+          ...snap.data(),
+          id: snap.id,
+        } as MaterialInspectionReport;
+        if (!effectiveCompId || item.companyId === effectiveCompId) return item;
       }
     } catch (e) {
       console.warn("Firestore getMIR warning:", e);
     }
-    const list = getCache<MaterialInspectionReport[]>(
-      `jqms_mirs_${projectId}`,
-      [],
-    );
-    return list.find((m) => m.id === id || m.mirNumber === id) || null;
-  },
-
-  async saveMIR(mir: MaterialInspectionReport): Promise<void> {
-    const cleaned = cleanForFirestore(mir);
-    const cacheKey = `jqms_mirs_${cleaned.projectId}`;
-    const list = getCache<MaterialInspectionReport[]>(cacheKey, []);
-    const idx = list.findIndex((m) => m.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "mirs", cleaned.id), cleaned, { merge: true });
-    } catch (e) {
-      console.warn("Firestore saveMIR error:", e);
-    }
-  },
-
-  async deleteMIR(id: string, projectId: string): Promise<void> {
-    removeFromAllVaultCaches("jqms_mirs_", id);
-    const cacheKey = `jqms_mirs_${projectId}`;
-    const list = getCache<MaterialInspectionReport[]>(cacheKey, []);
-    const filtered = list.filter((m) => m.id !== id);
-    setCache(cacheKey, filtered);
-
-    try {
-      await deleteDoc(doc(firestore, "mirs", id));
-    } catch (e) {
-      console.error("Firestore deleteMIR error:", e);
-    }
-  },
-
-  // --- Quality Inspections ---
-  async getInspection(id: string): Promise<InspectionRequest | null> {
-    try {
-      const snap = await getDoc(doc(firestore, "inspections", id));
-      if (snap.exists())
-        return { ...snap.data(), id: snap.id } as InspectionRequest;
-    } catch (e) {
-      console.warn("Firestore getInspection error:", e);
-    }
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith("jqms_inspections_")) {
-        const list = getCache<InspectionRequest[]>(k, []);
-        const item = list.find((ins) => ins.id === id);
-        if (item) return item;
-      }
-    }
     return null;
   },
 
-  async deleteInspection(id: string, projectId?: string): Promise<void> {
-    removeFromAllVaultCaches("jqms_inspections_", id);
-    if (projectId) {
-      const cacheKey = `jqms_inspections_${projectId}`;
-      const list = getCache<InspectionRequest[]>(cacheKey, []).filter(
-        (ins) => ins.id !== id,
+  async saveMIR(mir: MaterialInspectionReport): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(mir.companyId);
+    const cleaned = cleanForFirestore({ ...mir, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey("mirs", cleaned.projectId, effectiveCompId);
+    await persistRecord("mirs", "MIR", cleaned, cacheKey);
+  },
+
+  async deleteMIR(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    removeFromAllVaultCaches("jqms_mirs_", id);
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("mirs", projectId, effectiveCompId);
+      const list = getCache<MaterialInspectionReport[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((m) => m.id !== id),
       );
-      setCache(cacheKey, list);
     }
+    await deleteDoc(doc(firestore, "mirs", id));
+  },
+
+  // --- Quality Inspections ---
+  async getInspection(
+    id: string,
+    companyId?: string,
+  ): Promise<InspectionRequest | null> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     try {
-      await deleteDoc(doc(firestore, "inspections", id));
-    } catch (e) {}
+      const snap = await getDoc(doc(firestore, "inspections", id));
+      if (snap.exists()) {
+        const item = { ...snap.data(), id: snap.id } as InspectionRequest;
+        if (!effectiveCompId || item.companyId === effectiveCompId) return item;
+      }
+    } catch (e) {
+      console.warn("Firestore getInspection error:", e);
+    }
+    return null;
   },
 
   async getInspections(
     projectId: string,
     companyId?: string,
   ): Promise<InspectionRequest[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("inspections", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "inspections"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "inspections"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as InspectionRequest,
       );
       const list = sortByNewestFirst(rawList);
-      if (list.length > 0) {
-        setCache(`jqms_inspections_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getInspections warning, reading local cache:", e);
-      const cached = getCache<InspectionRequest[]>(
-        `jqms_inspections_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<InspectionRequest[]>(cacheKey, []);
     }
   },
 
   async saveInspection(insp: InspectionRequest): Promise<void> {
-    const cleaned = cleanForFirestore(insp);
-    const cacheKey = `jqms_inspections_${cleaned.projectId}`;
-    const list = getCache<InspectionRequest[]>(cacheKey, []);
-    const idx = list.findIndex((i) => i.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
+    const effectiveCompId = resolveEffectiveCompanyId(insp.companyId);
+    const cleaned = cleanForFirestore({ ...insp, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "inspections",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("inspections", "INSPECTION", cleaned, cacheKey);
+  },
 
-    try {
-      await setDoc(doc(firestore, "inspections", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.warn("Firestore saveInspection error:", e);
+  async deleteInspection(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    removeFromAllVaultCaches("jqms_inspections_", id);
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey(
+        "inspections",
+        projectId,
+        effectiveCompId,
+      );
+      const list = getCache<InspectionRequest[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((i) => i.id !== id),
+      );
     }
+    await deleteDoc(doc(firestore, "inspections", id));
   },
 
   subscribeInspections(
@@ -1711,17 +2011,18 @@ export const dbService = {
     callback: (inspections: InspectionRequest[]) => void,
     companyId?: string,
   ): () => void {
-    if (!projectId) {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) {
       callback([]);
       return () => {};
     }
+    const cacheKey = scopedCacheKey("inspections", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "inspections"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "inspections"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const unsub = onSnapshot(
         q,
         (snap) => {
@@ -1729,9 +2030,7 @@ export const dbService = {
             (d) => ({ ...d.data(), id: d.id }) as InspectionRequest,
           );
           const list = sortByNewestFirst(rawList);
-          if (list.length > 0) {
-            setCache(`jqms_inspections_${projectId}`, list);
-          }
+          setCache(cacheKey, list);
           callback(list);
         },
         (err) => {
@@ -1750,40 +2049,28 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<PermitToPour[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("ptps", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "permitsToPour"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "permitsToPour"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
-      if (!snap.empty) {
-        const rawList = snap.docs.map((d) =>
-          normalizePermitToPour({ ...d.data(), id: d.id }),
-        );
-        const list = sortByNewestFirst(rawList);
-        setCache(`jqms_ptps_${projectId}`, list);
-        return list;
-      }
-
-      const qAlt = query(collection(firestore, "permitToPour"), ...constraints);
-      const snapAlt = await getDocs(qAlt);
-      const rawListAlt = snapAlt.docs.map((d) =>
+      const rawList = snap.docs.map((d) =>
         normalizePermitToPour({ ...d.data(), id: d.id }),
       );
-      const listAlt = sortByNewestFirst(rawListAlt);
-      if (listAlt.length > 0) {
-        setCache(`jqms_ptps_${projectId}`, listAlt);
-      }
-      return listAlt;
+      const list = sortByNewestFirst(rawList);
+      setCache(cacheKey, list);
+      return list;
     } catch (e) {
       console.warn(
         "Firestore getPermitsToPour warning, reading local cache:",
         e,
       );
-      const cached = getCache<PermitToPour[]>(`jqms_ptps_${projectId}`, []);
-      return sortByNewestFirst(cached);
+      return getCache<PermitToPour[]>(cacheKey, []);
     }
   },
 
@@ -1795,41 +2082,29 @@ export const dbService = {
   },
 
   async savePermitToPour(ptp: PermitToPour): Promise<void> {
-    const cleaned = cleanForFirestore(ptp);
-    const cacheKey = `jqms_ptps_${cleaned.projectId}`;
-    const list = getCache<PermitToPour[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "permitsToPour", cleaned.id), cleaned, {
-        merge: true,
-      });
-      await setDoc(doc(firestore, "permitToPour", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.warn("Firestore savePermitToPour error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(ptp.companyId);
+    const cleaned = cleanForFirestore({ ...ptp, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey("ptps", cleaned.projectId, effectiveCompId);
+    await persistRecord("permitsToPour", "POUR_PERMIT", cleaned, cacheKey);
   },
 
-  async deletePermitToPour(id: string, projectId?: string): Promise<void> {
+  async deletePermitToPour(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_ptps_", id);
-    if (projectId) {
-      const cacheKey = `jqms_ptps_${projectId}`;
-      const list = getCache<PermitToPour[]>(cacheKey, []).filter(
-        (p) => p.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("ptps", projectId, effectiveCompId);
+      const list = getCache<PermitToPour[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((p) => p.id !== id),
       );
-      setCache(cacheKey, list);
     }
-    try {
-      await deleteDoc(doc(firestore, "permitsToPour", id));
-      await deleteDoc(doc(firestore, "permitToPour", id));
-    } catch (e) {
-      console.warn("Firestore deletePermitToPour error:", e);
-    }
+    await deleteDoc(doc(firestore, "permitsToPour", id));
+    await deleteDoc(doc(firestore, "permitToPour", id)).catch(() => {});
   },
 
   // --- Concrete Cube Samples ---
@@ -1837,182 +2112,91 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<ConcreteCubeSample[]> {
-    const cacheKey = `jqms_cubes_${projectId}`;
-    const cached = getCache<ConcreteCubeSample[]>(cacheKey, []).filter(
-      (c) => !isCubeDeleted(c.id, c.sampleId),
-    );
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("cubes", projectId, effectiveCompId);
     try {
-      let rawList: ConcreteCubeSample[] = [];
-      try {
-        const constraints: QueryConstraint[] = [
-          where("projectId", "==", projectId),
-        ];
-        if (companyId) constraints.push(where("companyId", "==", companyId));
-
-        const q = query(collection(firestore, "cubeSamples"), ...constraints);
-        const snap = await getDocs(q);
-        rawList = snap.docs.map(
-          (d) => ({ ...d.data(), id: d.id }) as ConcreteCubeSample,
-        );
-      } catch (innerErr) {
-        if (companyId) {
-          const fallbackQ = query(
-            collection(firestore, "cubeSamples"),
-            where("projectId", "==", projectId),
-          );
-          const fallbackSnap = await getDocs(fallbackQ);
-          rawList = fallbackSnap.docs
-            .map((d) => ({ ...d.data(), id: d.id }) as ConcreteCubeSample)
-            .filter((c) => !c.companyId || c.companyId === companyId);
-        } else {
-          throw innerErr;
-        }
-      }
-
-      const firestoreList = rawList.filter(
-        (c) => !isCubeDeleted(c.id, c.sampleId),
+      const q = query(
+        collection(firestore, "cubeSamples"),
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
-
-      const map = new Map<string, ConcreteCubeSample>();
-      firestoreList.forEach((item) => map.set(item.id, item));
-      cached.forEach((item) => {
-        if (isCubeDeleted(item.id, item.sampleId)) return;
-        const existing = map.get(item.id);
-        if (
-          !existing ||
-          (item.updatedAt &&
-            (!existing.updatedAt || item.updatedAt > existing.updatedAt))
-        ) {
-          map.set(item.id, item);
-        }
-      });
-
-      const list = sortByNewestFirst(Array.from(map.values()));
+      const snap = await getDocs(q);
+      const rawList = snap.docs.map(
+        (d) => ({ ...d.data(), id: d.id }) as ConcreteCubeSample,
+      );
+      const list = sortByNewestFirst(rawList);
       setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getCubeSamples warning, reading local cache:", e);
-      return sortByNewestFirst(cached);
+      return getCache<ConcreteCubeSample[]>(cacheKey, []);
     }
   },
 
   async getCubeSample(
     id: string,
     projectId?: string,
+    companyId?: string,
   ): Promise<ConcreteCubeSample | null> {
-    if (isCubeDeleted(id)) return null;
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     try {
       const snap = await getDoc(doc(firestore, "cubeSamples", id));
       if (snap.exists()) {
         const item = { ...snap.data(), id: snap.id } as ConcreteCubeSample;
-        if (!isCubeDeleted(item.id, item.sampleId)) return item;
+        if (!effectiveCompId || item.companyId === effectiveCompId) return item;
       }
     } catch (e) {
       console.warn("Firestore getCubeSample warning:", e);
-    }
-    if (projectId) {
-      const cached = getCache<ConcreteCubeSample[]>(
-        `jqms_cubes_${projectId}`,
-        [],
-      );
-      const match = cached.find(
-        (c) =>
-          (c.id === id || c.sampleId === id) &&
-          !isCubeDeleted(c.id, c.sampleId),
-      );
-      if (match) return match;
-    }
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith("jqms_cubes_")) {
-        const cached = getCache<ConcreteCubeSample[]>(key, []);
-        const match = cached.find(
-          (c) =>
-            (c.id === id || c.sampleId === id) &&
-            !isCubeDeleted(c.id, c.sampleId),
-        );
-        if (match) return match;
-      }
     }
     return null;
   },
 
   async saveCubeSample(cube: ConcreteCubeSample): Promise<void> {
-    try {
-      const set = getDeletedCubeIds();
-      set.delete(cube.id);
-      if (cube.sampleId) set.delete(cube.sampleId);
-      localStorage.setItem(
-        "jqms_deleted_cube_ids",
-        JSON.stringify(Array.from(set)),
-      );
-    } catch (_) {}
-
+    const effectiveCompId = resolveEffectiveCompanyId(cube.companyId);
     const cleaned = cleanForFirestore({
       ...cube,
+      companyId: effectiveCompId,
       updatedAt: Date.now(),
     });
-    const cacheKey = `jqms_cubes_${cleaned.projectId}`;
-    const list = getCache<ConcreteCubeSample[]>(cacheKey, []);
-    const idx = list.findIndex((c) => c.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned as ConcreteCubeSample;
-    else list.unshift(cleaned as ConcreteCubeSample);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "cubeSamples", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveCubeSample error:", e);
-    }
+    const cacheKey = scopedCacheKey(
+      "cubes",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("cubeSamples", "CUBE_TEST", cleaned, cacheKey);
   },
 
-  async deleteCubeSample(id: string, projectId?: string): Promise<void> {
-    markCubeAsDeleted(id);
+  async deleteCubeSample(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_cubes_", id);
-
-    try {
-      await deleteDoc(doc(firestore, "cubeSamples", id));
-    } catch (e) {
-      console.warn("Firestore deleteCubeSample warning:", e);
-    }
-
-    try {
-      const q = query(
-        collection(firestore, "cubeSamples"),
-        where("sampleId", "==", id),
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("cubes", projectId, effectiveCompId);
+      const list = getCache<ConcreteCubeSample[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((c) => c.id !== id && c.sampleId !== id),
       );
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        markCubeAsDeleted(d.id);
-        await deleteDoc(d.ref).catch(() => {});
-      }
-    } catch (_) {}
+    }
+    await deleteDoc(doc(firestore, "cubeSamples", id));
 
-    try {
-      if (projectId) {
-        const cacheKey = `jqms_cubes_${projectId}`;
-        const list = getCache<ConcreteCubeSample[]>(cacheKey, []);
-        setCache(
-          cacheKey,
-          list.filter((c) => c.id !== id && c.sampleId !== id),
+    if (effectiveCompId) {
+      try {
+        const q = query(
+          collection(firestore, "cubeSamples"),
+          where("companyId", "==", effectiveCompId),
+          where("sampleId", "==", id),
         );
-      }
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (
-          key &&
-          (key.startsWith("jqms_cubes_") || key === "jqms_cubes_all")
-        ) {
-          const list = getCache<ConcreteCubeSample[]>(key, []);
-          setCache(
-            key,
-            list.filter((c) => c.id !== id && c.sampleId !== id),
-          );
+        const snap = await getDocs(q);
+        for (const d of snap.docs) {
+          await deleteDoc(d.ref).catch(() => {});
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
   },
 
   // --- Steel Rebar Tests ---
@@ -2020,180 +2204,137 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<SteelRebarTest[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("steel", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "steelTests"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "steelTests"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as SteelRebarTest,
       );
       const list = sortByNewestFirst(rawList);
-      if (list.length > 0) {
-        setCache(`jqms_steel_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getSteelTests warning, reading local cache:", e);
-      const cached = getCache<SteelRebarTest[]>(`jqms_steel_${projectId}`, []);
-      return sortByNewestFirst(cached);
+      return getCache<SteelRebarTest[]>(cacheKey, []);
     }
   },
 
   async saveSteelTest(test: SteelRebarTest): Promise<void> {
-    const cleaned = cleanForFirestore(test);
-    const cacheKey = `jqms_steel_${cleaned.projectId}`;
-    const list = getCache<SteelRebarTest[]>(cacheKey, []);
-    const idx = list.findIndex((s) => s.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "steelTests", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.warn("Firestore saveSteelTest error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(test.companyId);
+    const cleaned = cleanForFirestore({ ...test, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "steel",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("steelTests", "STEEL_TEST", cleaned, cacheKey);
   },
 
-  async deleteSteelTest(id: string, projectId?: string): Promise<void> {
+  async deleteSteelTest(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_steel_", id);
-    if (projectId) {
-      const cacheKey = `jqms_steel_${projectId}`;
-      const list = getCache<SteelRebarTest[]>(cacheKey, []).filter(
-        (s) => s.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("steel", projectId, effectiveCompId);
+      const list = getCache<SteelRebarTest[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((s) => s.id !== id),
       );
-      setCache(cacheKey, list);
     }
-    try {
-      await deleteDoc(doc(firestore, "steelTests", id));
-    } catch (e) {
-      console.warn("Firestore deleteSteelTest error:", e);
-    }
+    await deleteDoc(doc(firestore, "steelTests", id));
   },
 
-  // --- Bar Cutting Schedules (QA/QC & Rebar Fabrication Control) ---
+  // --- Bar Cutting Schedules ---
   async getBarCuttingSchedules(
     projectId: string,
     companyId?: string,
   ): Promise<BarCuttingSchedule[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("bcs", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
-        where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
       const q = query(
         collection(firestore, "barCuttingSchedules"),
-        ...constraints,
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as BarCuttingSchedule,
       );
       const list = sortByNewestFirst(rawList);
-      if (list.length > 0) {
-        setCache(`jqms_bcs_${projectId}`, list);
-        return list;
-      }
-
-      const cached = getCache<BarCuttingSchedule[]>(
-        `jqms_bcs_${projectId}`,
-        [],
-      );
-      if (cached && cached.length > 0) {
-        return sortByNewestFirst(cached);
-      }
-
-      const initial = generateInitialSchedules(
-        projectId,
-        companyId || "comp-apex-civil",
-      );
-      setCache(`jqms_bcs_${projectId}`, initial);
-      return initial;
+      setCache(cacheKey, list);
+      return list;
     } catch (e) {
       console.warn(
         "Firestore getBarCuttingSchedules warning, reading local cache:",
         e,
       );
-      const cached = getCache<BarCuttingSchedule[]>(
-        `jqms_bcs_${projectId}`,
-        [],
-      );
-      if (cached && cached.length > 0) {
-        return sortByNewestFirst(cached);
-      }
-
-      const initial = generateInitialSchedules(
-        projectId,
-        companyId || "comp-apex-civil",
-      );
-      setCache(`jqms_bcs_${projectId}`, initial);
-      return initial;
+      return getCache<BarCuttingSchedule[]>(cacheKey, []);
     }
   },
 
   async getBarCuttingSchedule(
     id: string,
     projectId?: string,
+    companyId?: string,
   ): Promise<BarCuttingSchedule | null> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     try {
       const snap = await getDoc(doc(firestore, "barCuttingSchedules", id));
       if (snap.exists()) {
-        return { ...snap.data(), id: snap.id } as BarCuttingSchedule;
+        const item = { ...snap.data(), id: snap.id } as BarCuttingSchedule;
+        if (!effectiveCompId || item.companyId === effectiveCompId) return item;
       }
     } catch (e) {
       console.warn("Firestore getBarCuttingSchedule warning:", e);
-    }
-    if (projectId) {
-      const cached = getCache<BarCuttingSchedule[]>(
-        `jqms_bcs_${projectId}`,
-        [],
-      );
-      const match = cached.find((b) => b.id === id);
-      if (match) return match;
     }
     return null;
   },
 
   async saveBarCuttingSchedule(schedule: BarCuttingSchedule): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(schedule.companyId);
     const cleaned = cleanForFirestore({
       ...schedule,
+      companyId: effectiveCompId,
       updatedAt: new Date().toISOString(),
     });
-    const cacheKey = `jqms_bcs_${cleaned.projectId}`;
-    const list = getCache<BarCuttingSchedule[]>(cacheKey, []);
-    const idx = list.findIndex((b) => b.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned as BarCuttingSchedule;
-    else list.unshift(cleaned as BarCuttingSchedule);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "barCuttingSchedules", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveBarCuttingSchedule error:", e);
-    }
+    const cacheKey = scopedCacheKey("bcs", cleaned.projectId, effectiveCompId);
+    await persistRecord(
+      "barCuttingSchedules",
+      "BAR_CUTTING",
+      cleaned,
+      cacheKey,
+    );
   },
 
-  async deleteBarCuttingSchedule(id: string, projectId: string): Promise<void> {
+  async deleteBarCuttingSchedule(
+    id: string,
+    projectId: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_bcs_", id);
-    const cacheKey = `jqms_bcs_${projectId}`;
-    const list = getCache<BarCuttingSchedule[]>(cacheKey, []);
-    const filtered = list.filter((b) => b.id !== id);
-    setCache(cacheKey, filtered);
-
-    try {
-      await deleteDoc(doc(firestore, "barCuttingSchedules", id));
-    } catch (e) {
-      console.error("Firestore deleteBarCuttingSchedule error:", e);
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("bcs", projectId, effectiveCompId);
+      const list = getCache<BarCuttingSchedule[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((b) => b.id !== id),
+      );
     }
+    await deleteDoc(doc(firestore, "barCuttingSchedules", id));
   },
 
   // --- Material Deliveries ---
@@ -2201,104 +2342,90 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<MaterialDelivery[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("deliveries", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
-        where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
       const q = query(
         collection(firestore, "materialDeliveries"),
-        ...constraints,
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as MaterialDelivery,
       );
       const list = sortByNewestFirst(rawList);
-      if (list.length > 0) {
-        setCache(`jqms_deliveries_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getDeliveries warning, reading local cache:", e);
-      const cached = getCache<MaterialDelivery[]>(
-        `jqms_deliveries_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<MaterialDelivery[]>(cacheKey, []);
     }
   },
 
   async saveDelivery(delivery: MaterialDelivery): Promise<void> {
-    const cleaned = cleanForFirestore(delivery);
-    const cacheKey = `jqms_deliveries_${cleaned.projectId}`;
-    const list = getCache<MaterialDelivery[]>(cacheKey, []);
-    const idx = list.findIndex((d) => d.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(
-        doc(firestore, "materialDeliveries", cleaned.id),
-        cleaned,
-        { merge: true },
-      );
-    } catch (e) {
-      console.warn("Firestore saveDelivery error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(delivery.companyId);
+    const cleaned = cleanForFirestore({
+      ...delivery,
+      companyId: effectiveCompId,
+    });
+    const cacheKey = scopedCacheKey(
+      "deliveries",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord(
+      "materialDeliveries",
+      "MATERIAL_DELIVERY",
+      cleaned,
+      cacheKey,
+    );
   },
 
-  async deleteDelivery(id: string, projectId?: string): Promise<void> {
+  async saveMaterialDelivery(delivery: MaterialDelivery): Promise<void> {
+    return this.saveDelivery(delivery);
+  },
+
+  async deleteDelivery(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_deliveries_", id);
-    if (projectId) {
-      const cacheKey = `jqms_deliveries_${projectId}`;
-      const list = getCache<MaterialDelivery[]>(cacheKey, []).filter(
-        (d) => d.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("deliveries", projectId, effectiveCompId);
+      const list = getCache<MaterialDelivery[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((d) => d.id !== id),
       );
-      setCache(cacheKey, list);
     }
-    try {
-      await deleteDoc(doc(firestore, "materialDeliveries", id));
-    } catch (e) {
-      console.warn("Firestore deleteDelivery error:", e);
-    }
+    await deleteDoc(doc(firestore, "materialDeliveries", id));
   },
 
   // --- Universal Site Photo Gallery ---
   async getPhotos(projectId: string, companyId?: string): Promise<SitePhoto[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("photos", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "sitePhotos"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "sitePhotos"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
-      if (!snap.empty) {
-        const rawList = snap.docs.map(
-          (d) => ({ ...d.data(), id: d.id }) as SitePhoto,
-        );
-        const list = sortByNewestFirst(rawList);
-        setCache(`jqms_photos_${projectId}`, list);
-        return list;
-      }
-
-      const qAlt = query(collection(firestore, "photos"), ...constraints);
-      const snapAlt = await getDocs(qAlt);
-      const rawListAlt = snapAlt.docs.map(
+      const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as SitePhoto,
       );
-      const listAlt = sortByNewestFirst(rawListAlt);
-      if (listAlt.length > 0) {
-        setCache(`jqms_photos_${projectId}`, listAlt);
-      }
-      return listAlt;
+      const list = sortByNewestFirst(rawList);
+      setCache(cacheKey, list);
+      return list;
     } catch (e) {
       console.warn("Firestore getPhotos warning, reading local cache:", e);
-      const cached = getCache<SitePhoto[]>(`jqms_photos_${projectId}`, []);
-      return sortByNewestFirst(cached);
+      return getCache<SitePhoto[]>(cacheKey, []);
     }
   },
 
@@ -2310,41 +2437,33 @@ export const dbService = {
   },
 
   async savePhoto(photo: SitePhoto): Promise<void> {
-    const cleaned = cleanForFirestore(photo);
-    const cacheKey = `jqms_photos_${cleaned.projectId}`;
-    const list = getCache<SitePhoto[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "sitePhotos", cleaned.id), cleaned, {
-        merge: true,
-      });
-      await setDoc(doc(firestore, "photos", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.warn("Firestore savePhoto error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(photo.companyId);
+    const cleaned = cleanForFirestore({ ...photo, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "photos",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("sitePhotos", "PHOTO_UPLOAD", cleaned, cacheKey);
   },
 
-  async deletePhoto(id: string, projectId?: string): Promise<void> {
+  async deletePhoto(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_photos_", id);
-    if (projectId) {
-      const cacheKey = `jqms_photos_${projectId}`;
-      const list = getCache<SitePhoto[]>(cacheKey, []).filter(
-        (p) => p.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("photos", projectId, effectiveCompId);
+      const list = getCache<SitePhoto[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((p) => p.id !== id),
       );
-      setCache(cacheKey, list);
     }
-    try {
-      await deleteDoc(doc(firestore, "sitePhotos", id));
-      await deleteDoc(doc(firestore, "photos", id));
-    } catch (e) {
-      console.warn("Firestore deletePhoto error:", e);
-    }
+    await deleteDoc(doc(firestore, "sitePhotos", id));
+    await deleteDoc(doc(firestore, "photos", id)).catch(() => {});
   },
 
   // --- 4D Planner Events ---
@@ -2352,89 +2471,65 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<PlannerEvent[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("planner", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "calendarEvents"),
         where("projectId", "==", projectId),
-      ];
-
-      const q = query(collection(firestore, "calendarEvents"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as PlannerEvent,
       );
-
-      const qAlt = query(
-        collection(firestore, "plannerEvents"),
-        ...constraints,
-      );
-      const snapAlt = await getDocs(qAlt);
-      const rawListAlt = snapAlt.docs.map(
-        (d) => ({ ...d.data(), id: d.id }) as PlannerEvent,
-      );
-
-      const cached = getCache<PlannerEvent[]>(`jqms_planner_${projectId}`, []);
-      const map = new Map<string, PlannerEvent>();
-      cached.forEach((e) => map.set(e.id, e));
-      rawList.forEach((e) => map.set(e.id, e));
-      rawListAlt.forEach((e) => map.set(e.id, e));
-
-      const merged = Array.from(map.values());
-      setCache(`jqms_planner_${projectId}`, merged);
-      return sortByNewestFirst(merged);
+      const list = sortByNewestFirst(rawList);
+      setCache(cacheKey, list);
+      return list;
     } catch (e) {
       console.warn(
         "Firestore getPlannerEvents warning, reading local cache:",
         e,
       );
-      const cached = getCache<PlannerEvent[]>(`jqms_planner_${projectId}`, []);
-      return sortByNewestFirst(cached);
+      return getCache<PlannerEvent[]>(cacheKey, []);
     }
   },
 
   async savePlannerEvent(event: PlannerEvent): Promise<void> {
-    const cleaned = cleanForFirestore(event);
-    const cacheKey = `jqms_planner_${cleaned.projectId}`;
-    const list = getCache<PlannerEvent[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.push(cleaned);
-    setCache(cacheKey, list);
-
-    try {
-      await setDoc(doc(firestore, "calendarEvents", cleaned.id), cleaned, {
-        merge: true,
-      });
-      await setDoc(doc(firestore, "plannerEvents", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore savePlannerEvent error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(event.companyId);
+    const cleaned = cleanForFirestore({ ...event, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "planner",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("calendarEvents", "PLANNER_EVENT", cleaned, cacheKey);
 
     try {
       window.dispatchEvent(
         new CustomEvent("jqms-planner-updated", { detail: cleaned }),
       );
-    } catch {
-      // ignore
-    }
+    } catch {}
   },
 
-  async deletePlannerEvent(id: string, projectId?: string): Promise<void> {
+  async deletePlannerEvent(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_planner_", id);
-    if (projectId) {
-      const cacheKey = `jqms_planner_${projectId}`;
-      const list = getCache<PlannerEvent[]>(cacheKey, []).filter(
-        (p) => p.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("planner", projectId, effectiveCompId);
+      const list = getCache<PlannerEvent[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((p) => p.id !== id),
       );
-      setCache(cacheKey, list);
     }
-    try {
-      await deleteDoc(doc(firestore, "calendarEvents", id));
-      await deleteDoc(doc(firestore, "plannerEvents", id));
-    } catch (e) {
-      console.warn("Firestore deletePlannerEvent error:", e);
-    }
+    await deleteDoc(doc(firestore, "calendarEvents", id));
+    await deleteDoc(doc(firestore, "plannerEvents", id)).catch(() => {});
   },
 
   // --- Document Control ---
@@ -2442,96 +2537,116 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<DocumentRecord[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("documents", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "documents"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "documents"), ...constraints);
+        where("companyId", "==", effectiveCompId),
+      );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as DocumentRecord,
       );
       const list = sortByNewestFirst(rawList);
-      if (list.length > 0) {
-        setCache(`jqms_documents_${projectId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getDocuments warning, reading local cache:", e);
-      const cached = getCache<DocumentRecord[]>(
-        `jqms_documents_${projectId}`,
-        [],
-      );
-      return sortByNewestFirst(cached);
+      return getCache<DocumentRecord[]>(cacheKey, []);
     }
   },
 
   async saveDocument(docRecord: DocumentRecord): Promise<void> {
-    const cleaned = cleanForFirestore(docRecord);
-    const cacheKey = `jqms_documents_${cleaned.projectId}`;
-    const list = getCache<DocumentRecord[]>(cacheKey, []);
-    const idx = list.findIndex((d) => d.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "documents", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.warn("Firestore saveDocument error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(docRecord.companyId);
+    const cleaned = cleanForFirestore({
+      ...docRecord,
+      companyId: effectiveCompId,
+    });
+    const cacheKey = scopedCacheKey(
+      "documents",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("documents", "DOCUMENT", cleaned, cacheKey);
   },
 
-  async deleteDocument(id: string, projectId?: string): Promise<void> {
+  async deleteDocument(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_documents_", id);
-    if (projectId) {
-      const cacheKey = `jqms_documents_${projectId}`;
-      const list = getCache<DocumentRecord[]>(cacheKey, []).filter(
-        (d) => d.id !== id,
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("documents", projectId, effectiveCompId);
+      const list = getCache<DocumentRecord[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((d) => d.id !== id),
       );
-      setCache(cacheKey, list);
     }
-    try {
-      await deleteDoc(doc(firestore, "documents", id));
-    } catch (e) {
-      console.warn("Firestore deleteDocument error:", e);
-    }
+    await deleteDoc(doc(firestore, "documents", id));
   },
 
   // --- Immutable Enterprise Audit Logs ---
-  async getAuditLogs(companyId: string): Promise<AuditLog[]> {
+  async getAuditLogs(companyId: string, maxItems = 200): Promise<AuditLog[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
+    const cacheKey = `jqms_audit_logs_${effectiveCompId}`;
     try {
       const q = query(
         collection(firestore, "auditLogs"),
-        where("companyId", "==", companyId),
+        where("companyId", "==", effectiveCompId),
+        orderBy("timestamp", "desc"),
+        limit(maxItems),
       );
       const snap = await getDocs(q);
       const list = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as AuditLog,
       );
-      if (list.length > 0) {
-        setCache(`jqms_audit_logs_${companyId}`, list);
-      }
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
-      console.warn("Firestore getAuditLogs warning, reading local cache:", e);
-      return getCache<AuditLog[]>(`jqms_audit_logs_${companyId}`, []);
+      console.warn(
+        "Firestore getAuditLogs warning, fallback without orderBy:",
+        e,
+      );
+      try {
+        const qFallback = query(
+          collection(firestore, "auditLogs"),
+          where("companyId", "==", effectiveCompId),
+          limit(maxItems),
+        );
+        const snap = await getDocs(qFallback);
+        const list = sortByNewestFirst(
+          snap.docs.map((d) => ({ ...d.data(), id: d.id }) as AuditLog),
+        );
+        setCache(cacheKey, list);
+        return list;
+      } catch {
+        return getCache<AuditLog[]>(cacheKey, []);
+      }
     }
   },
 
   async saveAuditLog(log: AuditLog): Promise<void> {
-    const cleaned = cleanForFirestore(log);
-    const cacheKey = `jqms_audit_logs_${cleaned.companyId}`;
+    const effectiveCompId = resolveEffectiveCompanyId(log.companyId);
+    if (!effectiveCompId) return;
+    const cleaned = cleanForFirestore({
+      ...log,
+      companyId: effectiveCompId,
+      timestamp: typeof log.timestamp === "number" ? log.timestamp : Date.now(),
+    });
+    const cacheKey = `jqms_audit_logs_${effectiveCompId}`;
     const list = getCache<AuditLog[]>(cacheKey, []);
     list.unshift(cleaned);
-    setCache(cacheKey, list.slice(0, 500));
+    setCache(cacheKey, list.slice(0, 300));
 
     try {
-      await setDoc(doc(firestore, "auditLogs", cleaned.id), cleaned, { merge: true });
+      await setDoc(doc(firestore, "auditLogs", cleaned.id), cleaned);
     } catch (e) {
       console.warn("Firestore saveAuditLog error:", e);
     }
@@ -2542,61 +2657,29 @@ export const dbService = {
     companyId: string,
     forceReset = false,
   ): Promise<MasterTrade[]> {
-    if (!companyId) return [];
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
 
     try {
       if (!forceReset) {
         const q = query(
           collection(firestore, "trades"),
-          where("companyId", "==", companyId),
+          where("companyId", "==", effectiveCompId),
         );
         const snap = await getDocs(q);
         if (!snap.empty) {
           const existing = snap.docs.map(
             (d) => ({ ...d.data(), id: d.id }) as MasterTrade,
           );
-          setCache(`jqms_trades_${companyId}`, existing);
+          setCache(`jqms_trades_${effectiveCompId}`, existing);
           return existing;
         }
       }
 
-      const batch = writeBatch(firestore);
-      const seeded: MasterTrade[] = [];
       const now = Date.now();
-
-      for (let i = 0; i < DEFAULT_TRADES.length; i++) {
-        const dt = DEFAULT_TRADES[i];
-        const tradeDocId = `tr-${dt.code.toLowerCase()}-${companyId}`;
-        const docRef = doc(firestore, "trades", tradeDocId);
-        const tradeData: MasterTrade = {
-          id: tradeDocId,
-          companyId,
-          name: dt.name,
-          codePrefix: dt.code,
-          colorHex: dt.color,
-          icon: dt.icon,
-          description: dt.description,
-          status: "Active",
-          subtrades: dt.subtrades.map((s) => s.name),
-          createdAt: now,
-          updatedAt: now,
-        };
-        batch.set(docRef, tradeData);
-        seeded.push(tradeData);
-      }
-
-      await batch.commit();
-      console.log(
-        `[JQMS Enterprise] Successfully seeded ${seeded.length} master trades for company ${companyId}`,
-      );
-      setCache(`jqms_trades_${companyId}`, seeded);
-      return seeded;
-    } catch (e) {
-      console.warn("Firestore seedCompanyTrades fallback:", e);
-      const now = Date.now();
-      const localList: MasterTrade[] = DEFAULT_TRADES.map((dt) => ({
-        id: `tr-${dt.code.toLowerCase()}-${companyId}`,
-        companyId,
+      const seeded: MasterTrade[] = DEFAULT_TRADES.map((dt) => ({
+        id: `tr-${dt.code.toLowerCase()}-${effectiveCompId}`,
+        companyId: effectiveCompId,
         name: dt.name,
         codePrefix: dt.code,
         colorHex: dt.color,
@@ -2607,64 +2690,63 @@ export const dbService = {
         createdAt: now,
         updatedAt: now,
       }));
-      setCache(`jqms_trades_${companyId}`, localList);
-      return localList;
+
+      await commitInChunks(seeded, (batch, trade) => {
+        batch.set(doc(firestore, "trades", trade.id), trade, { merge: true });
+      });
+
+      setCache(`jqms_trades_${effectiveCompId}`, seeded);
+      return seeded;
+    } catch (e) {
+      console.warn("Firestore seedCompanyTrades fallback:", e);
+      return [];
     }
   },
 
-  // --- Master Trades & Subtrades (Queried from DB by companyId) ---
   async getTrades(companyId: string): Promise<MasterTrade[]> {
-    if (!companyId) return [];
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
+    const cacheKey = `jqms_trades_${effectiveCompId}`;
     try {
       const q = query(
         collection(firestore, "trades"),
-        where("companyId", "==", companyId),
+        where("companyId", "==", effectiveCompId),
       );
       const snap = await getDocs(q);
       if (snap.empty) {
-        return await this.seedCompanyTrades(companyId);
+        return await this.seedCompanyTrades(effectiveCompId);
       }
       const list = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as MasterTrade,
       );
-      setCache(`jqms_trades_${companyId}`, list);
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn("Firestore getTrades warning, checking cache/seed:", e);
-      const cached = getCache<MasterTrade[]>(`jqms_trades_${companyId}`, []);
+      const cached = getCache<MasterTrade[]>(cacheKey, []);
       if (cached.length > 0) return cached;
-      return await this.seedCompanyTrades(companyId);
+      return await this.seedCompanyTrades(effectiveCompId);
     }
   },
 
   async saveTrade(trade: MasterTrade): Promise<void> {
-    const cleaned = cleanForFirestore(trade);
-    const cacheKey = `jqms_trades_${cleaned.companyId}`;
-    const list = getCache<MasterTrade[]>(cacheKey, []);
-    const idx = list.findIndex((t) => t.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.push(cleaned);
-    setCache(cacheKey, list);
-
-    try {
-      await setDoc(doc(firestore, "trades", cleaned.id), cleaned, { merge: true });
-    } catch (e) {
-      console.warn("Firestore saveTrade error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(trade.companyId);
+    const cleaned = cleanForFirestore({ ...trade, companyId: effectiveCompId });
+    const cacheKey = `jqms_trades_${effectiveCompId}`;
+    await persistRecord("trades", "TRADE", cleaned, cacheKey);
   },
 
   async deleteTrade(id: string, companyId: string): Promise<void> {
-    const cacheKey = `jqms_trades_${companyId}`;
-    const list = getCache<MasterTrade[]>(cacheKey, []).filter(
-      (t) => t.id !== id,
-    );
-    setCache(cacheKey, list);
-
-    try {
-      await deleteDoc(doc(firestore, "trades", id));
-    } catch (e) {
-      console.error("Firestore deleteTrade error:", e);
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (effectiveCompId) {
+      const cacheKey = `jqms_trades_${effectiveCompId}`;
+      const list = getCache<MasterTrade[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((t) => t.id !== id),
+      );
     }
+    await deleteDoc(doc(firestore, "trades", id));
   },
 
   // --- Seed Built-in Inspection Templates for a Company ---
@@ -2672,74 +2754,30 @@ export const dbService = {
     companyId: string,
     forceReset = false,
   ): Promise<InspectionTemplate[]> {
-    if (!companyId) return [];
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
+
     try {
       if (!forceReset) {
         const q = query(
           collection(firestore, "inspectionTemplates"),
-          where("companyId", "==", companyId),
+          where("companyId", "==", effectiveCompId),
         );
         const snap = await getDocs(q);
         if (!snap.empty) {
           const existing = snap.docs.map(
             (d) => ({ ...d.data(), id: d.id }) as InspectionTemplate,
           );
-          setCache(`jqms_inspection_templates_${companyId}`, existing);
+          setCache(`jqms_inspection_templates_${effectiveCompId}`, existing);
           return existing;
         }
       }
 
-      const templatesToCreate: InspectionTemplate[] = [];
       const now = Date.now();
-      const chunkSize = 400;
-      for (let i = 0; i < BUILTIN_TEMPLATES.length; i += chunkSize) {
-        const chunk = BUILTIN_TEMPLATES.slice(i, i + chunkSize);
-        const batch = writeBatch(firestore);
-
-        for (const t of chunk) {
-          const newDocRef = doc(collection(firestore, "inspectionTemplates"));
-          const tmplData: InspectionTemplate = {
-            id: newDocRef.id,
-            companyId,
-            element: t.element,
-            stage: t.stage,
-            discipline: t.discipline,
-            version: t.version,
-            isSystem: true,
-            isActive: true,
-            name: `${t.element} - ${t.stage}`,
-            items: t.items.map((it) => ({
-              critical: !!it.critical,
-              label: it.label,
-              isHoldPoint: !!it.critical,
-              importanceWeight: it.critical ? 3 : 2,
-              acceptanceCriteria:
-                "Per approved project specifications & IFC drawings",
-              discipline: t.discipline,
-            })),
-            createdAt: now,
-          };
-          batch.set(newDocRef, tmplData);
-          templatesToCreate.push(tmplData);
-        }
-
-        await batch.commit();
-      }
-
-      console.log(
-        `[JQMS Enterprise] Successfully auto-seeded ${templatesToCreate.length} inspection templates for company ${companyId}`,
-      );
-      setCache(`jqms_inspection_templates_${companyId}`, templatesToCreate);
-      return templatesToCreate;
-    } catch (e) {
-      console.warn(
-        "Firestore seedCompanyInspectionTemplates error/fallback:",
-        e,
-      );
-      const localList: InspectionTemplate[] = BUILTIN_TEMPLATES.map(
+      const templatesToCreate: InspectionTemplate[] = BUILTIN_TEMPLATES.map(
         (t, idx) => ({
-          id: `tmpl-sys-${companyId}-${idx + 1}`,
-          companyId,
+          id: `tmpl-${effectiveCompId}-${idx + 1}`,
+          companyId: effectiveCompId,
           element: t.element,
           stage: t.stage,
           discipline: t.discipline,
@@ -2756,83 +2794,95 @@ export const dbService = {
               "Per approved project specifications & IFC drawings",
             discipline: t.discipline,
           })),
-          createdAt: Date.now(),
+          createdAt: now,
         }),
       );
-      setCache(`jqms_inspection_templates_${companyId}`, localList);
-      return localList;
+
+      await commitInChunks(templatesToCreate, (batch, tmpl) => {
+        batch.set(doc(firestore, "inspectionTemplates", tmpl.id), tmpl, {
+          merge: true,
+        });
+      });
+
+      setCache(
+        `jqms_inspection_templates_${effectiveCompId}`,
+        templatesToCreate,
+      );
+      return templatesToCreate;
+    } catch (e) {
+      console.warn(
+        "Firestore seedCompanyInspectionTemplates error/fallback:",
+        e,
+      );
+      return [];
     }
   },
 
-  // --- Inspection Checklist Templates ---
   async getInspectionTemplates(
     companyId: string,
   ): Promise<InspectionTemplate[]> {
-    if (!companyId) return [];
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
+    const cacheKey = `jqms_inspection_templates_${effectiveCompId}`;
     try {
       const q = query(
         collection(firestore, "inspectionTemplates"),
-        where("companyId", "==", companyId),
+        where("companyId", "==", effectiveCompId),
       );
       const snap = await getDocs(q);
       if (snap.empty) {
-        return await this.seedCompanyInspectionTemplates(companyId);
+        return await this.seedCompanyInspectionTemplates(effectiveCompId);
       }
       const list = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as InspectionTemplate,
       );
-      setCache(`jqms_inspection_templates_${companyId}`, list);
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn(
         "Firestore getInspectionTemplates warning, checking cache/seed:",
         e,
       );
-      const cached = getCache<InspectionTemplate[]>(
-        `jqms_inspection_templates_${companyId}`,
-        [],
-      );
+      const cached = getCache<InspectionTemplate[]>(cacheKey, []);
       if (cached.length > 0) return cached;
-      return await this.seedCompanyInspectionTemplates(companyId);
+      return await this.seedCompanyInspectionTemplates(effectiveCompId);
     }
   },
 
   async saveInspectionTemplate(template: InspectionTemplate): Promise<void> {
-    const cleaned = cleanForFirestore(template);
-    const cacheKey = `jqms_inspection_templates_${cleaned.companyId}`;
-    const list = getCache<InspectionTemplate[]>(cacheKey, []);
-    const idx = list.findIndex((t) => t.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.push(cleaned);
-    setCache(cacheKey, list);
-
-    try {
-      await setDoc(
-        doc(firestore, "inspectionTemplates", cleaned.id),
-        cleaned,
-        { merge: true },
-      );
-    } catch (e) {
-      console.warn("Firestore saveInspectionTemplate error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(template.companyId);
+    const cleaned = cleanForFirestore({
+      ...template,
+      companyId: effectiveCompId,
+    });
+    const cacheKey = `jqms_inspection_templates_${effectiveCompId}`;
+    await persistRecord(
+      "inspectionTemplates",
+      "INSPECTION_TEMPLATE",
+      cleaned,
+      cacheKey,
+    );
   },
 
   async deleteInspectionTemplate(id: string, companyId: string): Promise<void> {
-    const cacheKey = `jqms_inspection_templates_${companyId}`;
-    const list = getCache<InspectionTemplate[]>(cacheKey, []).filter(
-      (t) => t.id !== id,
-    );
-    setCache(cacheKey, list);
-
-    try {
-      await deleteDoc(doc(firestore, "inspectionTemplates", id));
-    } catch (e) {
-      console.error("Firestore deleteInspectionTemplate error:", e);
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (effectiveCompId) {
+      const cacheKey = `jqms_inspection_templates_${effectiveCompId}`;
+      const list = getCache<InspectionTemplate[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((t) => t.id !== id),
+      );
     }
+    await deleteDoc(doc(firestore, "inspectionTemplates", id));
   },
 
   // --- Users Directory ---
   async getUsers(companyId?: string): Promise<UserProfile[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
+    const cacheKey = `jqms_users_${effectiveCompId}`;
+
     const isDemoUser = (u: any): boolean => {
       if (!u) return true;
       const demoUids = [
@@ -2848,13 +2898,26 @@ export const dbService = {
         "usr-contractor",
       ];
       if (demoUids.includes(u.uid) || demoUids.includes(u.id)) return true;
-      if (typeof u.email === "string" && u.email.endsWith("@apexinfra.com")) return true;
+
+      // Case-insensitive email domain check for demo accounts
+      if (typeof u.email === "string") {
+        const lowerEmail = u.email.trim().toLowerCase();
+        if (
+          lowerEmail.endsWith("@apexinfra.com") ||
+          lowerEmail.endsWith("@demo.com")
+        ) {
+          return true;
+        }
+      }
       return false;
     };
 
     try {
-      // 1. Fetch live directly from Firestore users collection
-      const snap = await getDocs(collection(firestore, "users"));
+      const q = query(
+        collection(firestore, "users"),
+        where("companyId", "==", effectiveCompId),
+      );
+      const snap = await getDocs(q);
       const firestoreUsers = snap.docs
         .map((d) => {
           const data = d.data();
@@ -2866,117 +2929,144 @@ export const dbService = {
         })
         .filter((u) => !isDemoUser(u));
 
-      // 2. Read local cache and filter out any leftover demo accounts
-      const cached = getCache<UserProfile[]>(
-        `jqms_users_${companyId || "all"}`,
-        [],
-      ).filter((u) => !isDemoUser(u));
+      // Deduplicate by normalized email
+      const emailMap = new Map<string, UserProfile>();
+      const nonEmailUsers: UserProfile[] = [];
 
-      const userMap = new Map<string, UserProfile>();
-
-      // Cached users
-      cached.forEach((u) => {
-        if (u.uid) userMap.set(u.uid, u);
-      });
-
-      // Live Firestore users (highest authority)
-      firestoreUsers.forEach((u) => {
-        if (u.uid) userMap.set(u.uid, u);
-      });
-
-      // Include current logged-in user if saved in session storage
-      try {
-        const stored = localStorage.getItem("jqms_current_user");
-        if (stored) {
-          const authUser = JSON.parse(stored) as UserProfile;
-          if (authUser && authUser.uid && !isDemoUser(authUser)) {
-            if (!userMap.has(authUser.uid)) {
-              userMap.set(authUser.uid, authUser);
-            }
+      for (const u of firestoreUsers) {
+        const normEmail = (u.email || "").trim().toLowerCase();
+        if (!normEmail) {
+          nonEmailUsers.push(u);
+          continue;
+        }
+        const existing = emailMap.get(normEmail);
+        if (!existing) {
+          emailMap.set(normEmail, u);
+        } else {
+          const isUAuth = u.uid && !u.uid.startsWith("usr-");
+          const isExistingAuth =
+            existing.uid && !existing.uid.startsWith("usr-");
+          if (isUAuth && !isExistingAuth) {
+            emailMap.set(normEmail, { ...existing, ...u });
+          } else {
+            emailMap.set(normEmail, { ...u, ...existing });
           }
         }
-      } catch {}
+      }
 
-      const allRealUsers = Array.from(userMap.values());
-
-      // If companyId filter is provided, include users matching companyId, global access, or empty companyId
-      const filtered = companyId
-        ? allRealUsers.filter(
-            (u) =>
-              !u.companyId ||
-              u.companyId === "" ||
-              u.companyId === companyId ||
-              u.projectIds?.includes("*") ||
-              u.role === "SUPER_ADMIN",
-          )
-        : allRealUsers;
-
-      setCache(`jqms_users_${companyId || "all"}`, filtered);
-      setCache(`jqms_users_all`, allRealUsers);
-      return filtered;
+      const consolidated = [...Array.from(emailMap.values()), ...nonEmailUsers];
+      setCache(cacheKey, consolidated);
+      return consolidated;
     } catch (e) {
       console.warn("Firestore getUsers warning, reading local cache:", e);
-      const cached = getCache<UserProfile[]>(
-        `jqms_users_${companyId || "all"}`,
-        [],
-      ).filter((u) => !isDemoUser(u));
-
-      try {
-        const stored = localStorage.getItem("jqms_current_user");
-        if (stored) {
-          const authUser = JSON.parse(stored) as UserProfile;
-          if (authUser && authUser.uid && !isDemoUser(authUser)) {
-            if (!cached.some((u) => u.uid === authUser.uid)) {
-              cached.unshift(authUser);
-            }
-          }
-        }
-      } catch {}
-
-      return cached;
+      return getCache<UserProfile[]>(cacheKey, []).filter(
+        (u) => !isDemoUser(u),
+      );
     }
   },
 
   async saveUser(user: UserProfile): Promise<void> {
-    const cleaned = cleanForFirestore(user);
-    const cacheKey = `jqms_users_${cleaned.companyId || "all"}`;
-    const list = getCache<UserProfile[]>(cacheKey, []);
-    const idx = list.findIndex((u) => u.uid === cleaned.uid);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.push(cleaned);
-    setCache(cacheKey, list);
+    const effectiveCompId = resolveEffectiveCompanyId(user.companyId);
+    if (!effectiveCompId) {
+      throw new Error(
+        "User must be associated with an active company workspace.",
+      );
+    }
+    const cleaned = cleanForFirestore({
+      ...user,
+      companyId: effectiveCompId,
+      updatedAt:
+        typeof user.updatedAt === "number" ? user.updatedAt : Date.now(),
+    });
 
-    // Also update global users cache
-    const allCache = getCache<UserProfile[]>("jqms_users_all", []);
-    const allIdx = allCache.findIndex((u) => u.uid === cleaned.uid);
-    if (allIdx >= 0) allCache[allIdx] = cleaned;
-    else allCache.push(cleaned);
-    setCache("jqms_users_all", allCache);
+    const cacheKey = `jqms_users_${effectiveCompId}`;
+    const previous = getCache<UserProfile[]>(cacheKey, []);
+    const next = [...previous];
+    const idx = next.findIndex((u) => u.uid === cleaned.uid);
+    if (idx >= 0) next[idx] = cleaned;
+    else next.push(cleaned);
+    setCache(cacheKey, next);
 
     try {
-      await setDoc(doc(firestore, "users", cleaned.uid), cleaned, { merge: true });
-    } catch (e) {
-      console.warn("Firestore saveUser error:", e);
+      await setDoc(doc(firestore, "users", cleaned.uid), cleaned, {
+        merge: true,
+      });
+
+      // If manager created or updated an invited/subordinate account, synchronize userInvites/{emailLower}
+      const normEmail = (cleaned.email || "").trim().toLowerCase();
+      if (
+        normEmail &&
+        (cleaned.uid.startsWith("usr-") ||
+          auth.currentUser?.uid !== cleaned.uid)
+      ) {
+        try {
+          const inviteRef = doc(firestore, "userInvites", normEmail);
+          const invitePayload = cleanForFirestore({
+            email: normEmail,
+            fullName: cleaned.fullName || "",
+            role: cleaned.role,
+            companyId: effectiveCompId,
+            companyName: cleaned.companyName || "",
+            title: cleaned.title || "",
+            designation: cleaned.designation || "",
+            department: cleaned.department || "",
+            projectIds: cleaned.projectIds || [],
+            projectAccess: cleaned.projectAccess || {},
+            status: cleaned.status || "ACTIVE",
+            isActive:
+              cleaned.isActive !== false &&
+              cleaned.status !== "SUSPENDED" &&
+              cleaned.status !== "INACTIVE",
+            legacyUserDocId: cleaned.uid.startsWith("usr-")
+              ? cleaned.uid
+              : undefined,
+            updatedAt: Date.now(),
+          });
+          await setDoc(inviteRef, invitePayload, { merge: true });
+        } catch (inviteErr) {
+          // Non-manager self updates won't have permission to write userInvites, safe to ignore
+          console.debug(
+            "[dbService] Optional userInvites sync skipped:",
+            inviteErr,
+          );
+        }
+      }
+    } catch (e: any) {
+      setCache(cacheKey, previous);
+      console.error("Firestore saveUser critical error:", e);
+      throw new Error(
+        e?.message ||
+          "Cloud database write failed. Unable to persist user profile.",
+      );
     }
   },
 
-  /**
-   * Standard enterprise assignment of a user across multiple projects.
-   * Updates both the user's projectIds/projectAccess and every project's assignedStaff roster.
-   */
+  async deleteUser(userId: string, companyId?: string): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (effectiveCompId) {
+      const cacheKey = `jqms_users_${effectiveCompId}`;
+      const list = getCache<UserProfile[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((u) => u.uid !== userId),
+      );
+    }
+    await deleteDoc(doc(firestore, "users", userId));
+  },
+
   async assignUserToProjects(
     userId: string,
     targetProjectIds: string[],
     companyId?: string,
   ): Promise<{ user: UserProfile; updatedProjects: Project[] }> {
-    const effectiveCompId = companyId || "comp-apex-civil";
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId)
+      throw new Error("Active company is required for project assignment.");
 
-    // 1. Retrieve user
     const allUsers = await this.getUsers(effectiveCompId);
     const user = allUsers.find((u) => u.uid === userId);
     if (!user) throw new Error(`User with ID ${userId} not found`);
 
-    // 2. Compute updated user projectIds and projectAccess
     const isGlobal = targetProjectIds.includes("*");
     const updatedProjectIds = isGlobal ? ["*"] : targetProjectIds;
     const updatedProjectAccess: Record<string, boolean> = {};
@@ -2992,12 +3082,11 @@ export const dbService = {
       ...user,
       projectIds: updatedProjectIds,
       projectAccess: updatedProjectAccess,
-      updatedAt: new Date().toISOString(),
+      updatedAt: Date.now(),
     };
 
     await this.saveUser(updatedUser);
 
-    // 3. Update all projects in the company so project.assignedStaff / assignedStaffIds reflects this user
     const allProjects = await this.getProjects(effectiveCompId);
     const updatedProjects: Project[] = [];
 
@@ -3032,17 +3121,16 @@ export const dbService = {
     return { user: updatedUser, updatedProjects };
   },
 
-  /**
-   * Standard enterprise assignment of multiple staff members to a single project.
-   * Updates project.assignedStaff and synchronizes user.projectIds for affected users.
-   */
   async assignStaffToProject(
     projectId: string,
     staffUids: string[],
     excludedStaffIds: string[] = [],
     companyId?: string,
   ): Promise<Project> {
-    const effectiveCompId = companyId || "comp-apex-civil";
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId)
+      throw new Error("Active company is required for project assignment.");
+
     const allProjects = await this.getProjects(effectiveCompId);
     const proj = allProjects.find((p) => p.id === projectId);
     if (!proj) throw new Error(`Project ${projectId} not found`);
@@ -3055,7 +3143,6 @@ export const dbService = {
     };
     await this.saveProject(updatedProj);
 
-    // Also update individual users' projectIds/projectAccess
     const allUsers = await this.getUsers(effectiveCompId);
     for (const u of allUsers) {
       if (u.role === "SUPER_ADMIN" || u.projectIds?.includes("*")) continue;
@@ -3085,403 +3172,122 @@ export const dbService = {
     return updatedProj;
   },
 
-  // --- Weekly QA/QC Executive Reports (Multi-Tier Redundant Store) ---
+  // --- Weekly QA/QC Executive Reports ---
   async getWeeklyReports(
     projectId: string,
     companyId?: string,
   ): Promise<WeeklyReport[]> {
-    const mergedMap = new Map<string, WeeklyReport>();
-
-    for (const [id, r] of inMemoryWeeklyReports.entries()) {
-      if (!projectId || r.projectId === projectId) {
-        if (!companyId || !r.companyId || r.companyId === companyId) {
-          mergedMap.set(id, r);
-        }
-      }
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey(
+      "weekly_reports",
+      projectId,
+      effectiveCompId,
+    );
 
     try {
-      const cached = getCache<WeeklyReport[]>(
-        `jqms_weekly_reports_${projectId}`,
-        [],
+      const q = query(
+        collection(firestore, "weeklyReports"),
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
-      for (const r of cached) {
-        if (!companyId || !r.companyId || r.companyId === companyId) {
-          if (!mergedMap.has(r.id)) mergedMap.set(r.id, r);
-        }
-      }
-      const allCached = getCache<WeeklyReport[]>("jqms_weekly_reports_all", []);
-      for (const r of allCached) {
-        if (!projectId || r.projectId === projectId) {
-          if (!companyId || !r.companyId || r.companyId === companyId) {
-            if (!mergedMap.has(r.id)) mergedMap.set(r.id, r);
-          }
-        }
-      }
-    } catch (_) {}
-
-    try {
-      let rawList: WeeklyReport[] = [];
-      try {
-        const constraints: QueryConstraint[] = [
-          where("projectId", "==", projectId),
-        ];
-        if (companyId) constraints.push(where("companyId", "==", companyId));
-
-        const q = query(collection(firestore, "weeklyReports"), ...constraints);
-        const snap = await getDocs(q);
-        rawList = snap.docs.map(
-          (d) => ({ ...d.data(), id: d.id }) as WeeklyReport,
-        );
-      } catch (innerErr) {
-        if (companyId) {
-          const fallbackQ = query(
-            collection(firestore, "weeklyReports"),
-            where("projectId", "==", projectId),
-          );
-          const fallbackSnap = await getDocs(fallbackQ);
-          rawList = fallbackSnap.docs
-            .map((d) => ({ ...d.data(), id: d.id }) as WeeklyReport)
-            .filter((r) => !r.companyId || r.companyId === companyId);
-        } else {
-          throw innerErr;
-        }
-      }
-
-      for (const r of rawList) {
-        mergedMap.set(r.id, r);
-        inMemoryWeeklyReports.set(r.id, r);
-      }
-
-      const list = sortByNewestFirst(Array.from(mergedMap.values()));
-      if (list.length > 0) {
-        try {
-          setCache(`jqms_weekly_reports_${projectId}`, list);
-        } catch (_) {}
-      }
+      const snap = await getDocs(q);
+      const rawList = snap.docs.map(
+        (d) => ({ ...d.data(), id: d.id }) as WeeklyReport,
+      );
+      const list = sortByNewestFirst(rawList);
+      setCache(cacheKey, list);
       return list;
     } catch (e) {
       console.warn(
-        "Firestore getWeeklyReports warning, serving merged local reports:",
+        "Firestore getWeeklyReports warning, reading local cache:",
         e,
       );
-      return sortByNewestFirst(Array.from(mergedMap.values()));
+      return getCache<WeeklyReport[]>(cacheKey, []);
     }
   },
 
   async getWeeklyReport(
     id: string,
     projectId?: string,
+    companyId?: string,
   ): Promise<WeeklyReport | null> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     if (inMemoryWeeklyReports.has(id)) {
-      return inMemoryWeeklyReports.get(id)!;
-    }
-
-    if (projectId) {
-      const cached = getCache<WeeklyReport[]>(
-        `jqms_weekly_reports_${projectId}`,
-        [],
-      );
-      const found = cached.find((w) => w.id === id);
-      if (found) {
-        inMemoryWeeklyReports.set(found.id, found);
-        return found;
-      }
-    }
-    const allCached = getCache<WeeklyReport[]>("jqms_weekly_reports_all", []);
-    const foundAll = allCached.find((w) => w.id === id);
-    if (foundAll) {
-      inMemoryWeeklyReports.set(foundAll.id, foundAll);
-      return foundAll;
+      const rep = inMemoryWeeklyReports.get(id)!;
+      if (!effectiveCompId || rep.companyId === effectiveCompId) return rep;
     }
 
     try {
       const snap = await getDoc(doc(firestore, "weeklyReports", id));
       if (snap.exists()) {
         const report = { ...snap.data(), id: snap.id } as WeeklyReport;
-        inMemoryWeeklyReports.set(report.id, report);
-        return report;
-      }
-    } catch (e) {
-      console.warn(
-        "Firestore getWeeklyReport warning, checking all localStorage keys:",
-        e,
-      );
-    }
-
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith("jqms_weekly_reports_")) {
-          const list = getCache<WeeklyReport[]>(key, []);
-          const found = list.find((w) => w.id === id);
-          if (found) {
-            inMemoryWeeklyReports.set(found.id, found);
-            return found;
-          }
+        if (!effectiveCompId || report.companyId === effectiveCompId) {
+          inMemoryWeeklyReports.set(report.id, report);
+          return report;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      console.warn("Firestore getWeeklyReport warning:", e);
+    }
     return null;
   },
 
-  async deleteWeeklyReport(id: string, projectId?: string): Promise<void> {
+  async deleteWeeklyReport(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     inMemoryWeeklyReports.delete(id);
     removeFromAllVaultCaches("jqms_weekly_reports_", id);
 
-    if (projectId) {
-      const cacheKey = `jqms_weekly_reports_${projectId}`;
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey(
+        "weekly_reports",
+        projectId,
+        effectiveCompId,
+      );
       const list = getCache<WeeklyReport[]>(cacheKey, []);
       setCache(
         cacheKey,
         list.filter((w) => w.id !== id),
       );
     }
-    const allList = getCache<WeeklyReport[]>("jqms_weekly_reports_all", []);
-    setCache(
-      "jqms_weekly_reports_all",
-      allList.filter((w) => w.id !== id),
-    );
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith("jqms_weekly_reports_")) {
-          const list = getCache<WeeklyReport[]>(key, []);
-          setCache(
-            key,
-            list.filter((w) => w.id !== id),
-          );
-        }
-      }
-    } catch (_) {}
-
-    try {
-      await deleteDoc(doc(firestore, "weeklyReports", id));
-    } catch (e) {
-      console.error("Firestore deleteWeeklyReport error:", e);
-    }
+    await deleteDoc(doc(firestore, "weeklyReports", id));
   },
 
   async saveWeeklyReport(report: WeeklyReport): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(report.companyId);
+    if (!effectiveCompId) {
+      throw new Error(
+        "Weekly report must be associated with an active company workspace.",
+      );
+    }
     inMemoryWeeklyReports.set(report.id, report);
-    const cleaned = cleanForFirestore(report);
+    const cleaned = cleanForFirestore({
+      ...report,
+      companyId: effectiveCompId,
+      updatedAt: new Date().toISOString(),
+    });
 
-    const MAX_ITEMS = 100;
+    const sanitizeSafeUrl = (url: any): string => {
+      if (!url || typeof url !== "string") return "";
+      const trimmed = url.trim();
+      if (trimmed.startsWith("data:") && trimmed.length > 4096) return "";
+      return trimmed;
+    };
 
-    const slimNcr = (arr: any[] = []) =>
-      arr.slice(0, MAX_ITEMS).map((n: any) => ({
-        id: n.id || "",
-        ncrNumber: n.ncrNumber || "",
-        title: n.title || "",
-        trade: n.trade || "",
-        severity: n.severity || "",
-        status: n.status || "",
-        location: n.location || "",
-        createdAt: n.createdAt || 0,
-      }));
-
-    const slimInspection = (arr: any[] = []) =>
-      arr.slice(0, MAX_ITEMS).map((i: any) => ({
-        id: i.id || "",
-        inspectionNumber: i.inspectionNumber || "",
-        title: i.title || i.name || "",
-        trade: i.trade || "",
-        status: i.status || "",
-        level: i.level || i.levelName || "",
-        result: i.result || "",
-        createdAt: i.createdAt || 0,
-      }));
-
-    const slimFinding = (arr: any[] = []) =>
-      arr.slice(0, MAX_ITEMS).map((f: any) => ({
-        id: f.id || "",
-        findingNumber: f.findingNumber || "",
-        title: f.title || "",
-        trade: f.trade || "",
-        severity: f.severity || "",
-        status: f.status || "",
-        createdAt: f.createdAt || 0,
-      }));
-
-    const slimMaterial = (arr: any[] = []) =>
-      arr.slice(0, MAX_ITEMS).map((m: any) => ({
-        id: m.id || "",
-        materialName: m.materialName || m.material || m.materialDescription || "",
-        materialDescription: m.materialDescription || m.materialName || "",
-        supplier: m.supplier || m.supplierName || "",
-        supplierName: m.supplierName || m.supplier || "",
-        status: m.status || m.qaqcStatus || "",
-        qaqcStatus: m.qaqcStatus || m.status || "",
-        deliveryDate: m.deliveryDate || m.date || "",
-        quantity: m.quantity || 0,
-        quantityReceived: m.quantityReceived,
-        quantityAccepted: m.quantityAccepted,
-        quantityRejected: m.quantityRejected,
-        unit: m.unit || "",
-        qaqcRemarks: m.qaqcRemarks || m.inspectionNotes || m.remarks || "",
-        remarks: m.remarks || m.qaqcRemarks || m.inspectionNotes || "",
-        rejectionReason: m.rejectionReason || "",
-        batchNumber: m.batchNumber || "",
-        deliveryNoteNumber: m.deliveryNoteNumber || m.deliveryNote || "",
-        ncrNumber: m.ncrNumber || "",
-      }));
-
-    const slimCubeTest = (arr: any[] = []) =>
-      arr.slice(0, MAX_ITEMS).map((c: any) => ({
-        id: c.id || c.sampleId || "",
-        sampleId: c.sampleId || c.id || "",
-        dateCast: c.dateCast || c.castDate || c.date || "",
-        castDate: c.dateCast || c.castDate || c.date || "",
-        inscribedName:
-          c.inscribedName ||
-          c.elementLevel ||
-          c.structureElement ||
-          c.level ||
-          "",
-        elementLevel:
-          c.elementLevel ||
-          c.inscribedName ||
-          c.structureElement ||
-          c.level ||
-          "",
-        strength7Days:
-          c.strength7Days !== undefined &&
-          c.strength7Days !== null &&
-          c.strength7Days !== ""
-            ? c.strength7Days
-            : (c.day7Results?.[0]?.averageStrength ??
-              c.compressiveStrength ??
-              ""),
-        status7Days:
-          c.status7Days ||
-          c.result7Days ||
-          c.day7Results?.[0]?.status ||
-          c.result ||
-          "",
-        strength28Days:
-          c.strength28Days !== undefined &&
-          c.strength28Days !== null &&
-          c.strength28Days !== ""
-            ? c.strength28Days
-            : (c.day28Results?.[0]?.averageStrength ?? ""),
-        status28Days:
-          c.status28Days || c.result28Days || c.day28Results?.[0]?.status || "",
-        mixId: c.mixId || c.mix || "",
-        grade: c.grade || "",
-      }));
-
-    const slimComment = (arr: any[] = []) =>
-      arr.slice(0, MAX_ITEMS).map((s: any, idx: number) => ({
-        id: s.id || `COMM-${idx + 1}`,
-        commentNumber: s.commentNumber || s.refNo || `COMM-${String(idx + 1).padStart(3, "0")}`,
-        title: s.title || s.subject || s.comments || s.text || "",
-        trade: s.trade || "",
-        status: s.status || "PENDING",
-        date: s.date || (s.createdAt ? (typeof s.createdAt === "number" ? new Date(s.createdAt).toISOString().split("T")[0] : String(s.createdAt)) : ""),
-        createdAt: s.createdAt || 0,
-        inspector: s.inspector || s.vendorCheck || "QC Inspector",
-        vendorCheck: s.vendorCheck || s.inspector || "",
-        location: s.location || "",
-        level: s.level || "",
-        element: s.element || "",
-        comments: s.comments || s.text || s.title || "",
-        text: s.text || s.comments || s.title || "",
-        photos: Array.isArray(s.photos) ? s.photos.slice(0, 10) : [],
-        images: Array.isArray(s.images) ? s.images.slice(0, 10) : [],
-      }));
-
-    const slimInstruction = (arr: any[] = []) =>
-      arr.slice(0, MAX_ITEMS).map((si: any, idx: number) => ({
-        id: si.id || `SI-${idx + 1}`,
-        instructionNumber: si.instructionNumber || si.refNo || `SI-${String(idx + 1).padStart(3, "0")}`,
-        subject: si.subject || si.title || "Directive",
-        title: si.title || si.subject || "Directive",
-        instructionText: si.instructionText || si.issueSummary || "",
-        issueSummary: si.issueSummary || si.instructionText || "",
-        status: si.status || "ISSUED",
-        contractorName: si.contractorName || si.recipientName || si.recipient || "Main Contractor",
-        recipientName: si.recipientName || si.contractorName || si.recipient || "Main Contractor",
-        recipientRole: si.recipientRole || "",
-        location: si.location || "",
-        elementName: si.elementName || "",
-        issuedDate: si.issuedDate || (si.createdAt ? (typeof si.createdAt === "number" ? new Date(si.createdAt).toISOString().split("T")[0] : String(si.createdAt)) : ""),
-        complianceDeadline: si.complianceDeadline || si.dueDate || si.targetDate || "",
-        dueDate: si.dueDate || si.complianceDeadline || "",
-        stopWorkOrdered: Boolean(si.stopWorkOrdered),
-      }));
-
-    const slimRemediation = (arr: any[] = []) =>
-      arr.slice(0, MAX_ITEMS).map((r: any, idx: number) => ({
-        id: r.id || `NCR-REM-${idx + 1}`,
-        refNo: r.refNo || r.ncrNumber || r.ncrNo || `NCR-${String(idx + 1).padStart(3, "0")}`,
-        ncrNumber: r.ncrNumber || r.refNo || r.ncrNo || `NCR-${String(idx + 1).padStart(3, "0")}`,
-        description: r.description || r.issueSummary || r.title || "",
-        status: r.status || "OPEN",
-        trade: r.trade || r.assignedTo || "",
-        assignedTo: r.assignedTo || r.trade || "",
-        location: r.location || r.elementLevel || "",
-        elementLevel: r.elementLevel || r.location || "",
-        dateIdentified: r.dateIdentified || r.dateFound || r.dateRaised || "",
-        dateFound: r.dateFound || r.dateIdentified || r.dateRaised || "",
-        targetFixDate: r.targetFixDate || r.dueDate || r.signDate || "",
-        signDate: r.signDate || r.targetFixDate || "",
-      }));
-
-    const slimQuantity = (arr: any[] = []) =>
-      arr.slice(0, MAX_ITEMS).map((q: any) => ({
-        element: q.element || q.elementName || q.name || "",
-        scope:
-          q.scope ||
-          (q.calculatedVolume !== undefined
-            ? `${q.calculatedVolume} CUM`
-            : `${q.volume || 0} CUM`),
-        completion:
-          typeof q.completion === "string"
-            ? q.completion
-            : `${q.completion || 0}%`,
-        calculatedVolume: Number(q.calculatedVolume ?? q.volume ?? 0),
-        achievedVolume: Number(q.achievedVolume ?? q.total ?? 0),
-        total: Number(q.achievedVolume ?? q.total ?? 0),
-        percentageTotal: Number(q.percentageTotal ?? 0),
-      }));
-
-    const slimStructuralElement = (arr: any[] = []) =>
-      arr.slice(0, 500).map((el: any) => ({
-        id: el.id || "",
-        elementName: el.elementName || el.name || el.element || "Structural Element",
-        elementType: el.elementType || el.type || "Component",
-        status: el.status || "PENDING",
-        volume: Number(el.calculatedVolume || el.volume || 0),
-        calculatedVolume: Number(el.calculatedVolume || el.volume || 0),
-        achievedVolume: Number(el.achievedVolume ?? el.arcvievedVolume ?? el.achieved ?? el.completedVolume ?? 0),
-        completionPercentage: Number(el.completionPercentage || el.completion || 0),
-        grid: el.grid || el.gridLocation || "",
-        gridLocation: el.gridLocation || el.grid || "",
-        levelName: el.levelName || el.level || "",
-        level: el.level || el.levelName || "",
-      }));
-
-    let payload: any = {
+    const payload: any = {
       ...cleaned,
+      coverImageUrl: sanitizeSafeUrl((cleaned as any).coverImageUrl),
+      logoUrl: sanitizeSafeUrl((cleaned as any).logoUrl),
+      projectImage: sanitizeSafeUrl((cleaned as any).projectImage),
+      beamLayoutImg: sanitizeSafeUrl((cleaned as any).beamLayoutImg),
+      columnLayoutImg: sanitizeSafeUrl((cleaned as any).columnLayoutImg),
+      slabImg: sanitizeSafeUrl((cleaned as any).slabImg),
       coverImageBase64: "",
       logoBase64: "",
-      beamLayoutImg: cleaned.beamLayoutImg?.startsWith?.("data:")
-        ? ""
-        : cleaned.beamLayoutImg || "",
-      columnLayoutImg: cleaned.columnLayoutImg?.startsWith?.("data:")
-        ? ""
-        : cleaned.columnLayoutImg || "",
-      slabImg: cleaned.slabImg?.startsWith?.("data:")
-        ? ""
-        : cleaned.slabImg || "",
-      ncr: slimNcr(cleaned.ncr),
-      ncrRemediationLog: slimRemediation(cleaned.ncrRemediationLog),
-      materialDeliveries: slimMaterial(cleaned.materialDeliveries),
-      cubeTests: slimCubeTest(cleaned.cubeTests),
-      siteComments: slimComment(cleaned.siteComments),
-      siteInstructions: slimInstruction(cleaned.siteInstructions),
-      quantitySummary: slimQuantity(cleaned.quantitySummary),
-      structuralElements: slimStructuralElement(cleaned.structuralElements),
       filteredNcrs: undefined,
       filteredInspections: undefined,
       filteredFindings: undefined,
@@ -3489,96 +3295,66 @@ export const dbService = {
       filteredCubeTests: undefined,
       filteredSiteComments: undefined,
       filteredSiteInstructions: undefined,
+      filteredStructuralElements: undefined,
     };
 
-    (Object.keys(payload) as string[]).forEach((k: string) => {
-      if (payload[k] === undefined) delete payload[k];
-    });
+    const calcBytes = (obj: any): number => {
+      try {
+        return new Blob([JSON.stringify(obj)]).size;
+      } catch {
+        return JSON.stringify(obj).length;
+      }
+    };
 
-    try {
-      const cacheKey = `jqms_weekly_reports_${report.projectId}`;
-      const list = getCache<WeeklyReport[]>(cacheKey, []);
-      const idx = list.findIndex((w) => w.id === report.id);
-      if (idx >= 0) list[idx] = cleaned;
-      else list.unshift(cleaned);
-      setCache(cacheKey, sortByNewestFirst(list));
-
-      const allList = getCache<WeeklyReport[]>("jqms_weekly_reports_all", []);
-      const allIdx = allList.findIndex((w) => w.id === report.id);
-      if (allIdx >= 0) allList[allIdx] = cleaned;
-      else allList.unshift(cleaned);
-      setCache("jqms_weekly_reports_all", sortByNewestFirst(allList));
-    } catch (cacheErr) {
-      console.warn("LocalStorage caching warning:", cacheErr);
-    }
-
-    try {
-      await setDoc(doc(firestore, "weeklyReports", report.id), payload, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error(
-        "Firestore saveWeeklyReport warning (saved to in-memory & local caches):",
-        e,
+    const payloadSize = calcBytes(payload);
+    if (payloadSize > 950_000) {
+      throw new Error(
+        `Weekly report payload is ${Math.round(payloadSize / 1024)} KB, exceeding Firestore's 1 MB document limit. Please reduce the number of embedded photos or shorten the date range.`,
       );
     }
+
+    const cacheKey = scopedCacheKey(
+      "weekly_reports",
+      report.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("weeklyReports", "WEEKLY_REPORT", payload, cacheKey);
   },
 
   // --- Inspection & Test Plans (ITP Matrix) ---
   async getITPPlans(projectId: string, companyId?: string): Promise<ITPPlan[]> {
-    const cacheKey = `jqms_itp_plans_${projectId}`;
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("itp_plans", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
+      const q = query(
+        collection(firestore, "itpPlans"),
         where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q = query(collection(firestore, "itpPlans"), ...constraints);
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const rawList = snap.docs.map(
-          (d) => ({ ...d.data(), id: d.id }) as ITPPlan,
-        );
-        const sorted = sortByNewestFirst(rawList);
-        setCache(cacheKey, sorted);
-        return sorted;
-      }
-
-      const cached = getCache<ITPPlan[]>(cacheKey, []);
-      if (cached && cached.length > 0) {
-        return sortByNewestFirst(cached);
-      }
-
-      const initial = generateDefaultITPPlans(projectId, companyId || "");
-      setCache(cacheKey, initial);
-      for (const p of initial) {
-        try {
-          await setDoc(doc(firestore, "itpPlans", p.id), cleanForFirestore(p), {
-            merge: true,
-          });
-        } catch (_) {}
-      }
-      return initial;
-    } catch (e) {
-      console.warn(
-        "Firestore getITPPlans warning, falling back to local cache:",
-        e,
+        where("companyId", "==", effectiveCompId),
       );
-      const cached = getCache<ITPPlan[]>(cacheKey, []);
-      if (cached && cached.length > 0) {
-        return sortByNewestFirst(cached);
-      }
-      const initial = generateDefaultITPPlans(projectId, companyId || "");
-      setCache(cacheKey, initial);
-      return initial;
+      const snap = await getDocs(q);
+      const rawList = snap.docs.map(
+        (d) => ({ ...d.data(), id: d.id }) as ITPPlan,
+      );
+      const sorted = sortByNewestFirst(rawList);
+      setCache(cacheKey, sorted);
+      return sorted;
+    } catch (e) {
+      console.warn("Firestore getITPPlans warning, reading local cache:", e);
+      return getCache<ITPPlan[]>(cacheKey, []);
     }
   },
 
-  async getITPPlanById(id: string): Promise<ITPPlan | null> {
+  async getITPPlanById(
+    id: string,
+    companyId?: string,
+  ): Promise<ITPPlan | null> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     try {
       const snap = await getDoc(doc(firestore, "itpPlans", id));
       if (snap.exists()) {
-        return { ...snap.data(), id: snap.id } as ITPPlan;
+        const item = { ...snap.data(), id: snap.id } as ITPPlan;
+        if (!effectiveCompId || item.companyId === effectiveCompId) return item;
       }
     } catch (e) {
       console.warn("Firestore getITPPlanById warning:", e);
@@ -3587,37 +3363,32 @@ export const dbService = {
   },
 
   async saveITPPlan(plan: ITPPlan): Promise<void> {
-    const cleaned = cleanForFirestore(plan);
-    const cacheKey = `jqms_itp_plans_${plan.projectId}`;
-    const list = getCache<ITPPlan[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === plan.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, sortByNewestFirst(list));
-
-    try {
-      await setDoc(doc(firestore, "itpPlans", plan.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.error("Firestore saveITPPlan error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(plan.companyId);
+    const cleaned = cleanForFirestore({ ...plan, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "itp_plans",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("itpPlans", "ITP_PLAN", cleaned, cacheKey);
   },
 
-  async deleteITPPlan(id: string, projectId: string): Promise<void> {
+  async deleteITPPlan(
+    id: string,
+    projectId: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_itp_plans_", id);
-    const cacheKey = `jqms_itp_plans_${projectId}`;
-    const list = getCache<ITPPlan[]>(cacheKey, []);
-    setCache(
-      cacheKey,
-      list.filter((p) => p.id !== id),
-    );
-
-    try {
-      await deleteDoc(doc(firestore, "itpPlans", id));
-    } catch (e) {
-      console.error("Firestore deleteITPPlan error:", e);
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("itp_plans", projectId, effectiveCompId);
+      const list = getCache<ITPPlan[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((p) => p.id !== id),
+      );
     }
+    await deleteDoc(doc(firestore, "itpPlans", id));
   },
 
   // ─── TEAM CHAT & GROUP MESSAGING SYSTEM ───
@@ -3626,38 +3397,66 @@ export const dbService = {
     projectId?: string,
     userId?: string,
   ): Promise<ChatChannel[]> {
-    const cacheKey = `jqms_chat_channels_${companyId || "all"}_${projectId || "all"}`;
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
+    const currentUid = userId || auth.currentUser?.uid || "";
+    const cacheKey = `jqms_chat_channels_${effectiveCompId}`;
+
     try {
-      const constraints: QueryConstraint[] = [];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q =
-        constraints.length > 0
-          ? query(collection(firestore, "chatChannels"), ...constraints)
-          : collection(firestore, "chatChannels");
-
-      const snap = await getDocs(q);
-      const list = snap.docs.map(
-        (d) => ({ ...d.data(), id: d.id }) as ChatChannel,
+      // Dual query pattern strictly conforming to Firestore security rules
+      const publicQ = query(
+        collection(firestore, "chatChannels"),
+        where("companyId", "==", effectiveCompId),
+        where("isPrivate", "==", false),
       );
 
-      if (list.length > 0) {
-        setCache(cacheKey, list);
-        return sortByNewestFirst(list);
+      const queries = [getDocs(publicQ)];
+      if (currentUid) {
+        const memberQ = query(
+          collection(firestore, "chatChannels"),
+          where("companyId", "==", effectiveCompId),
+          where("memberIds", "array-contains", currentUid),
+        );
+        queries.push(getDocs(memberQ));
       }
-    } catch (e) {
-      console.warn("Firestore getChatChannels warning, falling back to cache:", e);
-    }
 
-    const cached = getCache<ChatChannel[]>(cacheKey, []);
-    return sortByNewestFirst(cached);
+      const results = await Promise.all(queries);
+      const channelMap = new Map<string, ChatChannel>();
+
+      for (const snap of results) {
+        for (const d of snap.docs) {
+          channelMap.set(d.id, { ...d.data(), id: d.id } as ChatChannel);
+        }
+      }
+
+      const allChannels = Array.from(channelMap.values());
+      const filtered = projectId
+        ? allChannels.filter((c) => !c.projectId || c.projectId === projectId)
+        : allChannels;
+
+      const sorted = sortByNewestFirst(filtered);
+      setCache(cacheKey, sorted);
+      return sorted;
+    } catch (e) {
+      console.warn(
+        "Firestore getChatChannels warning, falling back to cache:",
+        e,
+      );
+      return getCache<ChatChannel[]>(cacheKey, []);
+    }
   },
 
-  async getChatChannelById(id: string): Promise<ChatChannel | null> {
+  async getChatChannelById(
+    id: string,
+    companyId?: string,
+  ): Promise<ChatChannel | null> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     try {
       const snap = await getDoc(doc(firestore, "chatChannels", id));
       if (snap.exists()) {
-        return { ...snap.data(), id: snap.id } as ChatChannel;
+        const channel = { ...snap.data(), id: snap.id } as ChatChannel;
+        if (!effectiveCompId || channel.companyId === effectiveCompId)
+          return channel;
       }
     } catch (e) {
       console.warn("Firestore getChatChannelById error:", e);
@@ -3666,8 +3465,34 @@ export const dbService = {
   },
 
   async saveChatChannel(channel: ChatChannel): Promise<void> {
-    const cleaned = cleanForFirestore(channel);
-    const cacheKey = `jqms_chat_channels_${channel.companyId || "all"}_${channel.projectId || "all"}`;
+    const effectiveCompId = resolveEffectiveCompanyId(channel.companyId);
+    if (!effectiveCompId)
+      throw new Error("Chat channel must belong to an active company.");
+
+    const isPriv = Boolean(
+      channel.isPrivate ||
+      channel.type === "DIRECT" ||
+      (channel.type as string) === "PRIVATE",
+    );
+
+    // Strip any oversized data: URLs from members array
+    const safeMembers = (channel.members || []).map((m) => ({
+      ...m,
+      avatarUrl:
+        m.avatarUrl && m.avatarUrl.startsWith("data:")
+          ? undefined
+          : m.avatarUrl,
+    }));
+
+    const cleaned = cleanForFirestore({
+      ...channel,
+      companyId: effectiveCompId,
+      isPrivate: isPriv,
+      members: safeMembers,
+      updatedAt: Date.now(),
+    });
+
+    const cacheKey = `jqms_chat_channels_${effectiveCompId}`;
     const list = getCache<ChatChannel[]>(cacheKey, []);
     const idx = list.findIndex((c) => c.id === channel.id);
     if (idx >= 0) list[idx] = cleaned;
@@ -3678,52 +3503,109 @@ export const dbService = {
       await setDoc(doc(firestore, "chatChannels", channel.id), cleaned, {
         merge: true,
       });
-      window.dispatchEvent(new CustomEvent("jqms-chat-channels-updated", { detail: channel }));
+      window.dispatchEvent(
+        new CustomEvent("jqms-chat-channels-updated", { detail: cleaned }),
+      );
     } catch (e) {
       console.warn("Firestore saveChatChannel error:", e);
+      throw e;
     }
   },
 
-  async deleteChatChannel(channelId: string, companyId?: string): Promise<void> {
+  async deleteChatChannel(
+    channelId: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     removeFromAllVaultCaches("jqms_chat_channels_", channelId);
     removeFromAllVaultCaches("jqms_chat_messages_", channelId);
 
+    // Batch-delete child messages in chunks of 450
     try {
+      const msgsSnap = await getDocs(
+        collection(firestore, "chatChannels", channelId, "messages"),
+      );
+      await commitInChunks(msgsSnap.docs, (batch, d) => {
+        batch.delete(d.ref);
+      });
       await deleteDoc(doc(firestore, "chatChannels", channelId));
       window.dispatchEvent(new CustomEvent("jqms-chat-channels-updated"));
     } catch (e) {
       console.error("Firestore deleteChatChannel error:", e);
+      throw e;
     }
   },
 
-  async getChatMessages(channelId: string): Promise<ChatMessage[]> {
+  async getChatMessages(
+    channelId: string,
+    maxMessages = 100,
+  ): Promise<ChatMessage[]> {
     const cacheKey = `jqms_chat_messages_${channelId}`;
     try {
       const q = query(
         collection(firestore, "chatChannels", channelId, "messages"),
+        orderBy("timestamp", "desc"),
+        limit(maxMessages),
       );
       const snap = await getDocs(q);
       const list = snap.docs.map(
         (d) => ({ ...d.data(), id: d.id }) as ChatMessage,
       );
-
       list.sort((a, b) => a.timestamp - b.timestamp);
-
-      if (list.length > 0) {
-        setCache(cacheKey, list);
-        return list;
-      }
+      setCache(cacheKey, list);
+      return list;
     } catch (e) {
-      console.warn("Firestore getChatMessages warning, reading local cache:", e);
+      console.warn(
+        "Firestore getChatMessages warning, reading local cache:",
+        e,
+      );
+      const cached = getCache<ChatMessage[]>(cacheKey, []);
+      cached.sort((a, b) => a.timestamp - b.timestamp);
+      return cached;
     }
+  },
 
-    const cached = getCache<ChatMessage[]>(cacheKey, []);
-    cached.sort((a, b) => a.timestamp - b.timestamp);
-    return cached;
+  async loadOlderChatMessages(
+    channelId: string,
+    beforeTimestamp: number,
+    pageSize = 50,
+  ): Promise<ChatMessage[]> {
+    try {
+      const q = query(
+        collection(firestore, "chatChannels", channelId, "messages"),
+        where("timestamp", "<", beforeTimestamp),
+        orderBy("timestamp", "desc"),
+        limit(pageSize),
+      );
+      const snap = await getDocs(q);
+      const older = snap.docs.map(
+        (d) => ({ ...d.data(), id: d.id }) as ChatMessage,
+      );
+      older.sort((a, b) => a.timestamp - b.timestamp);
+
+      const cacheKey = `jqms_chat_messages_${channelId}`;
+      const existing = getCache<ChatMessage[]>(cacheKey, []);
+      const mergedMap = new Map<string, ChatMessage>();
+      older.forEach((m) => mergedMap.set(m.id, m));
+      existing.forEach((m) => mergedMap.set(m.id, m));
+      const mergedList = Array.from(mergedMap.values()).sort(
+        (a, b) => a.timestamp - b.timestamp,
+      );
+      setCache(cacheKey, mergedList);
+      return older;
+    } catch (e) {
+      console.warn("Firestore loadOlderChatMessages warning:", e);
+      return [];
+    }
   },
 
   async saveChatMessage(message: ChatMessage): Promise<void> {
-    const cleaned = cleanForFirestore(message);
+    const effectiveCompId = resolveEffectiveCompanyId(message.companyId);
+    const cleaned = cleanForFirestore({
+      ...message,
+      companyId: effectiveCompId || message.companyId || "",
+    });
+
     const cacheKey = `jqms_chat_messages_${message.channelId}`;
     const list = getCache<ChatMessage[]>(cacheKey, []);
     const idx = list.findIndex((m) => m.id === message.id);
@@ -3732,17 +3614,22 @@ export const dbService = {
     list.sort((a, b) => a.timestamp - b.timestamp);
     setCache(cacheKey, list);
 
-    // Also update channel lastMessage
-    try {
-      const channelRef = doc(firestore, "chatChannels", message.channelId);
-      const lastMsgData = {
-        text: message.content || (message.attachments && message.attachments.length > 0 ? "📎 Attachment" : ""),
-        senderId: message.senderId,
-        senderName: message.senderName,
-        timestamp: message.timestamp,
-        hasAttachment: Boolean(message.attachments && message.attachments.length > 0),
-      };
+    const channelRef = doc(firestore, "chatChannels", message.channelId);
+    const lastMsgData = {
+      text:
+        message.content ||
+        (message.attachments && message.attachments.length > 0
+          ? "📎 Attachment"
+          : ""),
+      senderId: message.senderId,
+      senderName: message.senderName,
+      timestamp: message.timestamp,
+      hasAttachment: Boolean(
+        message.attachments && message.attachments.length > 0,
+      ),
+    };
 
+    try {
       await Promise.all([
         setDoc(
           doc(
@@ -3772,6 +3659,7 @@ export const dbService = {
       );
     } catch (e) {
       console.warn("Firestore saveChatMessage error:", e);
+      throw e;
     }
   },
 
@@ -3794,6 +3682,7 @@ export const dbService = {
       );
     } catch (e) {
       console.error("Firestore deleteChatMessage error:", e);
+      throw e;
     }
   },
 
@@ -3803,33 +3692,38 @@ export const dbService = {
     emoji: string,
     userId: string,
   ): Promise<void> {
-    const cacheKey = `jqms_chat_messages_${channelId}`;
-    const list = getCache<ChatMessage[]>(cacheKey, []);
-    const targetMsg = list.find((m) => m.id === messageId);
-    if (!targetMsg) return;
-
-    const reactions = { ...(targetMsg.reactions || {}) };
-    const currentUsers = reactions[emoji] || [];
-
-    if (currentUsers.includes(userId)) {
-      reactions[emoji] = currentUsers.filter((u) => u !== userId);
-      if (reactions[emoji].length === 0) delete reactions[emoji];
-    } else {
-      reactions[emoji] = [...currentUsers, userId];
-    }
-
-    targetMsg.reactions = reactions;
-    setCache(cacheKey, list);
-
+    const msgRef = doc(
+      firestore,
+      "chatChannels",
+      channelId,
+      "messages",
+      messageId,
+    );
     try {
-      await setDoc(
-        doc(firestore, "chatChannels", channelId, "messages", messageId),
-        { reactions },
-        { merge: true },
-      );
+      await runTransaction(firestore, async (transaction) => {
+        const snap = await transaction.get(msgRef);
+        if (!snap.exists()) return;
+        const msg = snap.data() as ChatMessage;
+        const reactions = { ...(msg.reactions || {}) };
+        const currentUsers = reactions[emoji] || [];
+
+        if (currentUsers.includes(userId)) {
+          reactions[emoji] = currentUsers.filter((u) => u !== userId);
+          if (reactions[emoji].length === 0) delete reactions[emoji];
+        } else {
+          reactions[emoji] = [...currentUsers, userId];
+        }
+
+        transaction.set(
+          msgRef,
+          { reactions, updatedAt: Date.now() },
+          { merge: true },
+        );
+      });
+
       window.dispatchEvent(
         new CustomEvent("jqms-chat-reaction-updated", {
-          detail: { channelId, messageId, reactions },
+          detail: { channelId, messageId },
         }),
       );
     } catch (e) {
@@ -3837,61 +3731,73 @@ export const dbService = {
     }
   },
 
-  async toggleMessagePin(
-    channelId: string,
-    messageId: string,
-  ): Promise<void> {
-    const cacheKey = `jqms_chat_messages_${channelId}`;
-    const list = getCache<ChatMessage[]>(cacheKey, []);
-    const targetMsg = list.find((m) => m.id === messageId);
-    if (!targetMsg) return;
-
-    targetMsg.pinned = !targetMsg.pinned;
-    setCache(cacheKey, list);
-
+  async toggleMessagePin(channelId: string, messageId: string): Promise<void> {
+    const msgRef = doc(
+      firestore,
+      "chatChannels",
+      channelId,
+      "messages",
+      messageId,
+    );
     try {
-      await setDoc(
-        doc(firestore, "chatChannels", channelId, "messages", messageId),
-        { pinned: targetMsg.pinned },
-        { merge: true },
-      );
+      await runTransaction(firestore, async (transaction) => {
+        const snap = await transaction.get(msgRef);
+        if (!snap.exists()) return;
+        const isPinned = Boolean(snap.data()?.pinned);
+        transaction.set(
+          msgRef,
+          { pinned: !isPinned, updatedAt: Date.now() },
+          { merge: true },
+        );
+      });
     } catch (e) {
       console.warn("Firestore toggleMessagePin error:", e);
     }
   },
 
-  async markMessagesAsRead(
-    channelId: string,
-    userId: string,
-  ): Promise<void> {
+  async markMessagesAsRead(channelId: string, userId: string): Promise<void> {
     if (!channelId || !userId) return;
     const cacheKey = `jqms_chat_messages_${channelId}`;
     const list = getCache<ChatMessage[]>(cacheKey, []);
-    let modified = false;
+    const unreadIds: string[] = [];
 
     list.forEach((msg) => {
-      if (msg.senderId !== userId && (!msg.readBy || !msg.readBy.includes(userId))) {
+      if (
+        msg.senderId !== userId &&
+        (!msg.readBy || !msg.readBy.includes(userId))
+      ) {
         msg.readBy = [...(msg.readBy || []), userId];
         msg.status = "read";
-        modified = true;
+        unreadIds.push(msg.id);
       }
     });
 
-    if (modified) {
+    if (unreadIds.length > 0) {
       setCache(cacheKey, list);
       window.dispatchEvent(
         new CustomEvent("jqms-chat-messages-read", {
           detail: { channelId, userId },
         }),
       );
+
+      // Persist arrayUnion asynchronously in batch chunks
+      commitInChunks(unreadIds, (batch, mid) => {
+        batch.set(
+          doc(firestore, "chatChannels", channelId, "messages", mid),
+          { readBy: arrayUnion(userId), status: "read", updatedAt: Date.now() },
+          { merge: true },
+        );
+      }).catch(() => {});
     }
   },
 
   getCachedChannels(companyId?: string, projectId?: string): ChatChannel[] {
-    const cacheKey = `jqms_chat_channels_${companyId || "all"}_${projectId || "all"}`;
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    const cacheKey = `jqms_chat_channels_${effectiveCompId || "default"}`;
     const cached = getCache<ChatChannel[]>(cacheKey, []);
-    if (cached.length > 0) return cached;
-    return getCache<ChatChannel[]>("jqms_chat_channels_all_all", []);
+    return projectId
+      ? cached.filter((c) => !c.projectId || c.projectId === projectId)
+      : cached;
   },
 
   getChannelUnreadCount(
@@ -3905,13 +3811,12 @@ export const dbService = {
     const list = getCache<ChatMessage[]>(cacheKey, []);
 
     if (list.length > 0) {
-      const count = list.filter((m) => {
+      return list.filter((m) => {
         if (m.senderId === userId) return false;
         if (m.readBy && m.readBy.includes(userId)) return false;
         if (lastReadAt && m.timestamp <= lastReadAt) return false;
         return true;
       }).length;
-      return count;
     }
 
     if (channelLastMessage && channelLastMessage.senderId !== userId) {
@@ -3919,7 +3824,6 @@ export const dbService = {
         return 1;
       }
     }
-
     return 0;
   },
 
@@ -3929,10 +3833,12 @@ export const dbService = {
     channelsList?: ChatChannel[],
   ): number {
     if (!userId) return 0;
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
     const channels =
       channelsList && channelsList.length > 0
         ? channelsList
-        : this.getCachedChannels(companyId);
+        : this.getCachedChannels(effectiveCompId);
+
     let lastReadMap: Record<string, number> = {};
     try {
       const saved = localStorage.getItem("jqms_chat_last_read_map");
@@ -3962,6 +3868,7 @@ export const dbService = {
   listenToChatMessages(
     channelId: string,
     callback: (messages: ChatMessage[]) => void,
+    maxMessages = 100,
   ): () => void {
     const cacheKey = `jqms_chat_messages_${channelId}`;
     const cached = getCache<ChatMessage[]>(cacheKey, []);
@@ -3970,6 +3877,8 @@ export const dbService = {
     try {
       const q = query(
         collection(firestore, "chatChannels", channelId, "messages"),
+        orderBy("timestamp", "desc"),
+        limit(maxMessages),
       );
       const unsub = onSnapshot(
         q,
@@ -3997,57 +3906,103 @@ export const dbService = {
     projectId: string | undefined,
     callback: (channels: ChatChannel[]) => void,
   ): () => void {
-    const cacheKey = `jqms_chat_channels_${companyId || "all"}_${projectId || "all"}`;
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) {
+      callback([]);
+      return () => {};
+    }
+
+    const currentUid = auth.currentUser?.uid || "";
+    const cacheKey = `jqms_chat_channels_${effectiveCompId}`;
     const cached = getCache<ChatChannel[]>(cacheKey, []);
-    if (cached.length > 0) callback(sortByNewestFirst(cached));
+    if (cached.length > 0) {
+      const filtered = projectId
+        ? cached.filter((c) => !c.projectId || c.projectId === projectId)
+        : cached;
+      callback(sortByNewestFirst(filtered));
+    }
+
+    const publicMap = new Map<string, ChatChannel>();
+    const memberMap = new Map<string, ChatChannel>();
+
+    const emitMerged = () => {
+      const merged = new Map<string, ChatChannel>();
+      publicMap.forEach((c, id) => merged.set(id, c));
+      memberMap.forEach((c, id) => merged.set(id, c));
+      const all = Array.from(merged.values());
+      const filtered = projectId
+        ? all.filter((c) => !c.projectId || c.projectId === projectId)
+        : all;
+      const sorted = sortByNewestFirst(filtered);
+      setCache(cacheKey, sorted);
+      callback(sorted);
+    };
 
     try {
-      const constraints: QueryConstraint[] = [];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
-      const q =
-        constraints.length > 0
-          ? query(collection(firestore, "chatChannels"), ...constraints)
-          : collection(firestore, "chatChannels");
-
-      const unsub = onSnapshot(
-        q,
-        (snap) => {
-          const list = snap.docs.map(
-            (d) => ({ ...d.data(), id: d.id }) as ChatChannel,
-          );
-          const sorted = sortByNewestFirst(list);
-          setCache(cacheKey, sorted);
-          callback(sorted);
-        },
-        (err) => {
-          console.warn("listenToChatChannels snapshot error:", err);
-        },
+      const publicQ = query(
+        collection(firestore, "chatChannels"),
+        where("companyId", "==", effectiveCompId),
+        where("isPrivate", "==", false),
       );
-      return unsub;
+
+      const unsubPublic = onSnapshot(
+        publicQ,
+        (snap) => {
+          publicMap.clear();
+          snap.docs.forEach((d) =>
+            publicMap.set(d.id, { ...d.data(), id: d.id } as ChatChannel),
+          );
+          emitMerged();
+        },
+        (err) => console.warn("listenToChatChannels (public) warning:", err),
+      );
+
+      let unsubMember = () => {};
+      if (currentUid) {
+        const memberQ = query(
+          collection(firestore, "chatChannels"),
+          where("companyId", "==", effectiveCompId),
+          where("memberIds", "array-contains", currentUid),
+        );
+        unsubMember = onSnapshot(
+          memberQ,
+          (snap) => {
+            memberMap.clear();
+            snap.docs.forEach((d) =>
+              memberMap.set(d.id, { ...d.data(), id: d.id } as ChatChannel),
+            );
+            emitMerged();
+          },
+          (err) => console.warn("listenToChatChannels (member) warning:", err),
+        );
+      }
+
+      return () => {
+        unsubPublic();
+        unsubMember();
+      };
     } catch (e) {
       console.warn("listenToChatChannels setup error:", e);
       return () => {};
     }
   },
 
-  /**
-   * Generates default organization / project channels if none exist.
-   */
   async ensureDefaultChannels(
     companyId: string,
     projectId?: string,
     projectName?: string,
     currentUser?: any,
   ): Promise<ChatChannel[]> {
-    const existing = await this.getChatChannels(companyId, projectId);
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
+    const existing = await this.getChatChannels(effectiveCompId, projectId);
     if (existing.length > 0) return existing;
 
     const creatorId = currentUser?.uid || "system";
     const creatorName = currentUser?.fullName || "System Admin";
     const now = Date.now();
 
-    const userList = await this.getUsers(companyId).catch(() => []);
+    const userList = await this.getUsers(effectiveCompId).catch(() => []);
     const initialMembers: ChatMember[] = userList.map((u) => ({
       uid: u.uid,
       name: u.fullName || u.email || "Member",
@@ -4055,9 +4010,13 @@ export const dbService = {
       email: u.email,
       isAdmin:
         u.uid === creatorId ||
-        ["SUPER_ADMIN", "QUALITY_DIRECTOR", "PROJECT_MANAGER", "QUALITY_MANAGER", "QAQC_MANAGER"].includes(
-          u.role,
-        ),
+        [
+          "SUPER_ADMIN",
+          "QUALITY_DIRECTOR",
+          "PROJECT_MANAGER",
+          "QUALITY_MANAGER",
+          "QAQC_MANAGER",
+        ].includes(u.role),
       joinedAt: now,
     }));
 
@@ -4075,11 +4034,13 @@ export const dbService = {
 
     const defaultChannels: ChatChannel[] = [
       {
-        id: `chan-general-${companyId || "org"}`,
-        companyId: companyId || "comp-apex-civil",
+        id: `chan-general-${effectiveCompId}`,
+        companyId: effectiveCompId,
         name: "General Announcements",
-        description: "Company-wide general channel for quality notifications, announcements & updates.",
+        description:
+          "Company-wide general channel for quality notifications, announcements & updates.",
         type: "GROUP",
+        isPrivate: false,
         color: "bg-emerald-600",
         createdBy: creatorId,
         createdByName: creatorName,
@@ -4088,9 +4049,7 @@ export const dbService = {
         memberIds,
         members: initialMembers,
         isDefaultProjectGroup: false,
-        permissions: {
-          onlyAdminsCanEditGroupInfo: true,
-        },
+        permissions: { onlyAdminsCanEditGroupInfo: true },
         lastMessage: {
           text: "Welcome to JayQMS Connect! Collaborate with your team in real time.",
           senderId: creatorId,
@@ -4099,11 +4058,13 @@ export const dbService = {
         },
       },
       {
-        id: `chan-qaqc-team-${companyId || "org"}`,
-        companyId: companyId || "comp-apex-civil",
+        id: `chan-qaqc-team-${effectiveCompId}`,
+        companyId: effectiveCompId,
         name: "QA/QC Field Operations",
-        description: "Coordination for site inspections, test verifications, ITP checkpoints & NCR follow-ups.",
+        description:
+          "Coordination for site inspections, test verifications, ITP checkpoints & NCR follow-ups.",
         type: "QAQC_ALERTS",
+        isPrivate: false,
         color: "bg-sky-600",
         createdBy: creatorId,
         createdByName: creatorName,
@@ -4111,34 +4072,9 @@ export const dbService = {
         updatedAt: now,
         memberIds,
         members: initialMembers,
-        permissions: {
-          onlyAdminsCanEditGroupInfo: true,
-        },
+        permissions: { onlyAdminsCanEditGroupInfo: true },
         lastMessage: {
           text: "Channel created for live QA/QC snagging and field inspection tracking.",
-          senderId: creatorId,
-          senderName: creatorName,
-          timestamp: now,
-        },
-      },
-      {
-        id: `chan-concrete-materials-${companyId || "org"}`,
-        companyId: companyId || "comp-apex-civil",
-        name: "Concrete & Material Lab",
-        description: "Pour permits (PTP), cube crushing results, slump verifications & laboratory logs.",
-        type: "GROUP",
-        color: "bg-amber-600",
-        createdBy: creatorId,
-        createdByName: creatorName,
-        createdAt: now,
-        updatedAt: now,
-        memberIds,
-        members: initialMembers,
-        permissions: {
-          onlyAdminsCanEditGroupInfo: false,
-        },
-        lastMessage: {
-          text: "Live updates for concrete pour schedules and laboratory cube tests.",
           senderId: creatorId,
           senderName: creatorName,
           timestamp: now,
@@ -4149,12 +4085,13 @@ export const dbService = {
     if (projectId) {
       defaultChannels.unshift({
         id: `chan-proj-${projectId}`,
-        companyId: companyId || "comp-apex-civil",
+        companyId: effectiveCompId,
         projectId,
         projectName: projectName || "Active Project",
         name: `${projectName || "Project"} Team`,
         description: `Official default quality and field communication group for ${projectName || "this project"}.`,
         type: "PROJECT_GENERAL",
+        isPrivate: false,
         color: "bg-indigo-600",
         createdBy: creatorId,
         createdByName: creatorName,
@@ -4163,9 +4100,7 @@ export const dbService = {
         memberIds,
         members: initialMembers,
         isDefaultProjectGroup: true,
-        permissions: {
-          onlyAdminsCanEditGroupInfo: true,
-        },
+        permissions: { onlyAdminsCanEditGroupInfo: true },
         lastMessage: {
           text: `Welcome to the ${projectName || "Project"} team coordination group.`,
           senderId: creatorId,
@@ -4200,57 +4135,55 @@ export const dbService = {
     memberUid: string,
     isAdmin: boolean,
   ): Promise<void> {
-    const cacheKey = `jqms_chat_channels_`;
-    const chan = await this.getChatChannelById(channelId);
-    if (!chan) return;
-
-    const updatedMembers = (chan.members || []).map((m) =>
-      m.uid === memberUid ? { ...m, isAdmin } : m,
-    );
-
-    const updatedChannel: ChatChannel = {
-      ...chan,
-      members: updatedMembers,
-      updatedAt: Date.now(),
-    };
-
-    await this.saveChatChannel(updatedChannel);
+    const chanRef = doc(firestore, "chatChannels", channelId);
+    await runTransaction(firestore, async (transaction) => {
+      const snap = await transaction.get(chanRef);
+      if (!snap.exists()) return;
+      const chan = snap.data() as ChatChannel;
+      const updatedMembers = (chan.members || []).map((m) =>
+        m.uid === memberUid ? { ...m, isAdmin } : m,
+      );
+      transaction.set(
+        chanRef,
+        { members: updatedMembers, updatedAt: Date.now() },
+        { merge: true },
+      );
+    });
   },
 
   async removeMemberFromChannel(
     channelId: string,
     memberUid: string,
   ): Promise<void> {
-    const chan = await this.getChatChannelById(channelId);
-    if (!chan) return;
-
-    const updatedMemberIds = chan.memberIds.filter((id) => id !== memberUid);
-    const updatedMembers = (chan.members || []).filter((m) => m.uid !== memberUid);
-
-    const updatedChannel: ChatChannel = {
-      ...chan,
-      memberIds: updatedMemberIds,
-      members: updatedMembers,
-      updatedAt: Date.now(),
-    };
-
-    await this.saveChatChannel(updatedChannel);
+    const chanRef = doc(firestore, "chatChannels", channelId);
+    await runTransaction(firestore, async (transaction) => {
+      const snap = await transaction.get(chanRef);
+      if (!snap.exists()) return;
+      const chan = snap.data() as ChatChannel;
+      const updatedMemberIds = chan.memberIds.filter((id) => id !== memberUid);
+      const updatedMembers = (chan.members || []).filter(
+        (m) => m.uid !== memberUid,
+      );
+      transaction.set(
+        chanRef,
+        {
+          memberIds: updatedMemberIds,
+          members: updatedMembers,
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      );
+    });
   },
 
   async updateChannelSettings(
     channelId: string,
     updates: Partial<ChatChannel>,
   ): Promise<void> {
-    const chan = await this.getChatChannelById(channelId);
-    if (!chan) return;
-
-    const updatedChannel: ChatChannel = {
-      ...chan,
-      ...updates,
-      updatedAt: Date.now(),
-    };
-
-    await this.saveChatChannel(updatedChannel);
+    const cleaned = cleanForFirestore({ ...updates, updatedAt: Date.now() });
+    await setDoc(doc(firestore, "chatChannels", channelId), cleaned, {
+      merge: true,
+    });
   },
 
   // ─── Room-by-Room Punch List & Snag Register ───
@@ -4258,250 +4191,54 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<RoomPunchItem[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("room_punch", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
-        where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
       const q = query(
         collection(firestore, "roomPunchItems"),
-        ...constraints,
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
       const snap = await getDocs(q);
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id }) as RoomPunchItem);
-
-      if (list.length > 0) {
-        setCache(`jqms_room_punch_${projectId}`, list);
-        return list;
-      }
+      const list = snap.docs.map(
+        (d) => ({ ...d.data(), id: d.id }) as RoomPunchItem,
+      );
+      const sorted = sortByNewestFirst(list);
+      setCache(cacheKey, sorted);
+      return sorted;
     } catch (e) {
       console.warn("Firestore getRoomPunchItems warning, reading cache:", e);
+      return getCache<RoomPunchItem[]>(cacheKey, []);
     }
-
-    const cached = getCache<RoomPunchItem[]>(`jqms_room_punch_${projectId}`, []);
-    if (cached.length > 0) return cached;
-
-    // Default Initial Demo Punch Items for seamless testing
-    const demoItems: RoomPunchItem[] = [
-      {
-        id: `punch-demo-1`,
-        punchNumber: "PUNCH-BLD1-L04-402-001",
-        projectId,
-        projectName: "Apex Commercial & Residential Tower",
-        companyId: companyId || "comp-default",
-        building: "Tower 1",
-        levelName: "Level 04",
-        unitName: "Apt 402",
-        roomName: "Master Bedroom",
-        elementRef: "North Wall / Skirting",
-        trade: "Joinery & Doors",
-        tradeId: "trade-joinery",
-        severity: "MINOR",
-        stageStatus: "RECTIFIED",
-        title: "Wardrobe sliding track misaligned and skirting gap",
-        description: "Gap exceeding 3mm between skirting board and engineered timber flooring behind door swing.",
-        beforePhotos: [
-          "https://images.unsplash.com/photo-1513694203232-719a280e022f?w=600&auto=format&fit=crop&q=80",
-        ],
-        rectificationPhotos: [
-          "https://images.unsplash.com/photo-1581858726788-75bc0f6a952d?w=600&auto=format&fit=crop&q=80",
-        ],
-        rectificationRemarks: "Track realigned and perimeter acrylic gap-filler applied and color-matched.",
-        rectificationDate: new Date(Date.now() - 86400000).toISOString(),
-        contractorName: "Prime Finishes & Joinery Ltd",
-        assignedToName: "K. O'Connor (Joinery Foreman)",
-        dueDate: new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0],
-        raisedBy: {
-          uid: "user-qaqc",
-          name: "Engr. David Okon",
-          role: "QAQC_ENGINEER",
-          date: new Date(Date.now() - 86400000 * 4).toISOString(),
-        },
-        rectifiedBy: {
-          name: "K. O'Connor",
-          date: new Date(Date.now() - 86400000).toISOString(),
-          notes: "Rectification complete and vacuumed.",
-        },
-        createdAt: Date.now() - 86400000 * 4,
-        updatedAt: Date.now() - 86400000,
-      },
-      {
-        id: `punch-demo-2`,
-        punchNumber: "PUNCH-BLD1-L04-402-002",
-        projectId,
-        projectName: "Apex Commercial & Residential Tower",
-        companyId: companyId || "comp-default",
-        building: "Tower 1",
-        levelName: "Level 04",
-        unitName: "Apt 402",
-        roomName: "Ensuite Bathroom",
-        elementRef: "Vanity Basin & Plumbing Trap",
-        trade: "Sanitary & Plumbing",
-        tradeId: "trade-plumbing",
-        severity: "MAJOR",
-        stageStatus: "QAQC_VERIFIED",
-        title: "Slow drainage & chrome bottle trap weeping under vanity",
-        description: "Minor seepage detected at bottle trap compression joint during 10-minute continuous flow test.",
-        beforePhotos: [
-          "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=600&auto=format&fit=crop&q=80",
-        ],
-        rectificationPhotos: [
-          "https://images.unsplash.com/photo-1620626011761-996317b8d101?w=600&auto=format&fit=crop&q=80",
-        ],
-        rectificationRemarks: "Rubber seal gasket replaced and retightened. Re-tested with 15-min hydro flow.",
-        rectificationDate: new Date(Date.now() - 43200000).toISOString(),
-        contractorName: "AquaFlow MEP Engineering",
-        assignedToName: "M. Adeleke",
-        dueDate: new Date(Date.now() + 86400000).toISOString().split("T")[0],
-        raisedBy: {
-          uid: "user-qaqc",
-          name: "Engr. David Okon",
-          role: "QAQC_ENGINEER",
-          date: new Date(Date.now() - 86400000 * 3).toISOString(),
-        },
-        rectifiedBy: {
-          name: "M. Adeleke",
-          date: new Date(Date.now() - 43200000).toISOString(),
-        },
-        verifiedBy: {
-          uid: "user-qaqc",
-          name: "Engr. David Okon",
-          role: "QAQC_ENGINEER",
-          date: new Date(Date.now() - 21600000).toISOString(),
-          notes: "Hydro test re-witnessed on site. Dry joint confirmed.",
-        },
-        createdAt: Date.now() - 86400000 * 3,
-        updatedAt: Date.now() - 21600000,
-      },
-      {
-        id: `punch-demo-3`,
-        punchNumber: "PUNCH-BLD1-L04-402-003",
-        projectId,
-        projectName: "Apex Commercial & Residential Tower",
-        companyId: companyId || "comp-default",
-        building: "Tower 1",
-        levelName: "Level 04",
-        unitName: "Apt 402",
-        roomName: "Kitchen & Dining",
-        elementRef: "Quartz Countertop Splashback",
-        trade: "Tiling & Flooring",
-        tradeId: "trade-tiling",
-        severity: "COSMETIC",
-        stageStatus: "ISSUED",
-        title: "Silicone seal bead irregular along kitchen countertop edge",
-        description: "Antimicrobial silicone bead uneven and smudged across 400mm section behind induction hob.",
-        beforePhotos: [
-          "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=600&auto=format&fit=crop&q=80",
-        ],
-        rectificationPhotos: [],
-        contractorName: "Apex Stone & Surface Specialists",
-        assignedToName: "S. Ibrahim",
-        dueDate: new Date(Date.now() + 86400000 * 3).toISOString().split("T")[0],
-        raisedBy: {
-          uid: "user-insp",
-          name: "Sarah Jenkins",
-          role: "QAQC_INSPECTOR",
-          date: new Date().toISOString(),
-        },
-        createdAt: Date.now() - 86400000,
-        updatedAt: Date.now() - 86400000,
-      },
-      {
-        id: `punch-demo-4`,
-        punchNumber: "PUNCH-BLD1-L04-401-001",
-        projectId,
-        projectName: "Apex Commercial & Residential Tower",
-        companyId: companyId || "comp-default",
-        building: "Tower 1",
-        levelName: "Level 04",
-        unitName: "Apt 401",
-        roomName: "Living Room & Balcony",
-        elementRef: "Sliding Glass Door Threshold",
-        trade: "Glazing & Windows",
-        severity: "MINOR",
-        stageStatus: "HANDED_OVER",
-        title: "Weatherstrip brush seal missing on left sliding panel",
-        description: "Draft seal strip installed and tested for acoustic and wind tightness.",
-        beforePhotos: [
-          "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&auto=format&fit=crop&q=80",
-        ],
-        rectificationPhotos: [
-          "https://images.unsplash.com/photo-1600566753376-12c8ab7fb75b?w=600&auto=format&fit=crop&q=80",
-        ],
-        rectificationRemarks: "EPDM weatherstrip installed.",
-        rectificationDate: new Date(Date.now() - 86400000 * 6).toISOString(),
-        contractorName: "Skyline Façades & Glazing",
-        assignedToName: "P. Weber",
-        dueDate: new Date(Date.now() - 86400000 * 5).toISOString().split("T")[0],
-        raisedBy: {
-          uid: "user-qaqc",
-          name: "Engr. David Okon",
-          role: "QAQC_ENGINEER",
-          date: new Date(Date.now() - 86400000 * 10).toISOString(),
-        },
-        rectifiedBy: {
-          name: "P. Weber",
-          date: new Date(Date.now() - 86400000 * 6).toISOString(),
-        },
-        verifiedBy: {
-          uid: "user-qaqc",
-          name: "Engr. David Okon",
-          role: "QAQC_ENGINEER",
-          date: new Date(Date.now() - 86400000 * 5).toISOString(),
-        },
-        consultantApprovedBy: {
-          uid: "user-consultant",
-          name: "Arch. Marcus Sterling",
-          firm: "Sterling & Partners Consulting",
-          date: new Date(Date.now() - 86400000 * 4).toISOString(),
-        },
-        handedOverBy: {
-          uid: "user-pm",
-          name: "Engr. B. Adeyemi",
-          role: "PROJECT_MANAGER",
-          date: new Date(Date.now() - 86400000 * 2).toISOString(),
-        },
-        createdAt: Date.now() - 86400000 * 10,
-        updatedAt: Date.now() - 86400000 * 2,
-        closedAt: Date.now() - 86400000 * 2,
-      },
-    ];
-
-    setCache(`jqms_room_punch_${projectId}`, demoItems);
-    return demoItems;
   },
 
   async saveRoomPunchItem(item: RoomPunchItem): Promise<void> {
-    const cleaned = cleanForFirestore(item);
-    const cacheKey = `jqms_room_punch_${cleaned.projectId}`;
-    const list = getCache<RoomPunchItem[]>(cacheKey, []);
-    const idx = list.findIndex((p) => p.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, list);
-
-    try {
-      await setDoc(doc(firestore, "roomPunchItems", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.warn("Firestore saveRoomPunchItem error:", e);
-    }
+    const effectiveCompId = resolveEffectiveCompanyId(item.companyId);
+    const cleaned = cleanForFirestore({ ...item, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "room_punch",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord("roomPunchItems", "PUNCH_ITEM", cleaned, cacheKey);
   },
 
-  async deleteRoomPunchItem(id: string, projectId: string): Promise<void> {
-    const cacheKey = `jqms_room_punch_${projectId}`;
-    const list = getCache<RoomPunchItem[]>(cacheKey, []).filter(
-      (p) => p.id !== id,
-    );
-    setCache(cacheKey, list);
-
-    try {
-      await deleteDoc(doc(firestore, "roomPunchItems", id));
-    } catch (e) {
-      console.warn("Firestore deleteRoomPunchItem error:", e);
+  async deleteRoomPunchItem(
+    id: string,
+    projectId: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("room_punch", projectId, effectiveCompId);
+      const list = getCache<RoomPunchItem[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((p) => p.id !== id),
+      );
     }
+    await deleteDoc(doc(firestore, "roomPunchItems", id));
   },
 
   // ─── Taking Over Certificates (TOC) & Handover Dossiers ───
@@ -4509,106 +4246,57 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<TakingOverCertificate[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("tocs", projectId, effectiveCompId);
     try {
-      const constraints: QueryConstraint[] = [
-        where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
       const q = query(
         collection(firestore, "takingOverCertificates"),
-        ...constraints,
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
       const snap = await getDocs(q);
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id }) as TakingOverCertificate);
-
-      if (list.length > 0) {
-        setCache(`jqms_tocs_${projectId}`, list);
-        return list;
-      }
+      const list = snap.docs.map(
+        (d) => ({ ...d.data(), id: d.id }) as TakingOverCertificate,
+      );
+      const sorted = sortByNewestFirst(list);
+      setCache(cacheKey, sorted);
+      return sorted;
     } catch (e) {
-      console.warn("Firestore getTakingOverCertificates warning, reading cache:", e);
+      console.warn(
+        "Firestore getTakingOverCertificates warning, reading cache:",
+        e,
+      );
+      return getCache<TakingOverCertificate[]>(cacheKey, []);
     }
-
-    const cached = getCache<TakingOverCertificate[]>(`jqms_tocs_${projectId}`, []);
-    if (cached.length > 0) return cached;
-
-    const demoCert: TakingOverCertificate = {
-      id: `toc-demo-401`,
-      tocNumber: "TOC-2026-APT-401",
-      projectId,
-      projectName: "Apex Commercial & Residential Tower",
-      companyId: companyId || "comp-default",
-      building: "Tower 1",
-      levelName: "Level 04",
-      unitName: "Apt 401",
-      roomNames: ["Living Room", "Master Bedroom", "Kitchen", "Guest Bathroom", "Balcony"],
-      scopeOfHandover: "Practical Completion & Quality Clearance of Apartment 401 (3-Bedroom Luxury Suite)",
-      status: "FULLY_HANDED_OVER",
-      inspectionDate: new Date(Date.now() - 86400000 * 5).toISOString().split("T")[0],
-      handoverDate: new Date(Date.now() - 86400000 * 2).toISOString().split("T")[0],
-      warrantyStartDate: new Date(Date.now() - 86400000 * 2).toISOString().split("T")[0],
-      defectsLiabilityPeriodMonths: 12,
-      totalSnagsCount: 14,
-      openSnagsCount: 0,
-      rectifiedSnagsCount: 14,
-      verifiedSnagsCount: 14,
-      readinessPercentage: 100,
-      signOffs: {
-        contractorRep: {
-          name: "Engr. T. Balogun",
-          designation: "Project Director",
-          company: "Main Contractor Consortium",
-          signed: true,
-          date: new Date(Date.now() - 86400000 * 5).toISOString(),
-        },
-        qaqcManager: {
-          name: "Engr. David Okon",
-          designation: "Lead QA/QC Manager",
-          company: "QA/QC Authority",
-          signed: true,
-          date: new Date(Date.now() - 86400000 * 4).toISOString(),
-        },
-        consultantRep: {
-          name: "Arch. Marcus Sterling",
-          designation: "Supervising Consultant",
-          firm: "Sterling & Partners Consulting",
-          signed: true,
-          date: new Date(Date.now() - 86400000 * 3).toISOString(),
-        },
-        clientRep: {
-          name: "Chief O. Adeleke",
-          designation: "Client Project Sponsor",
-          organization: "Apex Real Estate Holdings",
-          signed: true,
-          date: new Date(Date.now() - 86400000 * 2).toISOString(),
-        },
-      },
-      notes: "All 14 snag items rectified and verified. Architectural finish score 98.4%. Keys and warranty manual handed over.",
-      createdAt: Date.now() - 86400000 * 5,
-      updatedAt: Date.now() - 86400000 * 2,
-    };
-
-    setCache(`jqms_tocs_${projectId}`, [demoCert]);
-    return [demoCert];
   },
 
   async saveTakingOverCertificate(cert: TakingOverCertificate): Promise<void> {
-    const cleaned = cleanForFirestore(cert);
-    const cacheKey = `jqms_tocs_${cleaned.projectId}`;
-    const list = getCache<TakingOverCertificate[]>(cacheKey, []);
-    const idx = list.findIndex((c) => c.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, list);
+    const effectiveCompId = resolveEffectiveCompanyId(cert.companyId);
+    const cleaned = cleanForFirestore({ ...cert, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey("tocs", cleaned.projectId, effectiveCompId);
+    await persistRecord("takingOverCertificates", "TOC", cleaned, cacheKey);
+  },
 
-    try {
-      await setDoc(doc(firestore, "takingOverCertificates", cleaned.id), cleaned, {
-        merge: true,
-      });
-    } catch (e) {
-      console.warn("Firestore saveTakingOverCertificate error:", e);
+  async saveTakingOverCert(cert: TakingOverCertificate): Promise<void> {
+    return this.saveTakingOverCertificate(cert);
+  },
+
+  async deleteTakingOverCertificate(
+    id: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("tocs", projectId, effectiveCompId);
+      const list = getCache<TakingOverCertificate[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((c) => c.id !== id),
+      );
     }
+    await deleteDoc(doc(firestore, "takingOverCertificates", id));
   },
 
   // ─── Method Statements & RAMS Review Workflow ───
@@ -4616,278 +4304,241 @@ export const dbService = {
     projectId: string,
     companyId?: string,
   ): Promise<MethodStatement[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey(
+      "method_statements",
+      projectId,
+      effectiveCompId,
+    );
     try {
-      const constraints: QueryConstraint[] = [
-        where("projectId", "==", projectId),
-      ];
-      if (companyId) constraints.push(where("companyId", "==", companyId));
-
       const q = query(
         collection(firestore, "methodStatements"),
-        ...constraints,
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
       );
       const snap = await getDocs(q);
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id }) as MethodStatement);
-
-      if (list.length > 0) {
-        setCache(`jqms_method_statements_${projectId}`, list);
-        return list;
-      }
+      const list = snap.docs.map(
+        (d) => ({ ...d.data(), id: d.id }) as MethodStatement,
+      );
+      const sorted = sortByNewestFirst(list);
+      setCache(cacheKey, sorted);
+      return sorted;
     } catch (e) {
       console.warn("Firestore getMethodStatements warning, reading cache:", e);
+      return getCache<MethodStatement[]>(cacheKey, []);
     }
-
-    const cached = getCache<MethodStatement[]>(`jqms_method_statements_${projectId}`, []);
-    if (cached.length > 0) return cached;
-
-    // Default Seed Method Statements
-    const demoMS: MethodStatement[] = [
-      {
-        id: "ms-demo-001",
-        msNumber: "MS-STR-001",
-        title: "Method Statement for Reinforced Concrete Suspended Slabs & Post-Tensioning Works",
-        projectId,
-        projectName: "Apex Commercial & Residential Tower",
-        companyId: companyId || "comp-default",
-        discipline: "Civil & Structural",
-        trade: "Reinforced Concrete & Post-Tensioning",
-        revision: "Rev 01",
-        status: "CODE_A",
-        reviewCode: "Code A",
-        isoClause: "ISO 9001:2015 Clause 8.1 & ISO 45001",
-        scopeOfWork: "Detailed execution methodology for formwork erection, rebar fixing, post-tensioned tendon profiling, concrete placement, slump verification, curing, and multi-stage tendon stressing for typical floor slabs L02 to L24.",
-        sequenceOfOperations: "1. Formwork falsework erection and surveyor level confirmation.\n2. Bottom rebar mat installation and MEP conduit embedment.\n3. PT duct layout, tendon pushing, dead-end anchor lock, and live-end trumpet placement.\n4. Top rebar grid layout and bar chair fixing.\n5. Pre-pour QA/QC & Consultant hold-point inspection.\n6. Concrete placement via stationary boom pump at 35m3/hr.\n7. Initial curing via wet burlap and polythene sheeting for 7 days.\n8. Stage 1 stressing at 70% cube strength (25 MPa) and final stressing at 28 days.",
-        plantAndEquipment: [
-          "Stationary Concrete Boom Pump (Schwing 36m)",
-          "Hydraulic Multi-Strand Mono-Jack (YDC-240QX)",
-          "High-Frequency Concrete Poker Vibrators (50mm)",
-          "Total Station Theodolite (Leica TS07)",
-          "Digital Calibrated Pressure Gauge (0-60 MPa)",
-        ],
-        materialsUsed: [
-          "Ready-Mix Concrete Grade C35/45 (Fly-Ash Blended)",
-          "High-Yield Deformed Steel Rebar Grade 500B",
-          "Low-Relaxation 7-Wire Prestressing Steel Strands (ASTM A416 Grade 270, 12.7mm)",
-          "HDPE Flat Corrugated Ducts & Trumpets",
-          "High-Strength Non-Shrink Grout (SikaGrout 214)",
-        ],
-        qualityHoldPoints: [
-          "HP-01: Formwork alignment, propping stability, and clear cover spacer audit.",
-          "HP-02: PT strand elongation calculation sheet and tendon profile parabolic curve sign-off.",
-          "HP-03: Pre-Pour Joint Inspection (Permit to Pour Sign-off).",
-          "HP-04: 7-Day & 28-Day Concrete Cube Compressive Strength Verification.",
-          "HP-05: Post-Tensioning Stressing & Grouting Witness Clearance.",
-        ],
-        emergencyProcedures: "In case of pump pipe burst or hydraulic jack rupture, immediately activate Emergency Stop, evacuate 10m perimeter radius, apply high-pressure hydraulic lockout, and notify Site Safety Officer.",
-        environmentalControls: "Concrete washout containment pits equipped with pH neutralization filters. Silt barriers installed around perimeter storm drains.",
-        ramsHazardsAndControls: [
-          {
-            id: "rams-1",
-            activityStep: "High-Pressure Concrete Pumping",
-            hazardDescription: "Whip hose failure, concrete splashing, line blockage blowout",
-            initialRisk: "HIGH",
-            controlMeasures: "Safety whip-checks on all pipe couplings. Full face shield PPE for nozzle operators. Pipe thickness ultrasonic testing prior to pour.",
-            residualRisk: "LOW",
-            responsiblePerson: "Concrete Foreman & HSE Officer",
-          },
-          {
-            id: "rams-2",
-            activityStep: "Hydraulic PT Tendon Stressing",
-            hazardDescription: "Strand snapping, jack back-plate blowout under 200kN tension",
-            initialRisk: "CRITICAL",
-            controlMeasures: "Strict barricaded exclusion zone behind stressing pocket. Heavy-duty ballistic steel shield placed behind operator. Jack calibrated within 30 days.",
-            residualRisk: "LOW",
-            responsiblePerson: "PT Specialist Lead & Consultant Witness",
-          },
-        ],
-        linkedItpIds: ["itp-conc-001", "itp-rebar-001"],
-        linkedItpTitles: [
-          "ITP-CONC-001: Concrete Placement & Testing",
-          "ITP-REBAR-001: Steel Reinforcement Fabrication & Placement",
-        ],
-        linkedPtpIds: ["ptp-demo-1"],
-        linkedDrawingNumbers: ["STR-SLAB-401-REV-C", "PT-LAYOUT-L04-REV-B"],
-        crsItems: [
-          {
-            id: "crs-1",
-            itemNumber: 1,
-            sectionReference: "Section 3.2 - Concrete Curing",
-            consultantComment: "Specify minimum curing duration for vertical soffits when forms are stripped at 72 hours.",
-            commentBy: "Arch. Marcus Sterling (Consultant)",
-            commentDate: new Date(Date.now() - 86400000 * 8).toISOString(),
-            contractorResponse: "Added Section 3.2.4: Membrane-forming curing compound (ASTM C309 Type 1-D) shall be spray-applied immediately upon formwork stripping.",
-            responseBy: "Engr. K. Vance (Project Engineer)",
-            responseDate: new Date(Date.now() - 86400000 * 7).toISOString(),
-            status: "CLOSED",
-          },
-        ],
-        preparedBy: {
-          name: "Engr. Kevin Vance",
-          role: "PROJECT_ENGINEER",
-          designation: "Senior Project Engineer",
-          date: new Date(Date.now() - 86400000 * 10).toISOString(),
-          signed: true,
-        },
-        qaqcReviewer: {
-          name: "Engr. David Okon",
-          role: "QAQC_ENGINEER",
-          designation: "Lead Quality Manager",
-          date: new Date(Date.now() - 86400000 * 9).toISOString(),
-          signed: true,
-          comments: "Reviewed and compliant with BS EN 13670 and project specifications.",
-        },
-        hseReviewer: {
-          name: "Babajide Martins",
-          role: "SAFETY_OFFICER",
-          designation: "HSE Director",
-          date: new Date(Date.now() - 86400000 * 9).toISOString(),
-          signed: true,
-          comments: "RAMS risk assessment matrix verified. Exclusion zones approved.",
-        },
-        consultantSignOff: {
-          name: "Arch. Marcus Sterling",
-          firm: "Sterling & Partners Consulting Engineers",
-          date: new Date(Date.now() - 86400000 * 6).toISOString(),
-          reviewCode: "Code A",
-          signed: true,
-          stampNumber: "SPCE-QA-STAMP-4402",
-          comments: "Approved without comments. Complies with ISO 9001 Clause 8.1.",
-        },
-        revisionHistory: [
-          {
-            revision: "Rev 00",
-            date: new Date(Date.now() - 86400000 * 14).toISOString().split("T")[0],
-            author: "Engr. K. Vance",
-            changeSummary: "Initial submittal for Consultant review.",
-            reviewCode: "Code B",
-          },
-          {
-            revision: "Rev 01",
-            date: new Date(Date.now() - 86400000 * 7).toISOString().split("T")[0],
-            author: "Engr. K. Vance",
-            changeSummary: "Incorporated CRS comments on vertical soffit membrane curing.",
-            reviewCode: "Code A",
-          },
-        ],
-        createdAt: Date.now() - 86400000 * 14,
-        updatedAt: Date.now() - 86400000 * 6,
-      },
-      {
-        id: "ms-demo-002",
-        msNumber: "MS-WPF-002",
-        title: "Method Statement for Below-Grade Basement Waterproofing & Bentonite Membrane Installation",
-        projectId,
-        projectName: "Apex Commercial & Residential Tower",
-        companyId: companyId || "comp-default",
-        discipline: "Façade & Waterproofing",
-        trade: "Bentonite & Liquid Applied Waterproofing",
-        revision: "Rev 00",
-        status: "UNDER_REVIEW",
-        reviewCode: "Code B",
-        isoClause: "ISO 9001:2015 Clause 8.1",
-        scopeOfWork: "Surface preparation, hydrophilic waterstop installation at construction joints, dual-layer bentonite geotextile membrane application, and 48-hour flood ponding test on retaining raft slab.",
-        sequenceOfOperations: "1. High-pressure waterjet cleaning of blinding concrete substrate.\n2. Application of expanding sodium-bentonite waterstop swelling bars at all cold joints.\n3. Placement of Voltex bentonite geotextile sheets with 100mm minimum overlap.\n4. Mechanical stapling and seam sealing.\n5. Protection screed (50mm unreinforced M15) cast within 24 hours of membrane installation.",
-        plantAndEquipment: [
-          "High Pressure Hydro-Washer (250 Bar)",
-          "Pneumatic Geotextile Stapler & Seamer",
-          "Submersible Sump Pumps (for dewatering)",
-        ],
-        materialsUsed: [
-          "Voltex Sodium Bentonite Geotextile Membrane",
-          "Bentoseal Trowel-Grade Mastic",
-          "Hydrotite Hydrophilic Waterstop Swelling Profile",
-        ],
-        qualityHoldPoints: [
-          "HP-01: Substrate dryness and surface roughness inspection.",
-          "HP-02: Waterstop installation and continuity witness at all pour kickers.",
-          "HP-03: Full membrane overlap and corner termination audit before protective screed.",
-        ],
-        ramsHazardsAndControls: [
-          {
-            id: "rams-wpf-1",
-            activityStep: "Confined Space Basement Application",
-            hazardDescription: "Toxic vapor build-up from primers, oxygen deficiency",
-            initialRisk: "HIGH",
-            controlMeasures: "Forced mechanical air extraction ventilation (minimum 10 air changes/hr). Continuous 4-gas atmospheric monitors.",
-            residualRisk: "LOW",
-            responsiblePerson: "Confined Space Entry Controller",
-          },
-        ],
-        linkedItpIds: ["itp-waterproofing-001"],
-        linkedItpTitles: ["ITP-WPF-001: Sub-Structure Waterproofing Inspection"],
-        crsItems: [
-          {
-            id: "crs-wpf-1",
-            itemNumber: 1,
-            sectionReference: "Section 4.1 - Overlap Detailing",
-            consultantComment: "Please provide manufacturer-backed detail for bentonite penetrations around dewatering sump well-points.",
-            commentBy: "Arch. Marcus Sterling (Consultant)",
-            commentDate: new Date(Date.now() - 86400000 * 2).toISOString(),
-            status: "OPEN",
-          },
-        ],
-        preparedBy: {
-          name: "Engr. Kevin Vance",
-          role: "PROJECT_ENGINEER",
-          date: new Date(Date.now() - 86400000 * 4).toISOString(),
-          signed: true,
-        },
-        qaqcReviewer: {
-          name: "Engr. David Okon",
-          role: "QAQC_ENGINEER",
-          date: new Date(Date.now() - 86400000 * 3).toISOString(),
-          signed: true,
-        },
-        revisionHistory: [
-          {
-            revision: "Rev 00",
-            date: new Date(Date.now() - 86400000 * 4).toISOString().split("T")[0],
-            author: "Engr. K. Vance",
-            changeSummary: "First submittal for Consultant review.",
-          },
-        ],
-        createdAt: Date.now() - 86400000 * 4,
-        updatedAt: Date.now() - 86400000 * 2,
-      },
-    ];
-
-    setCache(`jqms_method_statements_${projectId}`, demoMS);
-    return demoMS;
   },
 
   async saveMethodStatement(ms: MethodStatement): Promise<void> {
-    const cleaned = cleanForFirestore(ms);
-    const cacheKey = `jqms_method_statements_${cleaned.projectId}`;
-    const list = getCache<MethodStatement[]>(cacheKey, []);
-    const idx = list.findIndex((m) => m.id === cleaned.id);
-    if (idx >= 0) list[idx] = cleaned;
-    else list.unshift(cleaned);
-    setCache(cacheKey, list);
+    const effectiveCompId = resolveEffectiveCompanyId(ms.companyId);
+    const cleaned = cleanForFirestore({ ...ms, companyId: effectiveCompId });
+    const cacheKey = scopedCacheKey(
+      "method_statements",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord(
+      "methodStatements",
+      "METHOD_STATEMENT",
+      cleaned,
+      cacheKey,
+    );
+  },
 
+  async deleteMethodStatement(
+    id: string,
+    projectId: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey(
+        "method_statements",
+        projectId,
+        effectiveCompId,
+      );
+      const list = getCache<MethodStatement[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((m) => m.id !== id),
+      );
+    }
+    await deleteDoc(doc(firestore, "methodStatements", id));
+  },
+
+  // ─── REAL-TIME NOTIFICATIONS API ──────────────────────────────────────
+  async getNotifications(
+    companyId?: string,
+    userId?: string,
+    projectId?: string,
+  ): Promise<AppNotification[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return [];
+    const cacheKey = `jqms_notifications_${effectiveCompId}`;
     try {
-      await setDoc(doc(firestore, "methodStatements", cleaned.id), cleaned, {
-        merge: true,
+      const constraints: QueryConstraint[] = [
+        where("companyId", "==", effectiveCompId),
+        orderBy("createdAt", "desc"),
+        limit(50),
+      ];
+      if (projectId) constraints.unshift(where("projectId", "==", projectId));
+
+      const q = query(collection(firestore, "notifications"), ...constraints);
+      const snap = await getDocs(q);
+      const list = snap.docs.map((d) => {
+        const data = d.data();
+        const readBy: string[] = Array.isArray(data.readBy) ? data.readBy : [];
+        const isRead = userId ? readBy.includes(userId) : Boolean(data.isRead);
+        return {
+          ...data,
+          id: d.id,
+          readBy,
+          isRead,
+        } as AppNotification;
       });
+      setCache(cacheKey, list);
+      return list;
     } catch (e) {
-      console.warn("Firestore saveMethodStatement error:", e);
+      console.warn("Firestore getNotifications warning, reading cache:", e);
+      return getCache<AppNotification[]>(cacheKey, []);
     }
   },
 
-  async deleteMethodStatement(id: string, projectId: string): Promise<void> {
-    const cacheKey = `jqms_method_statements_${projectId}`;
-    const list = getCache<MethodStatement[]>(cacheKey, []).filter(
-      (m) => m.id !== id,
-    );
-    setCache(cacheKey, list);
+  subscribeNotifications(
+    companyId: string,
+    userId: string | undefined,
+    callback: (notifications: AppNotification[]) => void,
+  ): () => void {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) {
+      callback([]);
+      return () => {};
+    }
+    const cacheKey = `jqms_notifications_${effectiveCompId}`;
+    try {
+      const q = query(
+        collection(firestore, "notifications"),
+        where("companyId", "==", effectiveCompId),
+        orderBy("createdAt", "desc"),
+        limit(50),
+      );
+
+      const unsub = onSnapshot(
+        q,
+        (snap) => {
+          const list = snap.docs.map((d) => {
+            const data = d.data();
+            const readBy: string[] = Array.isArray(data.readBy)
+              ? data.readBy
+              : [];
+            const isRead = userId
+              ? readBy.includes(userId)
+              : Boolean(data.isRead);
+            return {
+              ...data,
+              id: d.id,
+              readBy,
+              isRead,
+            } as AppNotification;
+          });
+          setCache(cacheKey, list);
+          callback(list);
+        },
+        (err) => console.warn("subscribeNotifications listener warning:", err),
+      );
+      return unsub;
+    } catch (e) {
+      console.warn("subscribeNotifications setup error:", e);
+      return () => {};
+    }
+  },
+
+  async saveNotification(notification: AppNotification): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(notification.companyId);
+    if (!effectiveCompId) return;
+    const cleaned = cleanForFirestore({
+      ...notification,
+      companyId: effectiveCompId,
+      createdAt:
+        typeof notification.createdAt === "number"
+          ? notification.createdAt
+          : Date.now(),
+    });
+
+    const cacheKey = `jqms_notifications_${effectiveCompId}`;
+    const list = getCache<AppNotification[]>(cacheKey, []);
+    list.unshift(cleaned);
+    setCache(cacheKey, list.slice(0, 50));
 
     try {
-      await deleteDoc(doc(firestore, "methodStatements", id));
+      await setDoc(doc(firestore, "notifications", cleaned.id), cleaned, {
+        merge: true,
+      });
     } catch (e) {
-      console.warn("Firestore deleteMethodStatement error:", e);
+      console.warn("Firestore saveNotification error:", e);
     }
+  },
+
+  async markNotificationRead(
+    notificationId: string,
+    userId: string,
+  ): Promise<void> {
+    if (!notificationId || !userId) return;
+    try {
+      const notifRef = doc(firestore, "notifications", notificationId);
+      await setDoc(
+        notifRef,
+        {
+          readBy: arrayUnion(userId),
+          isRead: true,
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      );
+    } catch (e) {
+      console.warn("Firestore markNotificationRead error:", e);
+    }
+  },
+
+  async markAllNotificationsRead(
+    companyId: string,
+    userId: string,
+  ): Promise<void> {
+    if (!userId) return;
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!effectiveCompId) return;
+
+    try {
+      const items = await this.getNotifications(effectiveCompId, userId);
+      const unread = items.filter((n) => !n.readBy?.includes(userId));
+      await commitInChunks(unread, (batch, n) => {
+        batch.set(
+          doc(firestore, "notifications", n.id),
+          { readBy: arrayUnion(userId), isRead: true, updatedAt: Date.now() },
+          { merge: true },
+        );
+      });
+    } catch (e) {
+      console.warn("Firestore markAllNotificationsRead error:", e);
+    }
+  },
+
+  async deleteNotification(
+    notificationId: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (effectiveCompId) {
+      const cacheKey = `jqms_notifications_${effectiveCompId}`;
+      const list = getCache<AppNotification[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((n) => n.id !== notificationId),
+      );
+    }
+    await deleteDoc(doc(firestore, "notifications", notificationId));
   },
 };
 
 export const db = dbService;
-
-

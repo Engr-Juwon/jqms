@@ -12,6 +12,17 @@ dbService.initDefaults().then(() => {
 
 useAuthStore.getState().initAuthListener();
 
+// Auto-reload on deployed chunk hash changes to prevent dynamic import bricking
+window.addEventListener("vite:preloadError", (event) => {
+  console.warn("[JQMS] Dynamic chunk preload failure detected, auto-reloading page for fresh deployment assets:", event);
+  const reloadKey = "jqms_last_chunk_reload";
+  const lastReload = Number(sessionStorage.getItem(reloadKey) || "0");
+  if (Date.now() - lastReload > 8000) {
+    sessionStorage.setItem(reloadKey, String(Date.now()));
+    window.location.reload();
+  }
+});
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <App />

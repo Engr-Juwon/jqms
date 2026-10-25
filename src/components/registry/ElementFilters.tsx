@@ -38,7 +38,8 @@ interface ElementFiltersProps {
 const CORE_ELEMENT_TYPES = [
   { value: "ALL", label: "All Element Types" },
   { value: "Beam", label: "Beam" },
-  { value: "Column", label: "Column" },
+  { value: "Column", label: "Column (All)" },
+  { value: "INCLINED_COLUMN", label: "Inclined / Slanted Column ⤢" },
   { value: "Slab", label: "Slab" },
   { value: "Wall", label: "Wall" },
   { value: "Footing", label: "Footing" },

@@ -12,7 +12,9 @@ import {
 } from "@/lib/photoSync";
 import { uploadMultiple, getThumbnail } from "@/lib/cloudinary";
 import { generateSiteCommentsPDF } from "@/lib/pdfGenerators";
-import { LevelElementSelect } from "@/components/sitecomments/LevelElementSelect";
+import MultiLevelElementSelect, {
+  SelectedElementItem,
+} from "@/components/masterdata/MultiLevelElementSelect";
 import { TradeSubtradeSelect } from "@/components/sitecomments/TradeSubtradeSelect";
 import { RemarkSnippetDrawer } from "@/components/sitecomments/RemarkSnippetDrawer";
 import { PhotoMarkupModal } from "@/components/sitecomments/PhotoMarkupModal";
@@ -321,7 +323,7 @@ export const SiteCommentsEdit: React.FC = () => {
       await syncMultiplePhotosToSiteGallery(
         newPhotoObjs.map((p) => ({
           projectId: currentProjId,
-          companyId: currentCompId || company?.id || "comp-apex-civil",
+          companyId: currentCompId || company?.id || "",
           url: p.url,
           thumbnailUrl: p.thumbnailUrl,
           caption: p.caption || `Observation #${obsIndex + 1}`,
@@ -501,7 +503,7 @@ export const SiteCommentsEdit: React.FC = () => {
 
           await syncPhotoToSiteGallery({
             projectId: currentProjId,
-            companyId: currentCompId || company?.id || "comp-apex-civil",
+            companyId: currentCompId || company?.id || "",
             url: photoUrl,
             caption: `${obsText.substring(0, 80)} (${reportNumber})`,
             floorLevel: obs.levelName,
@@ -519,7 +521,7 @@ export const SiteCommentsEdit: React.FC = () => {
       // 3. Write Audit Log
       await writeAudit({
         projectId: currentProjId,
-        companyId: currentCompId || company?.id || "comp-apex-civil",
+        companyId: currentCompId || company?.id || "",
         userId: currentUser?.uid || "unknown",
         userName: currentUser?.fullName || inspectorName || "User",
         userRole: currentUser?.role || inspectorRole || "QA/QC Engineer",
@@ -856,26 +858,72 @@ export const SiteCommentsEdit: React.FC = () => {
 
                 {/* Level, Element & Trade pickers */}
                 <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
-                    <LevelElementSelect
-                    projectId={currentProjId}
-                    selectedLevelId={obs.levelId}
-                    selectedLevelName={obs.levelName}
-                    selectedElementId={obs.elementId}
-                    selectedElementName={obs.elementName}
-                    onLevelChange={(lvlId, lvlName) => {
-                      // Single atomic update
-                      updateObservationField(idx, "levelId", lvlId);
-                      updateObservationField(idx, "levelName", lvlName);
-                    }}
-                    onElementChange={(elemId, elemName, gridLoc) => {
-                      // Single atomic update
-                      updateObservationField(idx, "elementId", elemId);
-                      updateObservationField(idx, "elementName", elemName);
-                      if (gridLoc && !obs.gridLocation) {
-                        updateObservationField(idx, "gridLocation", gridLoc);
+                    <MultiLevelElementSelect
+                      projectId={currentProjId}
+                      companyId={currentCompId}
+                      defaultLevelId={obs.levelId}
+                      selectedElements={
+                        (obs as any).elementsData ||
+                        (obs.elementId
+                          ? [
+                              {
+                                id: obs.elementId,
+                                elementName:
+                                  obs.elementName ||
+                                  obs.structuralElement ||
+                                  "Selected Element",
+                                levelId: obs.levelId,
+                                levelName: obs.levelName,
+                                grid: obs.gridLocation,
+                                elementType: obs.elementType,
+                              },
+                            ]
+                          : [])
                       }
-                    }}
-                  />
+                      onChange={(items: SelectedElementItem[]) => {
+                        const names = items.map((i) => i.elementName).join(", ");
+                        const grids = Array.from(
+                          new Set(items.map((i) => i.grid).filter(Boolean)),
+                        ).join(", ");
+                        const levels = Array.from(
+                          new Set(items.map((i) => i.levelName).filter(Boolean)),
+                        ).join(", ");
+                        const firstLevelId = items[0]?.levelId || obs.levelId;
+
+                        updateObservationField(
+                          idx,
+                          "elementId",
+                          items[0]?.id || "",
+                        );
+                        updateObservationField(idx, "elementName", names);
+                        updateObservationField(idx, "structuralElement", names);
+                        updateObservationField(
+                          idx,
+                          "elementIds" as any,
+                          items.map((i) => i.id),
+                        );
+                        updateObservationField(
+                          idx,
+                          "elementNames" as any,
+                          items.map((i) => i.elementName),
+                        );
+                        updateObservationField(
+                          idx,
+                          "elementsData" as any,
+                          items,
+                        );
+                        if (firstLevelId) {
+                          updateObservationField(idx, "levelId", firstLevelId);
+                        }
+                        if (levels) {
+                          updateObservationField(idx, "levelName", levels);
+                        }
+                        if (grids && !obs.gridLocation) {
+                          updateObservationField(idx, "gridLocation", grids);
+                        }
+                      }}
+                      label="Structural Elements Subject to Observation"
+                    />
 
                   <TradeSubtradeSelect
                     companyId={currentCompId}

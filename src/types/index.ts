@@ -154,6 +154,10 @@ export interface UserProfile {
   lastActiveProjectId?: string;
   smtpCredentials?: {
     username?: string;
+    /** Server-encrypted AES-256-GCM token (`enc:v1:...`). Raw plaintext passwords must never be persisted. */
+    encryptedPassword?: string;
+    hasSavedPassword?: boolean;
+    /** @deprecated Legacy field cleared on save; use encryptedPassword instead. */
     password?: string;
     senderEmail?: string;
     senderDisplayName?: string;
@@ -287,9 +291,50 @@ export interface Project {
   carbonFactors?: CarbonFactors;
   currentLevelId?: string;
   currentLevelName?: string;
+  enableBim?: boolean; // Master or legacy flag for BIM suite
+  bimSettings?: BimModuleSettings; // Granular per-page/per-dimension BIM controls
   createdAt: number | string;
   updatedAt?: number | string;
 }
+
+// ─── BIM MODULES & GRANULAR TOGGLE SETTINGS ───
+export type BimModuleKey =
+  | "2d"
+  | "3d"
+  | "4d"
+  | "5d"
+  | "6d"
+  | "7d"
+  | "mto"
+  | "gridlines"
+  | "levels"
+  | "packages";
+
+export interface BimModuleSettings {
+  enable2D?: boolean; // 2D Spatial CAD / Grid Plan (/project/grid-plan) - default true
+  enable3D?: boolean; // 3D Structural Twin Viewer (/project/bim-3d, /project/3d-twin) - default true
+  enable4D?: boolean; // 4D Construction Planner (/project/planner) - default false
+  enable5D?: boolean; // 5D Cost Takeoff & BOQ (/project/5d-cost) - default false
+  enable6D?: boolean; // 6D Carbon & Sustainability ESG (/project/6d-carbon) - default false
+  enable7D?: boolean; // 7D Asset Register & Passports (/project/elements) - default true
+  enableMTO?: boolean; // Material Take-Off (/project/mto) - default true
+  enableGridlines?: boolean; // Gridlines & Axis Matrix (/project/gridlines) - default true
+  enableLevels?: boolean; // Floor Levels & Vertical Zones (/project/levels) - default true
+  enablePackages?: boolean; // Work Packages & Disciplines (/project/packages) - default true
+}
+
+export const DEFAULT_BIM_SETTINGS: Required<BimModuleSettings> = {
+  enable2D: true,
+  enable3D: true,
+  enable4D: false,
+  enable5D: false,
+  enable6D: false,
+  enable7D: true,
+  enableMTO: true,
+  enableGridlines: true,
+  enableLevels: true,
+  enablePackages: true,
+};
 
 // ─── WORK PACKAGE ───
 export interface WorkPackage {
@@ -439,6 +484,8 @@ export interface StructuralElement {
   topElevation?: number; // Top of element elevation in meters (e.g. +6.700m)
   bottomElevation?: number; // Bottom elevation in meters
   elevationOffset?: number; // Specific offset from level datum (e.g. step down -0.05m)
+  baseOffsetX?: number; // Base offset from grid along X (East/West) in meters (e.g. +1.0m)
+  baseOffsetY?: number; // Base offset from grid along Y (North/South) in meters
 
   // Dimensions & Profile
   length?: number; // in meters
@@ -473,6 +520,7 @@ export interface StructuralElement {
   horizontalOffset?: number;
   inclinationAngle?: number;
   inclinedCalcMode?: "offset" | "angle";
+  inclinationDirection?: "EAST" | "WEST" | "NORTH" | "SOUTH" | "+X" | "-X" | "+Y" | "-Y";
   calculatedFormworkArea?: number; // in m2
   area?: number; // in m2
   dimensions: {
@@ -922,6 +970,9 @@ export interface SiteInstruction {
   levelName?: string;
   elementId?: string;
   elementName?: string;
+  elementIds?: string[];
+  elementNames?: string[];
+  elementsData?: any[];
   trade?: string;
   tradeId?: string;
   tradeName?: string;
@@ -1119,6 +1170,9 @@ export interface PermitToPour {
   levelName: string;
   elementId?: string;
   elementName: string;
+  elementIds?: string[];
+  elementNames?: string[];
+  elementsData?: any[];
   tradeId?: string;
   tradeName?: string;
   subtradeName?: string;
@@ -1366,7 +1420,10 @@ export interface ConcreteCubeSample {
 
   // Structural Location & Level Info
   elementId?: string;
-  elementName: string; // e.g., "Pile Cap"
+  elementName: string;
+  elementIds?: string[];
+  elementNames?: string[];
+  elementsData?: any[]; // e.g., "Pile Cap"
   structureElement?: string; // e.g., "Pile Cap"
   levelId?: string;
   levelName: string; // e.g., "0 - Foundation"
@@ -2046,6 +2103,9 @@ export interface RequestForInformation {
   structuralElementId?: string;
   elementName?: string;
   elementType?: string;
+  elementIds?: string[];
+  elementNames?: string[];
+  elementsData?: any[];
   locationLevel?: string;
   levelId?: string;
   levelName?: string;
@@ -2673,6 +2733,9 @@ export interface SitePhoto {
   levelName?: string;
   elementId?: string;
   elementName?: string;
+  elementIds?: string[];
+  elementNames?: string[];
+  elementsData?: any[];
   category: PhotoCategory;
   tradeId?: string;
   tradeName?: string;
@@ -3166,6 +3229,9 @@ export interface DailyWorkActivity {
   levelName?: string;
   elementId?: string;
   elementName?: string;
+  elementIds?: string[];
+  elementNames?: string[];
+  elementsData?: any[];
   gridlineRef?: string;
   trade: string;
   tradeId?: string;

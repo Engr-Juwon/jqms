@@ -6,6 +6,7 @@ import { dbService, sortByNewestFirst } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { hasPermission } from "@/lib/rbac";
 import { uploadDocument, UploadResult } from "@/lib/cloudinary";
+import { generateUniversalName } from "@/lib/naming";
 import { DocumentRecord } from "@/types";
 import {
   FolderLock,
@@ -29,8 +30,8 @@ export const Documents: React.FC = () => {
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-apex-civil";
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+    currentUser?.companyId || company?.id || "";
+  const currentProjId = projectId || activeProject?.id || "";
   const canUploadDoc = hasPermission(
     currentUser?.role,
     "UPLOAD_CONTROLLED_DOCUMENT",
@@ -43,7 +44,9 @@ export const Documents: React.FC = () => {
   const [uploading, setUploading] = useState(false);
 
   // New Doc Form
-  const [docNumber, setDocNumber] = useState("MS-STR-005");
+  const [docNumber, setDocNumber] = useState(() =>
+    generateUniversalName(activeProject?.code, "DOC"),
+  );
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<any>("Method Statement");
   const [discipline, setDiscipline] = useState<any>("Civil/Structural");
@@ -87,11 +90,21 @@ export const Documents: React.FC = () => {
     try {
       let fileUrl = "#";
       let fileSizeMb = 1.0;
-      let fileName = selectedFile?.name || `${docNumber}.pdf`;
+      const effectiveDocNumber =
+        docNumber.trim() || generateUniversalName(activeProject?.code, "DOC");
+      const fileExt = selectedFile
+        ? selectedFile.name.split(".").pop() || "pdf"
+        : "pdf";
+      const finalFileName = `${effectiveDocNumber}.${fileExt}`;
+      let fileName = finalFileName;
 
       if (selectedFile) {
+        // Standardize physical file object with universal name
+        const standardizedFile = new File([selectedFile], finalFileName, {
+          type: selectedFile.type,
+        });
         const uploadRes: UploadResult = await uploadDocument(
-          selectedFile,
+          standardizedFile,
           `jqms/documents/${currentProjId}`,
         );
         fileUrl = uploadRes.url;
@@ -101,9 +114,9 @@ export const Documents: React.FC = () => {
       const newDoc: DocumentRecord = {
         id: `doc-${Date.now()}`,
         projectId: currentProjId,
-        companyId: company?.id || "comp-apex-civil",
-        docNumber,
-        documentNumber: docNumber,
+        companyId: currentCompId || company?.id || "",
+        docNumber: effectiveDocNumber,
+        documentNumber: effectiveDocNumber,
         title,
         category,
         discipline,
@@ -123,13 +136,13 @@ export const Documents: React.FC = () => {
       if (currentUser) {
         await writeAudit({
           projectId: currentProjId,
-          companyId: company?.id || "comp-apex-civil",
+          companyId: currentCompId || company?.id || "",
           userId: currentUser.uid,
           userName: currentUser.fullName,
           userRole: currentUser.role,
           action: "UPLOAD_DOCUMENT",
           module: "Documents",
-          details: `Uploaded controlled document ${docNumber} (${revision}): ${title}`,
+          details: `Uploaded controlled document ${effectiveDocNumber} (${revision}): ${title}`,
           newValue: newDoc,
         });
       }
@@ -140,6 +153,7 @@ export const Documents: React.FC = () => {
       setShowAddModal(false);
       setSelectedFile(null);
       setTitle("");
+      setDocNumber(generateUniversalName(activeProject?.code, "DOC"));
       loadData();
     } catch (error: any) {
       console.error("Failed to upload document:", error);
@@ -171,7 +185,10 @@ export const Documents: React.FC = () => {
           </div>
 
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              setDocNumber(generateUniversalName(activeProject?.code, "DOC"));
+              setShowAddModal(true);
+            }}
             disabled={!canUploadDoc}
             title={
               !canUploadDoc

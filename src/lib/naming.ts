@@ -1,31 +1,211 @@
-export const generateNcrNumber = (projectCode = "PRJ"): string => {
-  const d = new Date();
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = String(d.getFullYear()).slice(-2);
-  const rand = Math.floor(1000 + Math.random() * 9000);
-  return `NCR-${projectCode ? `${projectCode}-` : ""}${rand}_${day}${month}${year}`;
+import { useProjectStore } from "@/stores/useProjectStore";
+
+/**
+ * Universal Naming System for JQMS
+ * Format: {projectcode}_{prefix}_{random()}_{ddmmyy}
+ * Example: CDAS2_DOC_4821_251026
+ * With extension: CDAS2_PHOTO_8912_251026.jpg
+ */
+
+export interface UniversalNamingOptions {
+  date?: Date | string | number | null;
+  extension?: string | null;
+  randomDigits?: number;
+  randomNumber?: number | string;
+}
+
+/**
+ * Normalizes project code to uppercase alphanumeric string with hyphens/underscores.
+ * Falls back to active project code in useProjectStore, or "PRJ".
+ */
+export const sanitizeProjectCode = (code?: string | null): string => {
+  if (code && typeof code === "string" && code.trim()) {
+    const cleaned = code
+      .trim()
+      .toUpperCase()
+      .replace(/[\s/\\]+/g, "-")
+      .replace(/[^A-Z0-9_-]/g, "");
+    if (cleaned) return cleaned;
+  }
+
+  try {
+    const activeCode = useProjectStore.getState()?.activeProject?.code;
+    if (activeCode && typeof activeCode === "string" && activeCode.trim()) {
+      const cleaned = activeCode
+        .trim()
+        .toUpperCase()
+        .replace(/[\s/\\]+/g, "-")
+        .replace(/[^A-Z0-9_-]/g, "");
+      if (cleaned) return cleaned;
+    }
+  } catch {
+    // Zustand store not initialized yet
+  }
+
+  return "PRJ";
 };
 
-export const generateInspectionNumber = (projectCode = "INSP"): string => {
-  const d = new Date();
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = String(d.getFullYear()).slice(-2);
-  const rand = Math.floor(1000 + Math.random() * 9000);
-  return `INSP_${rand}_${day}${month}${year}`;
+/**
+ * Formats a date into 2-digit day, 2-digit month, 2-digit year (ddmmyy).
+ * e.g., 25 Oct 2026 -> "251026"
+ */
+export const formatDdmmyy = (
+  dateInput?: Date | string | number | null,
+): string => {
+  const d = dateInput ? new Date(dateInput) : new Date();
+  const validDate = isNaN(d.getTime()) ? new Date() : d;
+  const day = String(validDate.getDate()).padStart(2, "0");
+  const month = String(validDate.getMonth() + 1).padStart(2, "0");
+  const year = String(validDate.getFullYear()).slice(-2);
+  return `${day}${month}${year}`;
 };
 
-export const generateWeeklyReportNumber = (prefix = "WQR"): string => {
-  const d = new Date();
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = String(d.getFullYear()).slice(-2);
-  const rand = Math.floor(1000 + Math.random() * 9000);
-  return `${prefix || "WQR"}_${rand}_${day}${month}${year}`;
+/**
+ * Generates an integer random string with a fixed number of digits (default: 4 digits, 1000 - 9999).
+ */
+export const generateRandomNumber = (digits = 4): string => {
+  const safeDigits = Math.max(1, Math.min(10, digits));
+  const min = Math.pow(10, safeDigits - 1);
+  const max = Math.pow(10, safeDigits) - 1;
+  return String(Math.floor(min + Math.random() * (max - min + 1)));
+};
+
+/**
+ * Central generator for the universal naming system:
+ * {projectcode}_{prefix}_{random()}_{ddmmyy}
+ */
+export function generateUniversalName(
+  projectCode?: string | null,
+  prefix = "DOC",
+  options?: UniversalNamingOptions,
+): string {
+  const cleanProj = sanitizeProjectCode(projectCode);
+  const cleanPrefix =
+    (prefix || "DOC")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_]/g, "") || "DOC";
+
+  const rand =
+    options?.randomNumber !== undefined
+      ? String(options.randomNumber)
+      : generateRandomNumber(options?.randomDigits || 4);
+
+  const dateStr = formatDdmmyy(options?.date);
+
+  const baseName = `${cleanProj}_${cleanPrefix}_${rand}_${dateStr}`;
+
+  if (options?.extension) {
+    const ext = options.extension.replace(/^\./, "").trim().toLowerCase();
+    if (ext) {
+      return `${baseName}.${ext}`;
+    }
+  }
+
+  return baseName;
+}
+
+// ============================================================================
+// Specialized Universal Domain Generators
+// ============================================================================
+
+export const generateNcrNumber = (
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, "NCR", { date });
+};
+
+export const generateInspectionNumber = (
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, "INSP", { date });
+};
+
+export const generateWeeklyReportNumber = (
+  prefix = "WQR",
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, prefix || "WQR", { date });
+};
+
+export const generatePhotoName = (
+  projectCode?: string | null,
+  extension = "jpg",
+  prefix = "PHOTO",
+): string => {
+  return generateUniversalName(projectCode, prefix, { extension });
+};
+
+export const generateDocumentName = (
+  projectCode?: string | null,
+  extension?: string,
+  prefix = "DOC",
+): string => {
+  return generateUniversalName(projectCode, prefix, { extension });
+};
+
+export const generatePdfExportName = (
+  projectCode?: string | null,
+  prefix = "PDF",
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, prefix, { extension: "pdf", date });
+};
+
+export const generateRfiNumber = (
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, "RFI", { date });
+};
+
+export const generateMarNumber = (
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, "MAR", { date });
+};
+
+export const generateMirNumber = (
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, "MIR", { date });
+};
+
+export const generatePtpNumber = (
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, "PTP", { date });
+};
+
+export const generateCubeNumber = (
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, "CUBE", { date });
+};
+
+export const generateSteelNumber = (
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, "STL", { date });
+};
+
+export const generateSiteCommentNumber = (
+  projectCode?: string | null,
+  date?: Date | string | number,
+): string => {
+  return generateUniversalName(projectCode, "COM", { date });
 };
 
 export type SiteInstructionFormat =
+  | "UNIVERSAL" // e.g. CDAS2_SI_4821_251026
   | "PROJECT_YEAR_SEQ" // e.g. CDL-BS-SI-2026-001
   | "PROJECT_SEQ" // e.g. CDL-BS-SI-001
   | "YEAR_SEQ" // e.g. SI-2026-001
@@ -42,8 +222,7 @@ export interface SiteInstructionNamingOptions {
 
 /**
  * Parses existing site instructions to determine the next sequential number.
- * Searches for the maximum sequence number among existing instructions, even if
- * non-consecutive numbers exist or instructions have been deleted.
+ * Searches for the maximum sequence number among existing instructions.
  */
 export const getNextSiteInstructionSequence = (
   existingNumbers: (string | undefined | null)[],
@@ -60,10 +239,9 @@ export const getNextSiteInstructionSequence = (
     const num = raw.trim();
 
     // Check if there is a trailing number (e.g. SI-2026-003, CDL-BS-SI-004, SI/2026/012)
-    const trailingMatch = num.match(/(?:[-/.#\s]|^)(\d{1,4})$/);
+    const trailingMatch = num.match(/(?:[-/.#\s_]|^)(\d{1,4})$/);
     if (trailingMatch && trailingMatch[1]) {
       const parsed = parseInt(trailingMatch[1], 10);
-      // Avoid interpreting the year itself (e.g. 2026) as sequence number
       if (!isNaN(parsed) && parsed !== targetYear) {
         if (parsed > maxSeq) maxSeq = parsed;
         continue;
@@ -89,57 +267,49 @@ export const getNextSiteInstructionSequence = (
 };
 
 /**
- * Generates a formal, standardized Site Instruction reference number.
- * Default format: [PROJECT_CODE]-SI-[YEAR]-[SEQ]
- * e.g. "CDL-BS-SI-2026-001" or "SI-2026-001" (if no project code)
+ * Generates a Site Instruction reference number.
+ * Defaults to the universal format: {projectcode}_SI_{random()}_{ddmmyy}
  */
 export const generateSiteInstructionNumber = (
   options?: SiteInstructionNamingOptions,
 ): string => {
   const prefix = (options?.prefix || "SI").trim().toUpperCase();
-  const projectCode = (options?.projectCode || "").trim().toUpperCase();
+  const projectCode = options?.projectCode;
+  const format = options?.format || "UNIVERSAL";
+
+  if (format === "UNIVERSAL") {
+    return generateUniversalName(projectCode, prefix);
+  }
+
+  const cleanProj = sanitizeProjectCode(projectCode);
   const year = options?.year || new Date().getFullYear();
   const seq = String(options?.sequence || 1).padStart(3, "0");
-  const format =
-    options?.format || (projectCode ? "PROJECT_YEAR_SEQ" : "YEAR_SEQ");
   const sep = options?.delimiter || "-";
 
   switch (format) {
     case "PROJECT_YEAR_SEQ":
-      return projectCode
-        ? `${projectCode}${sep}${prefix}${sep}${year}${sep}${seq}`
-        : `${prefix}${sep}${year}${sep}${seq}`;
+      return `${cleanProj}${sep}${prefix}${sep}${year}${sep}${seq}`;
     case "PROJECT_SEQ":
-      return projectCode
-        ? `${projectCode}${sep}${prefix}${sep}${seq}`
-        : `${prefix}${sep}${seq}`;
+      return `${cleanProj}${sep}${prefix}${sep}${seq}`;
     case "YEAR_SEQ":
       return `${prefix}${sep}${year}${sep}${seq}`;
     case "SIMPLE_SEQ":
       return `${prefix}${sep}${seq}`;
     default:
-      return projectCode
-        ? `${projectCode}${sep}${prefix}${sep}${year}${sep}${seq}`
-        : `${prefix}${sep}${year}${sep}${seq}`;
+      return generateUniversalName(projectCode, prefix);
   }
 };
 
 /**
- * Generates a formal, standardized Daily Site Log (Site Diary) reference number.
- * Format: DSL-[PROJECT_CODE]-[YYYYMMDD]-[SEQ]
- * e.g. "DSL-PRJ-20260916-01"
+ * Generates a Daily Site Log reference number according to the universal naming system.
+ * Format: {projectcode}_DSL_{random()}_{ddmmyy}
  */
 export const generateDailyLogNumber = (
   projectCode = "PRJ",
   dateStr?: string,
-  seq = 1,
+  _seq = 1,
 ): string => {
-  const d = dateStr ? new Date(dateStr) : new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const cleanProj = (projectCode || "PRJ").trim().toUpperCase();
-  const seqStr = String(seq).padStart(2, "0");
-  return `DSL-${cleanProj}-${year}${month}${day}-${seqStr}`;
+  return generateUniversalName(projectCode, "DSL", { date: dateStr });
 };
+
 

@@ -52,8 +52,8 @@ export const DeliveriesPage: React.FC = () => {
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
   const currentCompId =
-    currentUser?.companyId || company?.id || activeProject?.companyId || "comp-apex-civil";
-  const currentProjId = projectId || activeProject?.id || "proj-bankside-001";
+    currentUser?.companyId || company?.id || activeProject?.companyId || "";
+  const currentProjId = projectId || activeProject?.id || "";
 
   const [deliveries, setDeliveries] = useState<MaterialDelivery[]>([]);
   const [searchTerm, setSearchTerm] = useState("");

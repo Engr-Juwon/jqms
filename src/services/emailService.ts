@@ -1,6 +1,7 @@
 import { Company, UserProfile, EmailCommunicationLog } from "@/types";
-import { firestore } from "@/firebase";
-import { collection, doc, setDoc, getDocs, query, where, orderBy } from "firebase/firestore";
+import { auth, firestore } from "@/firebase";
+import { cleanForFirestore } from "@/lib/db";
+import { collection, doc, setDoc, getDocs, query, where } from "firebase/firestore";
 
 export interface SendEmailOptions {
   company: Company | null;
@@ -17,7 +18,14 @@ export interface SendEmailOptions {
     encoding?: string;
     contentType?: string;
   }>;
-  module?: "WEEKLY_REPORT" | "NCR" | "SITE_INSTRUCTION" | "CUBE_TEST" | "INSPECTION" | "GENERAL" | string;
+  module?:
+    | "WEEKLY_REPORT"
+    | "NCR"
+    | "SITE_INSTRUCTION"
+    | "CUBE_TEST"
+    | "INSPECTION"
+    | "GENERAL"
+    | string;
   referenceId?: string;
   referenceTitle?: string;
   projectId?: string;
@@ -28,10 +36,71 @@ export interface TestSMTPOptions {
   port: number;
   secure?: boolean;
   username: string;
-  password: string;
+  password?: string;
+  encryptedPassword?: string;
   senderDisplayName?: string;
   senderEmail?: string;
   testRecipientEmail?: string;
+}
+
+function escapeHtml(raw: string): string {
+  return String(raw || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeSafeLogoUrl(url?: string): string {
+  if (!url) return "";
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("/")) {
+    return escapeHtml(trimmed);
+  }
+  return "";
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("Authentication required to access email services.");
+  }
+  const idToken = await user.getIdToken();
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${idToken}`,
+  };
+}
+
+async function postEmailEndpoint(payload: Record<string, unknown>): Promise<{
+  ok: boolean;
+  status: number;
+  data: any;
+}> {
+  const headers = await getAuthHeaders();
+  const endpoints = ["/api/send-email", "/.netlify/functions/send-email"];
+  let lastError = "Unable to reach email serverless endpoint.";
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        continue;
+      }
+      const data = await response.json();
+      return { ok: response.ok, status: response.status, data };
+    } catch (err: any) {
+      lastError = err?.message || String(err);
+    }
+  }
+
+  throw new Error(lastError);
 }
 
 export class EmailService {
@@ -62,7 +131,7 @@ export class EmailService {
   }
 
   /**
-   * Formats a corporate signature into HTML with the company logo embedded
+   * Formats a corporate signature into XSS-safe HTML with the company logo embedded.
    */
   public static formatSignatureHtml(options: {
     signatureText?: string;
@@ -78,40 +147,44 @@ export class EmailService {
       signatureText = "",
       fullName = "",
       title = "",
-      companyName = "Collection Developments",
+      companyName = "Organization",
       companyLogoUrl,
       email = "",
       phone = "",
       includeLogo = true,
     } = options;
 
+    const safeLogoSrc = sanitizeSafeLogoUrl(companyLogoUrl);
+    const safeCompanyAlt = escapeHtml(companyName);
     const logoHtml =
-      includeLogo && companyLogoUrl
-        ? `<div style="margin: 12px 0 8px 0;"><img src="${companyLogoUrl}" alt="${companyName}" style="max-height: 48px; max-width: 180px; object-fit: contain; display: block;" /></div>`
+      includeLogo && safeLogoSrc
+        ? `<div style="margin: 12px 0 8px 0;"><img src="${safeLogoSrc}" alt="${safeCompanyAlt}" style="max-height: 48px; max-width: 180px; object-fit: contain; display: block;" /></div>`
         : "";
 
     if (signatureText && signatureText.trim()) {
-      let raw = signatureText.trim();
-      
-      // If signature already has explicit logo placeholder tag
+      const raw = signatureText.trim();
+
       if (raw.includes("{{logo}}") || raw.includes("[LOGO]")) {
-        const formatted = raw
+        const escaped = escapeHtml(raw)
           .replace(/\{\{logo\}\}|\[LOGO\]/g, logoHtml)
           .replace(/\n/g, "<br/>");
-        return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: #0f172a; line-height: 1.5; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 16px;">${formatted}</div>`;
+        return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: #0f172a; line-height: 1.5; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 16px;">${escaped}</div>`;
       }
 
-      const rawLines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+      const rawLines = raw
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
       const lines = rawLines[0] === "--" ? rawLines.slice(1) : rawLines;
-      
-      // Build structured lines with professional formatting
+
       let logoInserted = false;
       const resultElements: string[] = [];
 
       lines.forEach((line, idx) => {
         const isEmailLine = /^email:\s*/i.test(line);
         const isTelLine = /^(tel|phone|mobile):\s*/i.test(line);
-        const isContactLine = isEmailLine || isTelLine || /^(addr|web|website):/i.test(line);
+        const isContactLine =
+          isEmailLine || isTelLine || /^(addr|web|website):/i.test(line);
 
         if (isContactLine && !logoInserted && logoHtml) {
           resultElements.push(logoHtml);
@@ -119,19 +192,29 @@ export class EmailService {
         }
 
         if (idx === 0) {
-          // First line: Author Name
-          resultElements.push(`<div style="font-weight: 800; font-size: 14px; color: #0f172a;">${line}</div>`);
+          resultElements.push(
+            `<div style="font-weight: 800; font-size: 14px; color: #0f172a;">${escapeHtml(line)}</div>`,
+          );
         } else if (idx === 1 && !isContactLine) {
-          // Second line: Title / Designation
-          resultElements.push(`<div style="font-weight: 600; font-size: 13px; color: #475569; margin-top: 2px;">${line}</div>`);
+          resultElements.push(
+            `<div style="font-weight: 600; font-size: 13px; color: #475569; margin-top: 2px;">${escapeHtml(line)}</div>`,
+          );
         } else if (isEmailLine) {
-          const mailVal = line.replace(/^email:\s*/i, "").trim();
-          resultElements.push(`<div style="font-size: 12px; color: #334155; margin-top: 4px;"><strong>Email:</strong> <a href="mailto:${mailVal}" style="color: #2563eb; text-decoration: underline;">${mailVal}</a></div>`);
+          const mailVal = escapeHtml(line.replace(/^email:\s*/i, "").trim());
+          resultElements.push(
+            `<div style="font-size: 12px; color: #334155; margin-top: 4px;"><strong>Email:</strong> <a href="mailto:${mailVal}" style="color: #2563eb; text-decoration: underline;">${mailVal}</a></div>`,
+          );
         } else if (isTelLine) {
-          const telVal = line.replace(/^(tel|phone|mobile):\s*/i, "").trim();
-          resultElements.push(`<div style="font-size: 12px; color: #334155; margin-top: 2px;"><strong>Tel:</strong> <a href="tel:${telVal}" style="color: #334155; text-decoration: none;">${telVal}</a></div>`);
+          const telVal = escapeHtml(
+            line.replace(/^(tel|phone|mobile):\s*/i, "").trim(),
+          );
+          resultElements.push(
+            `<div style="font-size: 12px; color: #334155; margin-top: 2px;"><strong>Tel:</strong> <a href="tel:${telVal}" style="color: #334155; text-decoration: none;">${telVal}</a></div>`,
+          );
         } else {
-          resultElements.push(`<div style="font-size: 12px; color: #475569; margin-top: 2px;">${line}</div>`);
+          resultElements.push(
+            `<div style="font-size: 12px; color: #475569; margin-top: 2px;">${escapeHtml(line)}</div>`,
+          );
         }
       });
 
@@ -146,30 +229,53 @@ export class EmailService {
       `;
     }
 
-    // Default Structured Signature
+    const safeFullName = escapeHtml(fullName || "QA/QC Engineer");
+    const safeTitle = escapeHtml(title);
+    const safeEmail = escapeHtml(email);
+    const safePhone = escapeHtml(phone);
+
     return `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
-        <div style="font-weight: 800; font-size: 14px; color: #0f172a;">${fullName || "QA/QC Engineer"}</div>
-        ${title ? `<div style="font-weight: 600; font-size: 13px; color: #475569; margin-top: 2px;">${title}</div>` : ""}
+        <div style="font-weight: 800; font-size: 14px; color: #0f172a;">${safeFullName}</div>
+        ${safeTitle ? `<div style="font-weight: 600; font-size: 13px; color: #475569; margin-top: 2px;">${safeTitle}</div>` : ""}
         ${logoHtml}
-        ${email ? `<div style="font-size: 12px; color: #334155; margin-top: 4px;"><strong>Email:</strong> <a href="mailto:${email}" style="color: #2563eb; text-decoration: underline;">${email}</a></div>` : ""}
-        ${phone ? `<div style="font-size: 12px; color: #334155; margin-top: 2px;"><strong>Tel:</strong> <a href="tel:${phone}" style="color: #334155; text-decoration: none;">${phone}</a></div>` : ""}
+        ${safeEmail ? `<div style="font-size: 12px; color: #334155; margin-top: 4px;"><strong>Email:</strong> <a href="mailto:${safeEmail}" style="color: #2563eb; text-decoration: underline;">${safeEmail}</a></div>` : ""}
+        ${safePhone ? `<div style="font-size: 12px; color: #334155; margin-top: 2px;"><strong>Tel:</strong> <a href="tel:${safePhone}" style="color: #334155; text-decoration: none;">${safePhone}</a></div>` : ""}
       </div>
     `;
   }
 
   /**
-   * Determine the API endpoint URL for sending emails via Netlify Function
+   * Encrypts a custom SMTP password server-side using AES-256-GCM bound to the user's UID.
+   * Plaintext passwords are never stored in Firestore, IndexedDB, localStorage, or audit logs.
    */
-  private static getApiUrl(): string {
-    return "/.netlify/functions/send-email";
+  public static async encryptSmtpPassword(rawPassword: string): Promise<string> {
+    const trimmed = rawPassword.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("enc:v1:")) return trimmed;
+
+    const { ok, data } = await postEmailEndpoint({
+      action: "encrypt_smtp",
+      password: trimmed,
+    });
+    if (!ok || !data?.encryptedPassword) {
+      throw new Error(
+        data?.error ||
+          "Unable to encrypt SMTP password via server security service.",
+      );
+    }
+    return String(data.encryptedPassword);
   }
 
   /**
-   * Check whether SMTP is properly configured across Company & User Profile
+   * Checks whether custom tenant/user SMTP is configured, or if platform server env SMTP will be used.
    */
-  public static isSMTPConfigured(company: Company | null, currentUser: UserProfile | null): {
+  public static isSMTPConfigured(
+    company: Company | null,
+    currentUser: UserProfile | null,
+  ): {
     configured: boolean;
+    mode: "custom" | "platform";
     missing: string[];
   } {
     const missing: string[] = [];
@@ -183,12 +289,19 @@ export class EmailService {
     if (!currentUser?.smtpCredentials?.username) {
       missing.push("Personal Email / Username (in Profile)");
     }
-    if (!currentUser?.smtpCredentials?.password) {
-      missing.push("Personal App Password (in Profile)");
+    const hasSecret = Boolean(
+      currentUser?.smtpCredentials?.encryptedPassword ||
+        currentUser?.smtpCredentials?.hasSavedPassword,
+    );
+    if (!hasSecret) {
+      missing.push("Encrypted App Password (in Profile)");
     }
 
+    const hasCustom = missing.length === 0;
     return {
-      configured: missing.length === 0,
+      // Platform Server SMTP acts as default fallback when custom SMTP is not configured
+      configured: true,
+      mode: hasCustom ? "custom" : "platform",
       missing,
     };
   }
@@ -199,6 +312,7 @@ export class EmailService {
   public static async testSMTPConnection(options: TestSMTPOptions): Promise<{
     success: boolean;
     message: string;
+    encryptedPassword?: string;
     error?: string;
     code?: string;
   }> {
@@ -210,24 +324,20 @@ export class EmailService {
           port: options.port,
           secure: options.secure,
           user: options.username,
-          pass: options.password,
+          pass: options.password || undefined,
+          encryptedPass: options.encryptedPassword || undefined,
           fromName: options.senderDisplayName || "Jay-QMS Test",
           fromEmail: options.senderEmail || options.username,
         },
-        to: options.testRecipientEmail || options.senderEmail || options.username,
+        to:
+          options.testRecipientEmail ||
+          options.senderEmail ||
+          options.username,
       };
 
-      const response = await fetch(this.getApiUrl(), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      const { ok, data } = await postEmailEndpoint(payload);
 
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
+      if (!ok || !data.success) {
         return {
           success: false,
           message: data.error || "SMTP Authentication failed.",
@@ -239,19 +349,22 @@ export class EmailService {
       return {
         success: true,
         message: data.message || "SMTP connection verified successfully!",
+        encryptedPassword: data.encryptedPassword,
       };
     } catch (err: any) {
       console.error("Test SMTP failed:", err);
       return {
         success: false,
-        message: err.message || "Failed to reach email dispatch service. Check network or Netlify function status.",
+        message:
+          err.message ||
+          "Failed to reach email dispatch service. Check network or Netlify function status.",
         error: err.toString(),
       };
     }
   }
 
   /**
-   * Send an Email combining Company Server settings and User credentials
+   * Send an Email using Custom Encrypted Tenant SMTP (if configured) or Server Env SMTP by default.
    */
   public static async sendEmail(options: SendEmailOptions): Promise<{
     success: boolean;
@@ -261,31 +374,47 @@ export class EmailService {
     const { company, currentUser } = options;
     const smtpStatus = this.isSMTPConfigured(company, currentUser);
 
-    if (!smtpStatus.configured) {
-      throw new Error(`SMTP not fully configured. Missing: ${smtpStatus.missing.join(", ")}`);
-    }
+    const smtpServer = company?.settings?.smtpServer;
+    const userCreds = currentUser?.smtpCredentials;
 
-    const smtpServer = company!.settings!.smtpServer!;
-    const userCreds = currentUser!.smtpCredentials!;
-
-    const senderEmail = userCreds.senderEmail || userCreds.username!;
+    const senderEmail =
+      userCreds?.senderEmail ||
+      userCreds?.username ||
+      currentUser?.email ||
+      company?.email ||
+      "notifications@jayqms.app";
     const senderDisplayName =
-      userCreds.senderDisplayName || currentUser?.displayName || currentUser?.fullName || smtpServer.defaultSenderName || "Jay-QMS";
+      userCreds?.senderDisplayName ||
+      currentUser?.displayName ||
+      currentUser?.fullName ||
+      smtpServer?.defaultSenderName ||
+      company?.name ||
+      "Jay-QMS";
+
+    const useCustom =
+      smtpStatus.mode === "custom" &&
+      Boolean(smtpServer?.host && userCreds?.username && userCreds?.encryptedPassword);
 
     const payload = {
-      smtp: {
-        host: smtpServer.host,
-        port: smtpServer.port,
-        secure: smtpServer.secure,
-        user: userCreds.username!,
-        pass: userCreds.password!,
-        fromName: senderDisplayName,
-        fromEmail: senderEmail,
-      },
+      usePlatformSmtp: !useCustom,
+      smtp: useCustom
+        ? {
+            host: smtpServer!.host,
+            port: smtpServer!.port,
+            secure: smtpServer!.secure,
+            user: userCreds!.username!,
+            encryptedPass: userCreds!.encryptedPassword!,
+            fromName: senderDisplayName,
+            fromEmail: senderEmail,
+          }
+        : {
+            fromName: senderDisplayName,
+            fromEmail: senderEmail,
+          },
       to: options.to,
       cc: options.cc,
       bcc: options.bcc,
-      replyTo: senderEmail,
+      replyTo: currentUser?.email || senderEmail,
       subject: options.subject,
       text: options.text,
       html: options.html,
@@ -293,17 +422,9 @@ export class EmailService {
     };
 
     try {
-      const response = await fetch(this.getApiUrl(), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      const { ok, data } = await postEmailEndpoint(payload);
 
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
+      if (!ok || !data.success) {
         const errorMsg = data.error || "Failed to send email via SMTP.";
         await this.logEmailCommunication({
           options,
@@ -318,7 +439,6 @@ export class EmailService {
         };
       }
 
-      // Log success to Firestore
       await this.logEmailCommunication({
         options,
         status: "SENT",
@@ -348,7 +468,7 @@ export class EmailService {
   }
 
   /**
-   * Log email communication record to Firestore for auditing and web app feedback tracking
+   * Log email communication record to Firestore using cleanForFirestore so optional undefined fields never fail.
    */
   private static async logEmailCommunication(params: {
     options: SendEmailOptions;
@@ -359,46 +479,71 @@ export class EmailService {
   }): Promise<void> {
     try {
       const { options, status, errorMessage, senderEmail, senderName } = params;
-      const logId = `eml-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const resolvedCompanyId =
+        options.company?.id || options.currentUser?.companyId || "";
+      if (!resolvedCompanyId) return;
+
+      const randomPart =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID().slice(0, 8)
+          : Math.random().toString(36).substring(2, 10);
+      const logId = `eml-${Date.now()}-${randomPart}`;
       const logRef = doc(firestore, "emailCommunications", logId);
 
-      const logRecord: EmailCommunicationLog = {
+      const logRecord: EmailCommunicationLog = cleanForFirestore({
         id: logId,
-        companyId: options.company?.id || options.currentUser?.companyId || "global",
-        projectId: options.projectId,
-        senderUid: options.currentUser?.uid || "system",
-        senderName: senderName,
-        senderEmail: senderEmail,
+        companyId: resolvedCompanyId,
+        projectId: options.projectId || undefined,
+        senderUid: options.currentUser?.uid || auth.currentUser?.uid || "system",
+        senderName,
+        senderEmail,
         recipients: Array.isArray(options.to) ? options.to : [options.to],
-        cc: options.cc ? (Array.isArray(options.cc) ? options.cc : [options.cc]) : undefined,
-        bcc: options.bcc ? (Array.isArray(options.bcc) ? options.bcc : [options.bcc]) : undefined,
+        cc: options.cc
+          ? Array.isArray(options.cc)
+            ? options.cc
+            : [options.cc]
+          : undefined,
+        bcc: options.bcc
+          ? Array.isArray(options.bcc)
+            ? options.bcc
+            : [options.bcc]
+          : undefined,
         subject: options.subject,
-        bodyText: options.text,
-        bodyHtml: options.html,
+        bodyText: options.text ? options.text.slice(0, 20_000) : undefined,
+        bodyHtml: options.html ? options.html.slice(0, 40_000) : undefined,
         module: options.module || "GENERAL",
-        referenceId: options.referenceId,
-        referenceTitle: options.referenceTitle,
-        status: status,
-        errorMessage: errorMessage,
-        hasAttachments: !!(options.attachments && options.attachments.length > 0),
+        referenceId: options.referenceId || undefined,
+        referenceTitle: options.referenceTitle || undefined,
+        status,
+        errorMessage: errorMessage || undefined,
+        hasAttachments: Boolean(
+          options.attachments && options.attachments.length > 0,
+        ),
         attachmentNames: options.attachments?.map((a) => a.filename),
         sentAt: new Date().toISOString(),
-      };
+      });
 
       await setDoc(logRef, logRecord);
     } catch (logErr) {
-      console.warn("Could not write email communication log to Firestore:", logErr);
+      console.warn(
+        "Could not write email communication log to Firestore:",
+        logErr,
+      );
     }
   }
 
   /**
-   * Fetch recent email communications for a project or company
+   * Fetch recent email communications scoped strictly to a tenant companyId.
    */
-  public static async getEmailLogs(companyId: string, projectId?: string): Promise<EmailCommunicationLog[]> {
+  public static async getEmailLogs(
+    companyId: string,
+    projectId?: string,
+  ): Promise<EmailCommunicationLog[]> {
+    if (!companyId) return [];
     try {
       const colRef = collection(firestore, "emailCommunications");
-      let q = query(colRef, where("companyId", "==", companyId));
-      
+      const q = query(colRef, where("companyId", "==", companyId));
+
       const snap = await getDocs(q);
       const logs: EmailCommunicationLog[] = [];
       snap.forEach((docSnap) => {
@@ -408,8 +553,9 @@ export class EmailService {
         }
       });
 
-      // Sort newest first
-      return logs.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
+      return logs.sort(
+        (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
+      );
     } catch (err) {
       console.warn("Error fetching email logs:", err);
       return [];

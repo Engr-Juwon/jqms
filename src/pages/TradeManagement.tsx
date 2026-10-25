@@ -25,7 +25,7 @@ export const TradeManagement: React.FC = () => {
     currentUser?.companyId ||
     company?.id ||
     activeProject?.companyId ||
-    "comp-apex-civil";
+    "";
 
   const [trades, setTrades] = useState<MasterTrade[]>([]);
   const [loading, setLoading] = useState(true);

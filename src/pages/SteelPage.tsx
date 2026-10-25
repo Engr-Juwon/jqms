@@ -24,22 +24,22 @@ export const SteelPage: React.FC = () => {
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-apex-civil";
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+    currentUser?.companyId || company?.id || activeProject?.companyId || "";
+  const currentProjId = projectId || activeProject?.id || "";
 
   const [tests, setTests] = useState<SteelRebarTest[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
 
   // New Steel Test Form state
-  const [heatNumber, setHeatNumber] = useState("HT-99830-C");
-  const [supplier, setSupplier] = useState("Emirates Steel Industries");
-  const [millName, setMillName] = useState("Rolling Mill #2");
-  const [barDiameterMm, setBarDiameterMm] = useState<any>(25);
+  const [heatNumber, setHeatNumber] = useState("");
+  const [supplier, setSupplier] = useState("");
+  const [millName, setMillName] = useState("");
+  const [barDiameterMm, setBarDiameterMm] = useState<any>(16);
   const [steelGrade, setSteelGrade] = useState<any>("Grade 500B");
-  const [yieldStrength, setYieldStrength] = useState<number>(540);
-  const [uts, setUts] = useState<number>(635);
-  const [elongation, setElongation] = useState<number>(16.2);
+  const [yieldStrength, setYieldStrength] = useState<number>(500);
+  const [uts, setUts] = useState<number>(600);
+  const [elongation, setElongation] = useState<number>(14);
   const [bendResult, setBendResult] = useState<"PASS" | "FAIL">("PASS");
   const [rebendResult, setRebendResult] = useState<"PASS" | "FAIL">("PASS");
 
@@ -76,7 +76,7 @@ export const SteelPage: React.FC = () => {
     const newTest: SteelRebarTest = {
       id: `stl-${Date.now()}`,
       projectId: currentProjId,
-      companyId: company?.id || "comp-apex-civil",
+      companyId: currentCompId,
       testNumber: `STL-2026-${String(Math.floor(Math.random() * 800 + 100)).padStart(3, "0")}`,
       heatNumber,
       supplier,
@@ -94,7 +94,7 @@ export const SteelPage: React.FC = () => {
       rebendTestResult: rebendResult,
       overallStatus: isPassing ? "PASS" : "FAIL",
       labName: "Central Materials Testing Laboratory",
-      testedBy: currentUser?.fullName || "Eng. Vikram Rao",
+      testedBy: currentUser?.fullName || "QA Technician",
       createdAt: new Date().toISOString(),
     };
 
@@ -103,7 +103,7 @@ export const SteelPage: React.FC = () => {
     if (currentUser) {
       await writeAudit({
         projectId: currentProjId,
-        companyId: company?.id || "comp-apex-civil",
+        companyId: currentCompId,
         userId: currentUser.uid,
         userName: currentUser.fullName,
         userRole: currentUser.role,

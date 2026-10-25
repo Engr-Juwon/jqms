@@ -87,7 +87,7 @@
       "name": "Concrete Cube Registry",
       "short_name": "Cubes",
       "description": "Concrete compressive strength testing and early prediction",
-      "url": "/project/cube-tests",
+      "url": "/project/concrete",
       "icons": [
         {
           "src": "/icon-192.png",

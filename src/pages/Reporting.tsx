@@ -38,8 +38,8 @@ export const Reporting: React.FC = () => {
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-apex-civil";
-  const currentProjId = activeProject?.id || "proj-skyline-tower";
+    currentUser?.companyId || company?.id || activeProject?.companyId || "";
+  const currentProjId = activeProject?.id || "";
 
   const [comments, setComments] = useState<SiteCommentReport[]>([]);
   const [ncrs, setNcrs] = useState<NonConformanceReport[]>([]);

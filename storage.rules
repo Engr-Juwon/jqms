@@ -1,0 +1,50 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function isActiveTenantMember(companyId) {
+      return isSignedIn()
+        && companyId != ''
+        && getUserDoc() != null
+        && getUserDoc().data.companyId == companyId
+        && !(getUserDoc().data.get('status', 'ACTIVE') in ['INACTIVE', 'SUSPENDED', 'DISABLED'])
+        && getUserDoc().data.get('isActive', true) != false;
+    }
+
+    function isSafeMediaUpload() {
+      return request.resource != null
+        && request.resource.size <= 25 * 1024 * 1024
+        && request.resource.contentType != null
+        && !request.resource.contentType.matches('.*svg.*')
+        && !request.resource.contentType.matches('text/html.*')
+        && !request.resource.contentType.matches('.*javascript.*')
+        && (
+          request.resource.contentType.matches('image/(jpeg|jpg|png|webp|gif|heic|heif)')
+          || request.resource.contentType.matches('audio/.*')
+          || request.resource.contentType == 'application/pdf'
+          || request.resource.contentType == 'text/plain'
+          || request.resource.contentType == 'text/csv'
+          || request.resource.contentType.matches('application/vnd\\..*')
+          || request.resource.contentType == 'application/msword'
+          || request.resource.contentType == 'application/zip'
+        );
+    }
+
+    match /companies/{companyId}/{allPaths=**} {
+      allow read: if isActiveTenantMember(companyId);
+      allow create, update: if isActiveTenantMember(companyId) && isSafeMediaUpload();
+      allow delete: if isActiveTenantMember(companyId);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

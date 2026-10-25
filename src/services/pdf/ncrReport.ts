@@ -6,6 +6,16 @@ export interface NCRPhoto {
   timestamp?: string;
 }
 
+export function escapeHtml(str: any): string {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 export const formatAlphanumericDate = (dateStr?: string | number | null): string => {
   if (!dateStr || dateStr === "—" || dateStr === "N/A" || dateStr === "Not set") return "—";
   const date = typeof dateStr === "number" ? new Date(dateStr) : new Date(dateStr);
@@ -153,10 +163,9 @@ export const generateStandardNCRPDF = (data: StandardNCRPDFData): void => {
         
         @page {
           size: A4 portrait;
-          margin: 0;
-        }
+          margin: 12mm 10mm 14mm 10mm;
           @bottom-left {
-            content: "CONFIDENTIAL & PROPRIETARY — ${data.companyName || "JQMS"}";
+            content: "CONFIDENTIAL & PROPRIETARY — ${escapeHtml(data.companyName || "JQMS")}";
             font-family: 'Segoe UI', -apple-system, sans-serif;
             font-size: 7.5px;
             color: #64748b;
@@ -548,9 +557,15 @@ export const generateStandardNCRPDF = (data: StandardNCRPDFData): void => {
       </div>
 
       <script>
-        window.onload = () => {
-          window.print();
-        };
+        window.addEventListener('load', () => {
+          const images = Array.from(document.images);
+          Promise.all(images.map((img) => img.complete ? Promise.resolve() : new Promise((res) => { img.onload = res; img.onerror = res; })))
+            .then(() => {
+              setTimeout(() => {
+                window.print();
+              }, 300);
+            });
+        });
       </script>
     </body>
     </html>

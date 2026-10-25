@@ -3,12 +3,41 @@
   functions = "netlify/functions"
   publish = "dist"
 
+[build.environment]
+  NODE_VERSION = "20"
+  FIREBASE_PROJECT_ID = "benchmark-jescode-2e842"
+  CLOUDINARY_CLOUD_NAME = "dpcnanmjl"
+  SMTP_ENCRYPTION_KEY = "jqms-enterprise-benchmark-jescode-2e842-aes256gcm-key"
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
+# Prevent 200 HTML fallback on missing static chunk files (anti-brick protection)
+[[redirects]]
+  from = "/assets/*"
+  to = "/404.html"
+  status = 404
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Aggressive immutable caching for hashed production assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Never cache index.html or service worker
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"

@@ -5,14 +5,16 @@ import { useProjectStore } from "@/stores/useProjectStore";
 import { dbService } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { hasPermission } from "@/lib/rbac";
-import { LevelElementSelect } from "@/components/sitecomments/LevelElementSelect";
+import MultiLevelElementSelect, {
+  SelectedElementItem,
+} from "@/components/masterdata/MultiLevelElementSelect";
 import {
   ConcreteCubeSample,
   TestAge,
   IndividualCubeRecord,
   NonConformanceReport,
 } from "@/types";
-import { generateNcrNumber } from "@/lib/naming";
+import { generateCubeNumber, generateNcrNumber } from "@/lib/naming";
 import { plannerSync } from "@/lib/plannerSync";
 import {
   FlaskConical,
@@ -39,80 +41,98 @@ export const CubeForm: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser, company } = useAuthStore();
   const { activeProject } = useProjectStore();
-  const currentProjId = activeProject?.id || projectId || "proj-skyline-tower";
+  const currentProjId = activeProject?.id || projectId || "";
   const currentCompId =
     currentUser?.companyId ||
     company?.id ||
     activeProject?.companyId ||
-    "comp-apex-civil";
+    "";
   const canCreateSample = hasPermission(currentUser?.role, "CREATE_CONCRETE_SAMPLE");
 
   // Section 1: Structural Location & Traceability
-  const [sampleId, setSampleId] = useState(
-    () =>
-      `CDL-BS-CUBE-${String(Math.floor(Math.random() * 800 + 100)).padStart(4, "0")}`,
+  const [sampleId, setSampleId] = useState(() =>
+    generateCubeNumber(activeProject?.code),
   );
-  const [inscribedName, setInscribedName] = useState("S3");
+  const [inscribedName, setInscribedName] = useState("");
   const [levelId, setLevelId] = useState(activeProject?.currentLevelId || "");
   const [levelName, setLevelName] = useState(
-    activeProject?.currentLevelName || "0 - Foundation",
+    activeProject?.currentLevelName || "",
   );
   const [elementId, setElementId] = useState("");
-  const [elementName, setElementName] = useState("Pile Cap");
-  const [zone, setZone] = useState("PILE CAPS 4, 5, 6, 7");
+  const [elementName, setElementName] = useState("");
+  const [selectedElements, setSelectedElements] = useState<
+    SelectedElementItem[]
+  >([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSelectedElementsChange = (items: SelectedElementItem[]) => {
+    setSelectedElements(items);
+    if (items.length > 0) {
+      const names = items.map((i) => i.elementName).join(", ");
+      const grids = Array.from(
+        new Set(items.map((i) => i.grid).filter(Boolean)),
+      ).join(", ");
+      const levels = Array.from(
+        new Set(items.map((i) => i.levelName).filter(Boolean)),
+      ).join(", ");
+      setElementName(names);
+      setElementId(items[0].id);
+      if (items[0].levelId) setLevelId(items[0].levelId);
+      if (levels) setLevelName(levels);
+      if (grids && !gridReference) setGridReference(grids);
+    } else {
+      setElementName("");
+      setElementId("");
+    }
+  };
+  const [zone, setZone] = useState("");
   const [block, setBlock] = useState("");
   const [chainage, setChainage] = useState("");
   const [gridReference, setGridReference] = useState("");
-  const [pourReference, setPourReference] = useState("PTP-2026-0012");
-  const [ITPReference, setITPReference] = useState("ITP-CIV-004");
-  const [RFINumber, setRFINumber] = useState("RFI-2026-088");
-  const [drawingReference, setDrawingReference] = useState("DWG-STR-104-REV2");
+  const [pourReference, setPourReference] = useState("");
+  const [ITPReference, setITPReference] = useState("");
+  const [RFINumber, setRFINumber] = useState("");
+  const [drawingReference, setDrawingReference] = useState("");
 
   // Section 2: Concrete Mix Design & Delivery
   const [concreteGrade, setConcreteGrade] = useState("C30");
   const [target28DayStrength, setTarget28DayStrength] = useState<number>(30);
   const [mixType, setMixType] = useState<string>("Design Mix");
   const [cementType, setCementType] = useState<string>("OPC Type I");
-  const [supplier, setSupplier] = useState("LEVITICAL");
-  const [batchingPlant, setBatchingPlant] = useState(
-    "Central ReadyMix Plant #1",
-  );
-  const [truckNumber, setTruckNumber] = useState("TRK-884");
-  const [batchTicketNumber, setBatchTicketNumber] = useState("BT-99014");
-  const [deliveryNoteNumber, setDeliveryNoteNumber] = useState("DN-99412");
+  const [supplier, setSupplier] = useState("");
+  const [batchingPlant, setBatchingPlant] = useState("");
+  const [truckNumber, setTruckNumber] = useState("");
+  const [batchTicketNumber, setBatchTicketNumber] = useState("");
+  const [deliveryNoteNumber, setDeliveryNoteNumber] = useState("");
   const [maximumAggregateSize, setMaximumAggregateSize] = useState("20mm");
-  const [aggregateSource, setAggregateSource] = useState(
-    "Quarry A Crushed Granite",
-  );
-  const [admixtureType, setAdmixtureType] = useState(
-    "Polycarboxylate Superplasticizer",
-  );
-  const [admixtureDosage, setAdmixtureDosage] = useState("0.8% by cement wt");
+  const [aggregateSource, setAggregateSource] = useState("");
+  const [admixtureType, setAdmixtureType] = useState("");
+  const [admixtureDosage, setAdmixtureDosage] = useState("");
   const [waterCementRatio, setWaterCementRatio] = useState<number | string>(
     "0.40",
   );
 
   // Section 3: Fresh Concrete Field Tests & Acceptance
   const [slumpMm, setSlumpMm] = useState<number>(120);
-  const [slumpTestTime, setSlumpTestTime] = useState("09:15");
+  const [slumpTestTime, setSlumpTestTime] = useState("");
   const [freshConcreteAccepted, setFreshConcreteAccepted] =
     useState<boolean>(true);
   const [rejectionReason, setRejectionReason] = useState("");
-  const [concreteTempCelsius, setConcreteTempCelsius] = useState<number>(28.5);
-  const [ambientTemperature, setAmbientTemperature] = useState("32°C");
-  const [densityKgM3, setDensityKgM3] = useState<number>(2420);
-  const [airContent, setAirContent] = useState("1.8%");
+  const [concreteTempCelsius, setConcreteTempCelsius] = useState<number>(28);
+  const [ambientTemperature, setAmbientTemperature] = useState("");
+  const [densityKgM3, setDensityKgM3] = useState<number>(2400);
+  const [airContent, setAirContent] = useState("");
   const [samplingMethod, setSamplingMethod] = useState("BS EN 12350-1");
   const [sampleCondition, setSampleCondition] = useState("Good");
   const [castDate, setCastDate] = useState(
     () => new Date().toISOString().split("T")[0],
   );
-  const [castTime, setCastTime] = useState("09:11");
+  const [castTime, setCastTime] = useState("");
   const [samplerName, setSamplerName] = useState(
     currentUser?.fullName || "QA/QC Site Technician",
   );
   const [qaqcInspector, setQaqcInspector] = useState(
-    "Eng. David K. (QA/QC Eng)",
+    currentUser?.fullName || "",
   );
 
   // Section 4: Specimen Molds & Curing Regimen
@@ -186,13 +206,23 @@ export const CubeForm: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!canCreateSample) {
       toast.error("You do not have permission to register concrete samples");
       return;
     }
-    if (!currentProjId) {
-      toast.error("Project ID missing");
+    if (!currentProjId || !currentCompId) {
+      toast.error("Active project workspace required");
       return;
+    }
+
+    setIsSubmitting(true);
+    let finalSampleId = sampleId;
+    try {
+      const seq = await dbService.getNextSequenceNumber(currentCompId, currentProjId, "CUBE");
+      finalSampleId = seq.formattedCode;
+    } catch {
+      // fallback
     }
 
     const castDateObj = new Date(castDate);
@@ -243,13 +273,16 @@ export const CubeForm: React.FC = () => {
 
     const newSample: ConcreteCubeSample = {
       id: `cube-${Date.now()}`,
-      sampleId: sampleId.trim() || `CUBE-${Date.now()}`,
+      sampleId: finalSampleId.trim() || `CUBE-${Date.now()}`,
       inscribedName: inscribedName.trim() || "S1",
       projectId: currentProjId,
       companyId: currentCompId,
       elementId,
       elementName: elementName || "Structural Element",
       structureElement: elementName || "Structural Element",
+      elementIds: selectedElements.map((e) => e.id),
+      elementNames: selectedElements.map((e) => e.elementName),
+      elementsData: selectedElements,
       levelId,
       levelName: levelName || "Site Level",
       level: levelName || "Site Level",
@@ -514,13 +547,15 @@ Measured Slump: ${slumpMm} mm | Concrete Temp: ${concreteTempCelsius}°C.`,
 
       toast.success(
         freshConcreteAccepted
-          ? `Cube sample ${sampleId} successfully registered!`
-          : `Sample ${sampleId} registered as REJECTED. Non-conformance report issued!`,
+          ? `Cube sample ${finalSampleId} successfully registered!`
+          : `Sample ${finalSampleId} registered as REJECTED. Non-conformance report issued!`,
       );
       navigate(`/project/${currentProjId}/concrete/${newSample.id}`);
     } catch (err: any) {
       console.error("Failed to save cube sample:", err);
       toast.error("Failed to save cube sample.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -621,22 +656,13 @@ Measured Slump: ${slumpMm} mm | Concrete Temp: ${concreteTempCelsius}°C.`,
             </div>
           </div>
 
-          <LevelElementSelect
+          <MultiLevelElementSelect
             projectId={currentProjId}
             companyId={currentCompId}
-            selectedLevelId={levelId}
-            selectedLevelName={levelName}
-            selectedElementId={elementId}
-            selectedElementName={elementName}
-            onLevelChange={(lId, lName) => {
-              setLevelId(lId);
-              setLevelName(lName);
-            }}
-            onElementChange={(elId, elName) => {
-              setElementId(elId);
-              setElementName(elName);
-            }}
+            selectedElements={selectedElements}
+            onChange={handleSelectedElementsChange}
             required
+            label="Structural Elements Represented by Cube Samples"
           />
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">

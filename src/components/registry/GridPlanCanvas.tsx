@@ -48,6 +48,7 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { isQAQCUser } from "@/lib/permissions";
 import { uploadImage, getThumbnail } from "@/lib/cloudinary";
 import { syncPhotoToSiteGallery } from "@/lib/photoSync";
+import { generateUniversalName } from "@/lib/naming";
 import { toast } from "react-hot-toast";
 import { GridSnapshotModal } from "./GridSnapshotModal";
 
@@ -366,12 +367,12 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
 }) => {
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
-  const currentProjId = projectId || activeProject?.id || "proj-default";
+  const currentProjId = projectId || activeProject?.id || "";
   const currentCompId =
     currentUser?.companyId ||
     company?.id ||
     activeProject?.companyId ||
-    "comp-default";
+    "";
 
   const [zoom, setZoom] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 80, y: 80 });
@@ -508,6 +509,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
         index,
         el.gridX,
         el.gridZ,
+        el.baseOffsetX,
+        el.baseOffsetY,
       );
       elMap.set(el.id, coords);
     });
@@ -673,7 +676,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
             ctx.lineWidth = 2;
             ctx.strokeRect(itemX, itemY - 12, 18, 18);
 
-            ctx.fillStyle = "#e2e8f0";
+            ctx.fillStyle = isLight ? "#0f172a" : "#e2e8f0";
             ctx.font = "normal 12px sans-serif";
             ctx.fillText(item.label, itemX + 26, itemY + 2);
           });
@@ -693,7 +696,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
             ctx.arc(itemX + 8, itemY - 3, 8, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.fillStyle = "#e2e8f0";
+            ctx.fillStyle = isLight ? "#0f172a" : "#e2e8f0";
             ctx.font = "normal 13px sans-serif";
             ctx.fillText(item.label, itemX + 26, itemY + 2);
           });
@@ -714,7 +717,7 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
             ctx.lineWidth = 1.5;
             ctx.strokeRect(itemX, itemY - 12, 18, 18);
 
-            ctx.fillStyle = "#e2e8f0";
+            ctx.fillStyle = isLight ? "#0f172a" : "#e2e8f0";
             ctx.font = "normal 13px sans-serif";
             ctx.fillText(item.label, itemX + 26, itemY + 2);
           });
@@ -728,7 +731,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
         "_",
       );
       const cleanLvl = currentLvlName.replace(/[^a-zA-Z0-9]/g, "_");
-      const fileName = `GridPlan_${cleanProj}_${cleanLvl}_${activeLayer}_${Date.now()}.png`;
+      const fileName = generateUniversalName(
+        activeProject?.code || cleanProj,
+        "PHOTO",
+        { extension: "png" }
+      );
 
       const downloadLink = document.createElement("a");
       downloadLink.href = pngURL;
@@ -3027,6 +3034,11 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                 const colR = colGeom.radiusPx;
                 const isCircular = colGeom.isCircular;
 
+                const incInfo = colGeom.inclinationInfo;
+                const isSlanted = incInfo.isInclined;
+                const dxPx = isSlanted ? incInfo.deltaX * scaleFactor : 0;
+                const dyPx = isSlanted ? incInfo.deltaY * scaleFactor : 0;
+
                 return (
                   <g
                     key={`col-${el.id}`}
@@ -3037,6 +3049,89 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                     onMouseLeave={() => setHoveredElement(null)}
                     opacity={isMatching ? 1 : 0.2}
                   >
+                    {/* Slanted / Inclined Column Projection (Top Footprint & Direction Vector) */}
+                    {isSlanted && (
+                      <g className="pointer-events-none">
+                        {/* Connecting axis guide */}
+                        <line
+                          x1={cx}
+                          y1={cy}
+                          x2={cx + dxPx}
+                          y2={cy + dyPx}
+                          stroke="#f59e0b"
+                          strokeWidth="2"
+                          strokeDasharray="4 2"
+                          strokeOpacity="0.85"
+                        />
+                        {/* Slant Arrow Pointer */}
+                        {(() => {
+                          const angle = Math.atan2(dyPx, dxPx);
+                          const arrowLen = 7;
+                          const tipX = cx + dxPx;
+                          const tipY = cy + dyPx;
+                          const p1X = tipX - arrowLen * Math.cos(angle - Math.PI / 6);
+                          const p1Y = tipY - arrowLen * Math.sin(angle - Math.PI / 6);
+                          const p2X = tipX - arrowLen * Math.cos(angle + Math.PI / 6);
+                          const p2Y = tipY - arrowLen * Math.sin(angle + Math.PI / 6);
+                          return (
+                            <polygon
+                              points={`${tipX},${tipY} ${p1X},${p1Y} ${p2X},${p2Y}`}
+                              fill="#f59e0b"
+                            />
+                          );
+                        })()}
+                        {/* Top Projected Footprint */}
+                        {isCircular ? (
+                          <circle
+                            cx={cx + dxPx}
+                            cy={cy + dyPx}
+                            r={colR}
+                            fill="none"
+                            stroke="#f59e0b"
+                            strokeWidth="1.8"
+                            strokeDasharray="3 2"
+                            strokeOpacity="0.9"
+                          />
+                        ) : (
+                          <>
+                            {/* Corner projection guide lines */}
+                            <line
+                              x1={cx - colW / 2}
+                              y1={cy - colH / 2}
+                              x2={cx + dxPx - colW / 2}
+                              y2={cy + dyPx - colH / 2}
+                              stroke="#f59e0b"
+                              strokeWidth="1"
+                              strokeDasharray="2 2"
+                              strokeOpacity="0.45"
+                            />
+                            <line
+                              x1={cx + colW / 2}
+                              y1={cy + colH / 2}
+                              x2={cx + dxPx + colW / 2}
+                              y2={cy + dyPx + colH / 2}
+                              stroke="#f59e0b"
+                              strokeWidth="1"
+                              strokeDasharray="2 2"
+                              strokeOpacity="0.45"
+                            />
+                            <rect
+                              x={cx + dxPx - colW / 2}
+                              y={cy + dyPx - colH / 2}
+                              width={colW}
+                              height={colH}
+                              rx="3"
+                              fill="none"
+                              stroke="#f59e0b"
+                              strokeWidth="1.8"
+                              strokeDasharray="3 2"
+                              strokeOpacity="0.9"
+                            />
+                          </>
+                        )}
+                      </g>
+                    )}
+
                     {isCircular ? (
                       <g>
                         <circle

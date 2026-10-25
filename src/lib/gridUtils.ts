@@ -190,8 +190,37 @@ export function resolveElementGridCoords(
   fallbackIndex: number = 0,
   explicitGridX?: number,
   explicitGridZ?: number,
+  baseOffsetX?: number,
+  baseOffsetY?: number,
 ): ResolvedElementCoords {
-  let str = normalizeGridLabel(rawGrid);
+  let parsedOffsetX = 0;
+  let parsedOffsetY = 0;
+  let cleanRawGrid = (rawGrid || "").trim();
+
+  // Match explicit offset syntax like "+ 1.0m", "+ 1m E", "+1", or " - 0.5m", " - 500mm"
+  // MUST NEVER match hyphenated grid spans like "Grid A-1", "A-1", "1-2", "B/1-2", "Grid A-(1-2)"
+  const matchOffset = cleanRawGrid.match(
+    /(?:(?:\s*\+\s*(\d+(?:\.\d+)?)\s*(m|mm)?(?:\s*([EWNS]))?)|\s+-\s*(\d+(?:\.\d+)?)\s*(m|mm)(?:\s*([EWNS]))?)$/i
+  );
+  if (matchOffset) {
+    const isMinus = !!matchOffset[4];
+    const valStr = matchOffset[1] || matchOffset[4];
+    let distVal = parseFloat(valStr);
+    const unit = (matchOffset[2] || matchOffset[5] || "m").toLowerCase();
+    const dir = (matchOffset[3] || matchOffset[6] || "").toUpperCase();
+    if (!isNaN(distVal)) {
+      if (unit === "mm" || distVal >= 100) distVal = distVal / 1000;
+      if (isMinus || dir === "W") parsedOffsetX = -Math.abs(distVal);
+      else if (dir === "E") parsedOffsetX = Math.abs(distVal);
+      else if (dir === "S") parsedOffsetY = Math.abs(distVal);
+      else if (dir === "N") parsedOffsetY = -Math.abs(distVal);
+      else parsedOffsetX = isMinus ? -Math.abs(distVal) : Math.abs(distVal);
+
+      cleanRawGrid = cleanRawGrid.slice(0, matchOffset.index).trim();
+    }
+  }
+
+  let str = normalizeGridLabel(cleanRawGrid);
 
   // Extract from elementName if grid string is empty
   if (!str && elementName) {
@@ -349,6 +378,25 @@ export function resolveElementGridCoords(
 
   if (x2 === undefined) x2 = x1;
   if (y2 === undefined) y2 = y1;
+
+  // Apply base offsets from grid intersection (e.g. 1m away from A')
+  const effectiveOffsetX =
+    (baseOffsetX !== undefined && !isNaN(baseOffsetX) && baseOffsetX !== 0
+      ? baseOffsetX
+      : parsedOffsetX) * scaleMultiplier;
+  const effectiveOffsetY =
+    (baseOffsetY !== undefined && !isNaN(baseOffsetY) && baseOffsetY !== 0
+      ? baseOffsetY
+      : parsedOffsetY) * scaleMultiplier;
+
+  if (effectiveOffsetX !== 0) {
+    x1 += effectiveOffsetX;
+    x2 += effectiveOffsetX;
+  }
+  if (effectiveOffsetY !== 0) {
+    y1 += effectiveOffsetY;
+    y2 += effectiveOffsetY;
+  }
 
   const dx = x2 - x1;
   const dy = y2 - y1;

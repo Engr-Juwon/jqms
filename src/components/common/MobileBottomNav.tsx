@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { NavLink, useParams, useLocation } from "react-router-dom";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
-import { canAccessRoute } from "@/lib/permissions";
+import { canAccessRoute, isBimEnabledForProject } from "@/lib/permissions";
 import {
   LayoutDashboard,
   FlaskConical,
@@ -73,9 +73,9 @@ export const MobileBottomNav: React.FC = () => {
 
   const primaryNavItems = useMemo(() => {
     return allPrimaryNavItems.filter((item) =>
-      canAccessRoute(currentUser, item.to),
+      canAccessRoute(currentUser, item.to, activeProject),
     );
-  }, [allPrimaryNavItems, currentUser]);
+  }, [allPrimaryNavItems, currentUser, activeProject]);
 
   const drawerSections = [
     {
@@ -355,10 +355,12 @@ export const MobileBottomNav: React.FC = () => {
     return drawerSections
       .map((sec) => ({
         ...sec,
-        items: sec.items.filter((item) => canAccessRoute(currentUser, item.to)),
+        items: sec.items.filter((item) =>
+          canAccessRoute(currentUser, item.to, activeProject),
+        ),
       }))
       .filter((sec) => sec.items.length > 0);
-  }, [drawerSections, currentUser]);
+  }, [drawerSections, currentUser, activeProject]);
 
   return (
     <>

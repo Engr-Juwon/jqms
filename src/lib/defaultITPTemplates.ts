@@ -1,45 +1,64 @@
 import { ITPPlan } from "@/types";
 
+export interface DefaultITPOptions {
+  companyName?: string;
+  officeAddress?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  docPrefix?: string;
+  preparedBy?: string;
+  preparedByTitle?: string;
+}
+
 /**
- * Standard Construction Inspection & Test Plans (ITP)
- * Fully aligned with Collection Developments LTD Quality Plan (CD-QP-001 Rev 01).
- * Office: 3B, Taofik Lawal, Off Awolowo Road, Ikoyi Lagos | www.collection.dev
+ * Standard Construction Inspection & Test Plans (ITP) baseline templates.
+ * Generated strictly as unapproved DRAFT templates with zero pre-signed gates,
+ * scoped to the active tenant organization and project.
  */
-export function generateDefaultITPPlans(projectId: string, companyId: string): ITPPlan[] {
+export function generateDefaultITPPlans(
+  projectId: string,
+  companyId: string,
+  options?: DefaultITPOptions,
+): ITPPlan[] {
+  if (!projectId || !companyId) return [];
+
   const now = new Date().toISOString();
+  const todayFormatted = now.slice(0, 10);
+  const prefix = (options?.docPrefix || "QMS").trim().toUpperCase();
+
   const baseCompany = {
-    companyId: companyId || "comp-collection-dev",
-    companyName: "Collection Developments LTD",
-    officeAddress: "3B, Taofik Lawal, Off Awolowo Road, Ikoyi, Lagos",
-    contactEmail: "info@collection.gp",
-    contactPhone: "+234 (0) 16328782",
-    docCode: "CD-QP-001",
-    revision: "REV. 01",
-    preparedBy: "Oladejo Jesujuwon",
-    preparedByTitle: "QA/QC Engineer",
-    preparedByDate: "18-08-2026",
-    checkedBy: "QA/QC Manager",
+    companyId,
+    companyName: options?.companyName || "",
+    officeAddress: options?.officeAddress || "",
+    contactEmail: options?.contactEmail || "",
+    contactPhone: options?.contactPhone || "",
+    docCode: `${prefix}-QP-001`,
+    revision: "REV. 00",
+    preparedBy: options?.preparedBy || "",
+    preparedByTitle: options?.preparedByTitle || "QA/QC Engineer",
+    preparedByDate: todayFormatted,
+    checkedBy: "",
     checkedByTitle: "Quality Manager",
-    checkedByDate: "20-08-2026",
-    approvedBy: "Structural Engineer of Record",
+    checkedByDate: "",
+    approvedBy: "",
     approvedByTitle: "Lead Consultant / RE",
-    approvedByDate: "22-08-2026",
+    approvedByDate: "",
     createdAt: now,
     updatedAt: now,
   };
 
   return [
-    // 1. ITP FOR MASONRY & FINISHES (APPENDIX B3 OF CD-QP-001)
+    // 1. ITP FOR MASONRY & FINISHES
     {
       ...baseCompany,
       id: `itp-${projectId}-mas-001`,
-      itpNumber: "CD-ITP-MAS-001",
+      itpNumber: `${prefix}-ITP-MAS-001`,
       title: "Inspection & Test Plan for Masonry & Architectural Finishes",
       discipline: "Concrete & Masonry",
       methodStatementRef: "WMS-MAS-002",
       methodStatementTitle: "Method Statement for Blockwork, Plastering & Waterproofing",
       specSection: "Section 04200 - Masonry Units & Section 07100 - Waterproofing",
-      status: "APPROVED",
+      status: "DRAFT",
       projectId,
       items: [
         {
@@ -56,7 +75,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "W",
           contractorQaGate: "R",
           consultantGate: "R",
-          isCompleted: true,
+          isCompleted: false,
           remarks: "Mandatory NIS 87 compliance verified before site placement",
         },
         {
@@ -128,17 +147,17 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
       ],
     },
 
-    // 2. ITP FOR IN-SITU REINFORCED CONCRETE WORKS (SECTION 5.3 & 5.4 OF CD-QP-001)
+    // 2. ITP FOR IN-SITU REINFORCED CONCRETE WORKS
     {
       ...baseCompany,
       id: `itp-${projectId}-con-002`,
-      itpNumber: "CD-ITP-CON-002",
+      itpNumber: `${prefix}-ITP-CON-002`,
       title: "Inspection & Test Plan for In-situ Reinforced Concrete Works",
       discipline: "Civil/Structural",
       methodStatementRef: "WMS-CON-001",
       methodStatementTitle: "Method Statement for Structural Concrete Casting & Curing",
       specSection: "Section 03300 - Cast-in-Place Concrete",
-      status: "APPROVED",
+      status: "DRAFT",
       projectId,
       items: [
         {
@@ -155,7 +174,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "H",
           contractorQaGate: "H",
           consultantGate: "W",
-          isCompleted: true,
+          isCompleted: false,
           remarks: "Inspection before closing beam sides or slab decking",
         },
         {
@@ -172,7 +191,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "H",
           contractorQaGate: "H",
           consultantGate: "H",
-          isCompleted: true,
+          isCompleted: false,
           remarks: "Hold Point: Consultant sign-off required prior to pour card issue",
         },
         {
@@ -189,14 +208,14 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "H",
           contractorQaGate: "H",
           consultantGate: "W",
-          isCompleted: true,
+          isCompleted: false,
         },
         {
           id: "itp-item-con-4",
           itemNo: "4.0",
           activityStage: "4. Pour Authorization",
           itemParameter: "Permit to Pour (PTP) final governance sign-off",
-          referenceStandard: "CD-QP-001 Section 5.3.3",
+          referenceStandard: "Quality Management Plan",
           acceptanceCriteria: "All 5 trade disciplines signed off (Formwork, Rebar, MEP, Survey, Safety); vibrators on standby",
           controlGate: "H",
           responsibleParty: "Quality Manager / Lead QA Engineer",
@@ -205,7 +224,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "H",
           contractorQaGate: "H",
           consultantGate: "H",
-          isCompleted: true,
+          isCompleted: false,
           remarks: "No concrete truck discharge allowed without active approved PTP",
         },
         {
@@ -222,7 +241,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "W",
           contractorQaGate: "W",
           consultantGate: "S",
-          isCompleted: true,
+          isCompleted: false,
         },
         {
           id: "itp-item-con-6",
@@ -234,11 +253,11 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           controlGate: "W",
           responsibleParty: "Materials Technician, Testing Lab",
           frequency: "1 set per pour batch (tested at 7, 14, 28 days)",
-          verifiableRecord: "Concrete Cube Register (CD-QP-001)",
+          verifiableRecord: "Concrete Cube Register",
           subcontractorGate: "W",
           contractorQaGate: "W",
           consultantGate: "S",
-          isCompleted: true,
+          isCompleted: false,
         },
         {
           id: "itp-item-con-7",
@@ -255,7 +274,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           contractorQaGate: "R",
           consultantGate: "R",
           isCompleted: false,
-          remarks: "Values logged into system; non-conformance triggers Section 6.0 NCR",
+          remarks: "Values logged into system; non-conformance triggers formal NCR",
         },
         {
           id: "itp-item-con-8",
@@ -276,17 +295,17 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
       ],
     },
 
-    // 3. ITP FOR GEOTECHNICAL & SUBSTRUCTURE EARTHWORKS (SECTION 5.4 OF CD-QP-001)
+    // 3. ITP FOR GEOTECHNICAL & SUBSTRUCTURE EARTHWORKS
     {
       ...baseCompany,
       id: `itp-${projectId}-geo-003`,
-      itpNumber: "CD-ITP-GEO-003",
+      itpNumber: `${prefix}-ITP-GEO-003`,
       title: "Inspection & Test Plan for Geotechnical & Earthworks",
       discipline: "Geotechnical",
       methodStatementRef: "WMS-EAR-001",
       methodStatementTitle: "Method Statement for Excavation, Dewatering & Subgrade Compaction",
       specSection: "Section 02200 - Earthworks & Compaction",
-      status: "APPROVED",
+      status: "DRAFT",
       projectId,
       items: [
         {
@@ -303,7 +322,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "H",
           contractorQaGate: "H",
           consultantGate: "H",
-          isCompleted: true,
+          isCompleted: false,
         },
         {
           id: "itp-item-geo-2",
@@ -319,7 +338,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "H",
           contractorQaGate: "H",
           consultantGate: "H",
-          isCompleted: true,
+          isCompleted: false,
         },
         {
           id: "itp-item-geo-3",
@@ -335,7 +354,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "W",
           contractorQaGate: "H",
           consultantGate: "H",
-          isCompleted: true,
+          isCompleted: false,
         },
         {
           id: "itp-item-geo-4",
@@ -351,7 +370,7 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
           subcontractorGate: "W",
           contractorQaGate: "W",
           consultantGate: "W",
-          isCompleted: true,
+          isCompleted: false,
         },
         {
           id: "itp-item-geo-5",
@@ -372,17 +391,17 @@ export function generateDefaultITPPlans(projectId: string, companyId: string): I
       ],
     },
 
-    // 4. ITP FOR MEP CONCEALED SERVICES (SECTION 5.4 OF CD-QP-001)
+    // 4. ITP FOR MEP CONCEALED SERVICES
     {
       ...baseCompany,
       id: `itp-${projectId}-mep-004`,
-      itpNumber: "CD-ITP-MEP-004",
+      itpNumber: `${prefix}-ITP-MEP-004`,
       title: "Inspection & Test Plan for MEP Concealed Services",
       discipline: "MEP",
       methodStatementRef: "WMS-MEP-001",
       methodStatementTitle: "Method Statement for Plumbing Pressure Testing & Electrical Pre-Commissioning",
       specSection: "Section 15000 - Mechanical & Section 16000 - Electrical",
-      status: "APPROVED",
+      status: "DRAFT",
       projectId,
       items: [
         {

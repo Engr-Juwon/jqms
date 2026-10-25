@@ -264,6 +264,7 @@ export const WeeklyReportDetail: React.FC = () => {
   const [revisionNumber, setRevisionNumber] = useState<string>(
     "Rev 1.0 (Final Submission)",
   );
+  const [reportTitle, setReportTitle] = useState<string>("");
   const [executiveSummary, setExecutiveSummary] = useState("");
   const [synopsis, setSynopsis] = useState("");
   const [highlights, setHighlights] = useState("");
@@ -349,6 +350,9 @@ export const WeeklyReportDetail: React.FC = () => {
         } else if ((data as any).revision) {
           setRevisionNumber((data as any).revision);
         }
+        setReportTitle(
+          data.title || "QAQC WEEKLY REPORT - 01 - FIRST FLOOR BANKSIDE",
+        );
         setExecutiveSummary(data.executiveSummary || "");
         setSynopsis(data.synopsis || "");
         setHighlights(data.highlights || "");
@@ -1585,6 +1589,10 @@ export const WeeklyReportDetail: React.FC = () => {
 
       const updatedReport: WeeklyReport = {
         ...report,
+        title:
+          reportTitle.trim() ||
+          report.title ||
+          "QAQC WEEKLY REPORT - 01 - FIRST FLOOR BANKSIDE",
         revisionNumber,
         executiveSummary,
         synopsis,
@@ -2216,35 +2224,97 @@ export const WeeklyReportDetail: React.FC = () => {
   }
 
   // ==========================================
-  // MAIN RENDER
+  // MAIN RENDER HELPERS
   // ==========================================
+
+  const renderStatusBadge = () => {
+    const status = report.status || "DRAFT";
+    const isApproved = status === "APPROVED" || status === "PUBLISHED";
+    const isReview = status === "UNDER REVIEW";
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border shrink-0 ${
+          isApproved
+            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+            : isReview
+              ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30"
+              : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
+        }`}
+      >
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${
+            isApproved
+              ? "bg-emerald-500 animate-pulse"
+              : isReview
+                ? "bg-blue-500"
+                : "bg-amber-500"
+          }`}
+        />
+        {status}
+      </span>
+    );
+  };
+
+  const renderMetadataStrip = () => (
+    <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 overflow-x-auto no-scrollbar py-0.5">
+      <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1 shrink-0">
+        <Building2 size={12} className="text-orange-500 shrink-0" />
+        {report.projectName || activeProject?.name || "Bankside Project"}
+      </span>
+      <span className="text-slate-300 dark:text-slate-600">&bull;</span>
+      <span className="flex items-center gap-1 shrink-0">
+        <MapPin size={12} className="text-slate-400 shrink-0" />
+        {report.selectedLevel || "All Levels"}
+      </span>
+      <span className="text-slate-300 dark:text-slate-600">&bull;</span>
+      <span className="flex items-center gap-1 font-mono shrink-0">
+        <Calendar size={12} className="text-slate-400 shrink-0" />
+        {report.weekStart && report.weekEnd
+          ? `${report.weekStart} → ${report.weekEnd}`
+          : report.weekNumber
+            ? `Week ${report.weekNumber}`
+            : "Current Period"}
+      </span>
+      <span className="text-slate-300 dark:text-slate-600">&bull;</span>
+      <span className="shrink-0">
+        Compiled by{" "}
+        {(typeof report.preparedBy === "object"
+          ? report.preparedBy?.name
+          : report.preparedBy) || "QA/QC Engineer"}
+      </span>
+    </div>
+  );
 
   return (
     <>
       <div
         className={`${
           structureMode === "EXECUTIVE" ? "max-w-7xl" : "max-w-5xl"
-        } mx-auto pb-20 px-3 sm:px-4 space-y-6 sm:space-y-8 mt-4 sm:mt-6 transition-all duration-300`}
+        } mx-auto pb-20 px-3 sm:px-4 space-y-6 sm:space-y-8 mt-3 sm:mt-6 transition-all duration-300`}
       >
         {/* ========================================== */}
-        {/* STICKY ACTION BAR */}
+        {/* STICKY ACTION & METADATA BAR (ADAPTIVE RESPONSIVE) */}
         {/* ========================================== */}
-        <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-3 sm:p-3.5 rounded-2xl border border-slate-200/90 dark:border-slate-800/90 shadow-md dark:shadow-2xl sticky top-1 sm:top-2 z-30 transition-all">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
-            {/* LEFT WING: Identity, Breadcrumb & Status */}
-            <div className="flex items-center gap-3 min-w-0">
-              <button
-                onClick={() => navigate("/project/weekly-reports")}
-                className="p-2 sm:p-2.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200/70 dark:border-slate-700/70 shrink-0 transition-colors shadow-xs"
-                title="Back to Weekly Reports List"
-              >
-                <ArrowLeft size={18} />
-              </button>
+        <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-2.5 sm:p-3.5 md:p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800/90 shadow-md dark:shadow-2xl sticky top-1 sm:top-2 z-30 transition-all">
+          
+          {/* ────────────────────────────────────────── */}
+          {/* DESKTOP & LARGE DISPLAY VIEW (lg:flex, hidden on < lg) */}
+          {/* ────────────────────────────────────────── */}
+          <div className="hidden lg:flex flex-col space-y-2.5">
+            {/* Top Tier: Nav + Badges + Flexible Title + Primary Actions */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <button
+                  onClick={() => navigate("/project/weekly-reports")}
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200/70 dark:border-slate-700/70 shrink-0 transition-colors shadow-xs"
+                  title="Back to Weekly Reports List"
+                >
+                  <ArrowLeft size={18} />
+                </button>
 
-              <div className="min-w-0 space-y-1">
-                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                  {/* Report Code Badge with Copy */}
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-black text-slate-800 dark:text-slate-200">
+                {/* Badges Cluster */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-black text-slate-800 dark:text-slate-200">
                     <span>{report.reportNumber || "WQR-RECORD"}</span>
                     <button
                       type="button"
@@ -2254,199 +2324,293 @@ export const WeeklyReportDetail: React.FC = () => {
                           toast.success("Report ID copied to clipboard");
                         }
                       }}
-                      className="text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors ml-0.5"
                       title="Copy Report ID"
                     >
                       <Copy size={11} />
                     </button>
                   </div>
 
-                  {/* Revision Badge */}
-                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800/60 text-xs font-mono font-bold text-orange-700 dark:text-orange-300" title="Document Revision Control">
+                  <div
+                    className="inline-flex items-center px-2 py-1 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800/60 text-xs font-mono font-bold text-orange-700 dark:text-orange-300"
+                    title="Document Revision Control"
+                  >
                     <span>{revisionNumber}</span>
                   </div>
 
-                  {/* Document Title */}
-                  <h1 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight truncate max-w-xs sm:max-w-sm">
-                    {report.title || "Weekly Quality Assurance Dossier"}
-                  </h1>
-
-                  {/* Status Badge */}
-                  {(() => {
-                    const status = report.status || "DRAFT";
-                    const isApproved =
-                      status === "APPROVED" || status === "PUBLISHED";
-                    const isReview = status === "UNDER REVIEW";
-                    return (
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                          isApproved
-                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
-                            : isReview
-                              ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30"
-                              : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
-                        }`}
-                      >
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            isApproved
-                              ? "bg-emerald-500 animate-pulse"
-                              : isReview
-                                ? "bg-blue-500"
-                                : "bg-amber-500"
-                          }`}
-                        />
-                        {status}
-                      </span>
-                    );
-                  })()}
+                  {renderStatusBadge()}
                 </div>
 
-                {/* Subtitle Metadata Strip */}
-                <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 overflow-hidden text-ellipsis whitespace-nowrap">
-                  <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                    <Building2 size={12} className="text-orange-500" />
-                    {report.projectName ||
-                      activeProject?.name ||
-                      "Bankside Project"}
-                  </span>
-                  <span>&bull;</span>
-                  <span className="flex items-center gap-1">
-                    <MapPin size={12} className="text-slate-400" />
-                    {report.selectedLevel || "All Levels"}
-                  </span>
-                  <span>&bull;</span>
-                  <span className="flex items-center gap-1 font-mono">
-                    <Calendar size={12} className="text-slate-400" />
-                    {report.weekStart && report.weekEnd
-                      ? `${report.weekStart} → ${report.weekEnd}`
-                      : report.weekNumber
-                        ? `Week ${report.weekNumber}`
-                        : "Current Period"}
-                  </span>
-                  <span>&bull;</span>
-                  <span>
-                    Compiled by{" "}
-                    {(typeof report.preparedBy === "object"
-                      ? report.preparedBy?.name
-                      : report.preparedBy) || "QA/QC Engineer"}
-                  </span>
+                {/* Editable Title with Dedicated Flexible Box */}
+                <div className="flex-1 min-w-[220px]">
+                  <input
+                    type="text"
+                    value={reportTitle || report.title || ""}
+                    onChange={(e) => setReportTitle(e.target.value)}
+                    placeholder="QAQC WEEKLY REPORT - 01 - FIRST FLOOR BANKSIDE"
+                    className="w-full text-sm font-black text-slate-900 dark:text-white bg-slate-50/70 dark:bg-slate-800/50 hover:bg-slate-100/70 dark:hover:bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-200/80 dark:border-slate-700/80 focus:border-orange-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-orange-500 tracking-tight transition-all font-sans"
+                    title="Click to edit report title"
+                  />
                 </div>
               </div>
             </div>
+            <div className="flex items-center justify-end gap-3">
+              {/* Primary Action Buttons */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setIsSlideDeckOpen(true)}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 shadow-sm transition active:scale-95"
+                  title="Open Interactive 16:9 Presentation Deck"
+                >
+                  <Presentation size={14} />
+                  <span>Present Deck</span>
+                </button>
 
-            {/* CENTER: Segmented Mode Switcher */}
-            <div className="flex items-center self-start lg:self-center bg-slate-100 dark:bg-slate-800/90 p-1 rounded-xl border border-slate-200/90 dark:border-slate-700/80 shadow-inner shrink-0">
-              <button
-                type="button"
-                onClick={() => handleStructureChange("EXECUTIVE")}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-black transition-all ${
-                  structureMode === "EXECUTIVE"
-                    ? "bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/20"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-                title="Executive Command Matrix & Real-Time Quality Control view"
-              >
-                <Sparkles size={13} />
-                <span>Executive Matrix</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleStructureChange("CLASSIC")}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  structureMode === "CLASSIC"
-                    ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-800"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-                title="Classic 13-page vertical dossier document editor"
-              >
-                <LayoutTemplate size={13} />
-                <span>Classic Dossier (13 Pgs)</span>
-              </button>
+                <button
+                  onClick={() => setIsPrintModalOpen(true)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-100 px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 border border-slate-700 transition active:scale-95"
+                  title="Print or Export PDF (Choose Portrait / Landscape & Scope)"
+                >
+                  <Printer size={14} className="text-slate-300" />
+                  <span>Print / PDF</span>
+                </button>
+
+                <button
+                  onClick={handleUpdate}
+                  disabled={saving || !canUpdateReport}
+                  title={
+                    !canUpdateReport
+                      ? "Level 3+ authority required to update weekly reports"
+                      : "Save All Real-Time Updates"
+                  }
+                  className="bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shrink-0 shadow-md shadow-orange-500/20 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? (
+                    <Loader2 className="animate-spin" size={14} />
+                  ) : (
+                    <Save size={14} />
+                  )}
+                  <span>{saving ? "Saving..." : "Save States"}</span>
+                </button>
+              </div>
             </div>
 
-            {/* RIGHT WING: Action Cluster */}
-            <div className="flex items-center gap-2 justify-end flex-wrap sm:flex-nowrap shrink-0">
-              {/* Presentation Deck Launcher */}
-              <button
-                onClick={() => setIsSlideDeckOpen(true)}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 sm:px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 shadow-sm transition active:scale-95"
-                title="Open Interactive 16:9 Presentation Deck"
-              >
-                <Presentation size={14} />
-                <span className="hidden sm:inline">Present Deck</span>
-                <span className="sm:hidden">Present</span>
-              </button>
+            {/* Bottom Tier: Metadata Strip + Mode Switcher + Auxiliary Actions */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-3">
+              {renderMetadataStrip()}
 
-              {/* Print / PDF Document Modal */}
-              <button
-                onClick={() => setIsPrintModalOpen(true)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-100 px-3 sm:px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 border border-slate-700 transition active:scale-95"
-                title="Print or Export PDF (Choose Portrait / Landscape & Scope)"
-              >
-                <Printer size={14} className="text-slate-300" />
-                <span className="hidden sm:inline">Print / PDF</span>
-                <span className="sm:hidden">Print</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Segmented Mode Switcher */}
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800/90 p-1 rounded-xl border border-slate-200/90 dark:border-slate-700/80 shadow-inner shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleStructureChange("EXECUTIVE")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
+                      structureMode === "EXECUTIVE"
+                        ? "bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/20"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                    title="Executive Command Matrix & Real-Time Quality Control view"
+                  >
+                    <Sparkles size={13} />
+                    <span>Executive Matrix</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStructureChange("CLASSIC")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      structureMode === "CLASSIC"
+                        ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-800"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                    title="Classic 13-page vertical dossier document editor"
+                  >
+                    <LayoutTemplate size={13} />
+                    <span>Classic Dossier (13 Pgs)</span>
+                  </button>
+                </div>
 
-              {/* Landscape PDF Slides Quick Export */}
-              <button
-                onClick={handleGenerate}
-                className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 border border-slate-200 dark:border-slate-700 transition"
-                title="Export Slide Deck (jsPDF Landscape Presentation)"
-              >
-                <FileText size={14} className="text-orange-500" />
-                <span className="hidden md:inline">Slides PDF</span>
-              </button>
+                {/* Slides PDF Quick Export */}
+                <button
+                  onClick={handleGenerate}
+                  className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 border border-slate-200 dark:border-slate-700 transition"
+                  title="Export Slide Deck (jsPDF Landscape Presentation)"
+                >
+                  <FileText size={13} className="text-orange-500" />
+                  <span>Slides PDF</span>
+                </button>
 
-              {/* Email Report with Attached PDF */}
-              <button
-                onClick={handleOpenEmailModal}
-                disabled={preparingEmail}
-                className="bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 border border-indigo-200 dark:border-indigo-800/80 transition active:scale-95 disabled:opacity-50"
-                title="Dispatch Report via SMTP Email with Attached Presentation PDF"
-              >
-                {preparingEmail ? (
-                  <Loader2 size={14} className="animate-spin text-indigo-600 dark:text-indigo-400" />
-                ) : (
-                  <Mail size={14} className="text-indigo-600 dark:text-indigo-400" />
-                )}
-                <span className="hidden sm:inline">Email Report</span>
-                <span className="sm:hidden">Email</span>
-              </button>
+                {/* Email Report */}
+                <button
+                  onClick={handleOpenEmailModal}
+                  disabled={preparingEmail}
+                  className="bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 border border-indigo-200 dark:border-indigo-800/80 transition active:scale-95 disabled:opacity-50"
+                  title="Dispatch Report via SMTP Email with Attached Presentation PDF"
+                >
+                  {preparingEmail ? (
+                    <Loader2 size={13} className="animate-spin text-indigo-600 dark:text-indigo-400" />
+                  ) : (
+                    <Mail size={13} className="text-indigo-600 dark:text-indigo-400" />
+                  )}
+                  <span>Email Report</span>
+                </button>
 
-              {/* Primary Save Changes Button */}
-              <button
-                onClick={handleUpdate}
-                disabled={saving || !canUpdateReport}
-                title={
-                  !canUpdateReport
-                    ? "Level 3+ authority required to update weekly reports"
-                    : "Save All Real-Time Updates"
-                }
-                className="bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white px-3.5 sm:px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shrink-0 shadow-md shadow-orange-500/20 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? (
-                  <Loader2 className="animate-spin" size={14} />
-                ) : (
-                  <Save size={14} />
-                )}
-                <span>{saving ? "Saving..." : "Save States"}</span>
-              </button>
+                {/* Delete Button */}
+                <button
+                  onClick={handleDelete}
+                  disabled={!canDeleteReport}
+                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl shrink-0 disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-800/40"
+                  title={
+                    !canDeleteReport
+                      ? "Level 4 authority required to delete weekly reports"
+                      : "Delete Report"
+                  }
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
+          </div>
 
-              {/* Destructive Delete Button */}
-              <button
-                onClick={handleDelete}
-                disabled={!canDeleteReport}
-                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl shrink-0 disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-800/40"
-                title={
-                  !canDeleteReport
-                    ? "Level 4 authority required to delete weekly reports"
-                    : "Delete Report"
-                }
-              >
-                <Trash2 size={16} />
-              </button>
+          {/* ────────────────────────────────────────── */}
+          {/* MOBILE & TABLET ADAPTIVE VIEW (< lg:flex, hidden on lg+) */}
+          {/* ────────────────────────────────────────── */}
+          <div className="flex lg:hidden flex-col space-y-2">
+            {/* Row 1: Nav + Badges + Primary Action Buttons */}
+            <div className="flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <button
+                  onClick={() => navigate("/project/weekly-reports")}
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-slate-500 border border-slate-200/70 dark:border-slate-700/70 shrink-0"
+                  title="Back to Weekly Reports"
+                >
+                  <ArrowLeft size={16} />
+                </button>
+
+                {/* Code badge */}
+                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-mono font-bold text-slate-800 dark:text-slate-200">
+                  <span className="truncate max-w-[85px] sm:max-w-none">{report.reportNumber || "WQR"}</span>
+                </div>
+
+                {renderStatusBadge()}
+              </div>
+            </div>
+
+            {/* Row 2: Full-Width Title Input */}
+            <div className="w-full">
+              <input
+                type="text"
+                value={reportTitle || report.title || ""}
+                onChange={(e) => setReportTitle(e.target.value)}
+                placeholder="QAQC WEEKLY REPORT - 01 - FIRST FLOOR BANKSIDE"
+                className="w-full text-xs font-black text-slate-900 dark:text-white bg-slate-50/70 dark:bg-slate-800/50 hover:bg-slate-100/70 dark:hover:bg-slate-800/80 px-2.5 py-1.5 rounded-lg border border-slate-200/80 dark:border-slate-700/80 focus:border-orange-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-orange-500 tracking-tight transition-all font-sans"
+                title="Click to edit report title"
+              />
+            </div>
+
+            {/* Row 1: Nav + Badges + Primary Action Buttons */}
+            <div className="flex items-center justify-between gap-1.5">
+                {/* Rev badge */}
+                <div className="inline-flex items-center px-1.5 py-0.5 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800/60 text-[11px] font-mono font-bold text-orange-700 dark:text-orange-300">
+                  <span>{revisionNumber}</span>
+                </div>
+                
+              {/* Quick Primary Actions */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() => setIsSlideDeckOpen(true)}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white p-1.5 sm:px-2.5 sm:py-1 rounded-lg text-xs font-bold flex items-center gap-1 shrink-0"
+                  title="Present Deck"
+                >
+                  <Presentation size={13} />
+                  <span className="hidden sm:inline">Present</span>
+                </button>
+
+                <button
+                  onClick={() => setIsPrintModalOpen(true)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-100 p-1.5 sm:px-2.5 sm:py-1 rounded-lg text-xs font-semibold flex items-center gap-1 shrink-0 border border-slate-700"
+                  title="Print / PDF"
+                >
+                  <Printer size={13} />
+                  <span className="hidden sm:inline">PDF</span>
+                </button>
+
+                <button
+                  onClick={handleUpdate}
+                  disabled={saving || !canUpdateReport}
+                  className="bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white px-2.5 sm:px-3 py-1 rounded-lg text-xs font-black flex items-center gap-1 shrink-0 shadow-sm disabled:opacity-50"
+                  title="Save States"
+                >
+                  {saving ? <Loader2 className="animate-spin" size={13} /> : <Save size={13} />}
+                  <span>Save</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Row 3: Mode Switcher + Auxiliary Actions */}
+            <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80">
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800/90 p-0.5 rounded-xl border border-slate-200/90 dark:border-slate-700/80 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleStructureChange("EXECUTIVE")}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-black transition-all ${
+                    structureMode === "EXECUTIVE"
+                      ? "bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  <Sparkles size={11} />
+                  <span>Matrix</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStructureChange("CLASSIC")}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                    structureMode === "CLASSIC"
+                      ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  <LayoutTemplate size={11} />
+                  <span>Dossier (13p)</span>
+                </button>
+              </div>
+
+              {/* Auxiliary Quick Buttons */}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={handleGenerate}
+                  className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
+                  title="Export Slides PDF"
+                >
+                  <FileText size={12} className="text-orange-500" />
+                  <span className="hidden sm:inline">Slides</span>
+                </button>
+
+                <button
+                  onClick={handleOpenEmailModal}
+                  disabled={preparingEmail}
+                  className="bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 border border-indigo-200 dark:border-indigo-800/80"
+                  title="Email Report"
+                >
+                  {preparingEmail ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
+                  <span className="hidden sm:inline">Email</span>
+                </button>
+
+                <button
+                  onClick={handleDelete}
+                  disabled={!canDeleteReport}
+                  className="p-1 text-slate-400 hover:text-red-600 rounded-lg shrink-0"
+                  title="Delete Report"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+
+            {/* Row 4: Scrollable Metadata Chips on Mobile */}
+            <div className="pt-0.5">
+              {renderMetadataStrip()}
             </div>
           </div>
         </div>

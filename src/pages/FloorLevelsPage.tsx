@@ -1,9 +1,15 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { useProjectStore } from '@/stores/useProjectStore';
+import { isBimModuleEnabled } from '@/lib/permissions';
 import { LevelManager } from '@/components/registry/LevelManager';
 import { Building2, Box, Grid } from 'lucide-react';
 
 export const FloorLevelsPage: React.FC = () => {
+  const { activeProject } = useProjectStore();
+  const show7D = isBimModuleEnabled(activeProject, "7d");
+  const show2D = isBimModuleEnabled(activeProject, "2d");
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300 pb-12">
       {/* Header */}
@@ -22,21 +28,25 @@ export const FloorLevelsPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <Link
-            to="/project/elements"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold shadow transition"
-          >
-            <Box className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-            <span>Element Registry</span>
-          </Link>
+          {show7D && (
+            <Link
+              to="/project/elements"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold shadow transition"
+            >
+              <Box className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+              <span>Element Registry</span>
+            </Link>
+          )}
 
-          <Link
-            to="/project/grid-plan"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold shadow transition"
-          >
-            <Grid className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-            <span>2D Grid Plan</span>
-          </Link>
+          {show2D && (
+            <Link
+              to="/project/grid-plan"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold shadow transition"
+            >
+              <Grid className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+              <span>2D Grid Plan</span>
+            </Link>
+          )}
         </div>
       </div>
 

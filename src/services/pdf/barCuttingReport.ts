@@ -2,6 +2,7 @@ import jsPDF from "jspdf";
 import autoTable, { RowInput } from "jspdf-autotable";
 import { BarCuttingSchedule, Project, Company } from "@/types";
 import { renderCompanyBrandCell } from "@/lib/companyHelper";
+import { generateUniversalName } from "@/lib/naming";
 
 export interface ExportOptions {
   fileName?: string;
@@ -46,8 +47,8 @@ export function exportBarCuttingSchedulePDF(
   const projectName = project?.name || "Civil Engineering Construction Project";
   const projectCode = project?.code || "PRJ-001";
   const docRef =
-    schedule.scheduleNumber || `BCS-${(schedule.id || "00000000").slice(0, 8).toUpperCase()}`;
-  const fileName = options.fileName || `${docRef}_Cutting_Schedule.pdf`;
+    schedule.scheduleNumber || generateUniversalName(projectCode, "BBS");
+  const fileName = options.fileName || `${docRef}.pdf`;
 
   const currentDate = new Date().toLocaleDateString("en-GB", {
     day: "2-digit",
@@ -693,8 +694,9 @@ export function exportBarCuttingScheduleCSV(
   fileName?: string,
 ): void {
   const docRef =
-    schedule.scheduleNumber || `BCS-${(schedule.id || "00000000").slice(0, 8).toUpperCase()}`;
-  const outName = fileName || `${docRef}_Cutting_Schedule.csv`;
+    schedule.scheduleNumber ||
+    generateUniversalName((schedule as any)?.projectCode, "BBS");
+  const outName = fileName || `${docRef}.csv`;
 
   const headers = [
     "S/N",

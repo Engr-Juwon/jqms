@@ -39,9 +39,9 @@ export const ITPDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+  const currentProjId = projectId || activeProject?.id || "";
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-collection-dev";
+    currentUser?.companyId || company?.id || activeProject?.companyId || "";
 
   const [plan, setPlan] = useState<ITPPlan | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,7 +95,7 @@ export const ITPDetailPage: React.FC = () => {
 
   // Registry URL
   const registryUrl = projectId
-    ? `/projects/${projectId}/itp`
+    ? `/project/${projectId}/itp`
     : `/project/itp`;
 
   // Gate summary counts
@@ -279,7 +279,7 @@ export const ITPDetailPage: React.FC = () => {
 
     // Use router state or search params
     navigate(
-      projectId ? `/projects/${projectId}/rfi/create` : `/project/rfi/create`,
+      projectId ? `/project/${projectId}/rfi/create` : `/project/rfi/create`,
       {
         state: {
           prefill: {
@@ -423,14 +423,18 @@ export const ITPDetailPage: React.FC = () => {
           <div className="text-left md:text-right border-t md:border-t-0 pt-3 md:pt-0 border-slate-800">
             <div className="text-sm font-black text-white flex items-center md:justify-end gap-1.5">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              {plan.companyName || "Collection Developments LTD"}
+              {company?.name || plan.companyName || "Quality Assurance Department"}
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">
-              {plan.officeAddress || "3B, Taofik Lawal, Off Awolowo Road, Ikoyi, Lagos"}
-            </div>
-            <div className="text-[11px] text-amber-400 font-mono mt-0.5">
-              {plan.contactEmail || "info@collection.gp"} &bull; {plan.contactPhone || "+234 (0) 16328782"}
-            </div>
+            {(company?.address || plan.officeAddress) && (
+              <div className="text-[11px] text-slate-400 mt-0.5">
+                {company?.address || plan.officeAddress}
+              </div>
+            )}
+            {(company?.email || plan.contactEmail || company?.phone || plan.contactPhone) && (
+              <div className="text-[11px] text-amber-400 font-mono mt-0.5">
+                {[company?.email || plan.contactEmail, company?.phone || plan.contactPhone].filter(Boolean).join(" • ")}
+              </div>
+            )}
           </div>
         </div>
 

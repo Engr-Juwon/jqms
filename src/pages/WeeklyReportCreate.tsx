@@ -220,10 +220,62 @@ export const WeeklyReportCreate: React.FC = () => {
   const defaultExecutiveSummary =
     "During the reporting period, quality control and assurance monitoring was maintained across scheduled structural operations in strict accordance with approved Inspection and Test Plans (ITPs), project specifications, and standard quality procedures. Routine hold points, concrete placement evaluations, and delivery compliance verifications proceeded with systematic tracking of open items.";
 
+  const getStandardTitle = (
+    lvlNameOrSeq: string | number = "First Floor",
+    projName = activeProject?.name || "Bankside",
+  ) => {
+    const rawStr = String(lvlNameOrSeq || "").trim();
+    const cleanProj = (projName || "Bankside").toUpperCase().trim();
+
+    // 1. Determine the 2-digit number (01, 02, etc.)
+    let num = "01";
+    const numMatch = rawStr.match(/\d+/);
+    if (numMatch) {
+      num = String(numMatch[0]).padStart(2, "0");
+    } else if (/first|1st/i.test(rawStr)) {
+      num = "01";
+    } else if (/second|2nd/i.test(rawStr)) {
+      num = "02";
+    } else if (/third|3rd/i.test(rawStr)) {
+      num = "03";
+    } else if (/fourth|4th/i.test(rawStr)) {
+      num = "04";
+    } else if (/fifth|5th/i.test(rawStr)) {
+      num = "05";
+    } else if (/ground|basement/i.test(rawStr)) {
+      num = "00";
+    } else if (typeof lvlNameOrSeq === "number") {
+      num = String(lvlNameOrSeq).padStart(2, "0");
+    } else {
+      num = String(pastReports.length + 1).padStart(2, "0");
+    }
+
+    // 2. Determine the descriptor (e.g. FIRST FLOOR BANKSIDE)
+    let descriptor = cleanProj;
+    const isGenericAll =
+      !rawStr ||
+      rawStr === "ALL" ||
+      rawStr === "1" ||
+      /all.*combined/i.test(rawStr);
+
+    if (!isGenericAll && rawStr) {
+      const upperLvl = rawStr.toUpperCase().trim();
+      if (upperLvl.includes(cleanProj)) {
+        descriptor = upperLvl;
+      } else {
+        descriptor = `${upperLvl} ${cleanProj}`;
+      }
+    } else if (cleanProj.includes("BANKSIDE") && !cleanProj.includes("FLOOR")) {
+      descriptor = `FIRST FLOOR ${cleanProj}`;
+    }
+
+    return `QAQC WEEKLY REPORT - ${num} - ${descriptor}`;
+  };
+
   const [form, setForm] = useState({
     weekStart: mondayStr,
     weekEnd: saturdayStr,
-    title: `QAQC WEEKLY REPORT (W${String(initialIso.week).padStart(2, "0")}) - PROJECT QUALITY PERFORMANCE`,
+    title: getStandardTitle("First Floor", activeProject?.name || "Bankside"),
     revisionNumber: "Rev 1.0 (Final Submission)",
     executiveSummary: defaultExecutiveSummary,
     highlights: "",
@@ -520,9 +572,7 @@ export const WeeklyReportCreate: React.FC = () => {
 
     setForm((prev) => ({
       ...prev,
-      title: `QAQC WEEKLY REPORT - ${lvlName.toUpperCase()} ${
-        activeProject?.name?.toUpperCase() || ""
-      }`.trim(),
+      title: getStandardTitle(lvlName, activeProject?.name || "Bankside"),
     }));
   };
 
@@ -1241,7 +1291,8 @@ export const WeeklyReportCreate: React.FC = () => {
     try {
       const isoDetails = getISOWeekDetails(form.weekStart);
       const reportNumber = generateWeeklyReportNumber(
-        company?.settings?.weeklyReportPrefix,
+        company?.settings?.weeklyReportPrefix || "WQR",
+        activeProject?.code,
       );
       const timestamp = Date.now();
 
@@ -1387,11 +1438,13 @@ export const WeeklyReportCreate: React.FC = () => {
 
       try {
         await dbService.saveWeeklyReport(combinedReportPayload);
-      } catch (saveErr) {
-        console.warn(
-          "Direct save warning (session cache guarantees availability):",
-          saveErr,
+      } catch (saveErr: any) {
+        console.error("Direct save error:", saveErr);
+        toast.error(
+          `Database save error: ${saveErr?.message || "Failed to save report"}`,
         );
+        setSaveStatus("idle");
+        return null;
       }
 
       try {

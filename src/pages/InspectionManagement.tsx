@@ -25,7 +25,7 @@ export const InspectionManagement: React.FC = () => {
     currentUser?.companyId ||
     company?.id ||
     activeProject?.companyId ||
-    "comp-apex-civil";
+    "";
 
   const [templates, setTemplates] = useState<InspectionTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] =

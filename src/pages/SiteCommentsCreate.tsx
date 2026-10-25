@@ -13,7 +13,9 @@ import {
   getDraftObservation,
   clearDraftObservation,
 } from "@/lib/idbVault";
-import { LevelElementSelect } from "@/components/sitecomments/LevelElementSelect";
+import MultiLevelElementSelect, {
+  SelectedElementItem,
+} from "@/components/masterdata/MultiLevelElementSelect";
 import { TradeSubtradeSelect } from "@/components/sitecomments/TradeSubtradeSelect";
 import { RemarkSnippetDrawer } from "@/components/sitecomments/RemarkSnippetDrawer";
 import { PhotoMarkupModal } from "@/components/sitecomments/PhotoMarkupModal";
@@ -52,7 +54,7 @@ export const SiteCommentsCreate: React.FC = () => {
   const location = useLocation();
   const { currentUser, company } = useAuthStore();
   const { activeProject } = useProjectStore();
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+  const currentProjId = projectId || activeProject?.id || "";
   const currentCompId =
     currentUser?.companyId || company?.id || activeProject?.companyId || "";
   const canCreateComment = hasPermission(currentUser?.role, "CREATE_SITE_COMMENT");
@@ -532,13 +534,13 @@ export const SiteCommentsCreate: React.FC = () => {
     const reportData: SiteCommentReport = {
       id: reportId,
       projectId: currentProjId,
-      companyId: currentCompId || company?.id || "-Oubn5JnM98I3QvSzHCB",
+      companyId: currentCompId || company?.id || "",
       projectName:
-        activeProject?.name || originalReport?.projectName || "Bankside",
+        activeProject?.name || originalReport?.projectName || "Site Project",
       companyName:
         company?.name ||
         originalReport?.companyName ||
-        "Collection Developments LTD",
+        "Quality Management Department",
       reportNumber,
       title:
         title ||
@@ -592,7 +594,7 @@ export const SiteCommentsCreate: React.FC = () => {
         if (!photoUrl) continue;
         await syncPhotoToSiteGallery({
           projectId: currentProjId,
-          companyId: currentCompId || company?.id || "comp-apex-civil",
+          companyId: currentCompId || company?.id || "",
           url: photoUrl,
           caption: `${obsText.substring(0, 80)} (${reportNumber})`,
           floorLevel: obs.levelName,
@@ -616,7 +618,7 @@ export const SiteCommentsCreate: React.FC = () => {
 
       await writeAudit({
         projectId: currentProjId,
-        companyId: currentCompId || company?.id || "comp-apex-civil",
+        companyId: currentCompId || company?.id || "",
         userId: currentUser.uid,
         userName: currentUser.fullName,
         userRole: currentUser.role,
@@ -845,24 +847,73 @@ export const SiteCommentsCreate: React.FC = () => {
 
                 {/* Master Data Selectors */}
                 <div className="space-y-3">
-                    <LevelElementSelect
-                    projectId={currentProjId}
-                    selectedLevelId={obs.levelId}
-                    selectedElementId={obs.elementId}
-                    onLevelChange={(lId, lName) => {
-                      updateObservationField(idx, "levelId", lId);
-                      updateObservationField(idx, "levelName", lName);
-                    }}
-                    onElementChange={(elId, elName, gridLoc) => {
-                      updateObservationField(idx, "elementId", elId);
-                      updateObservationField(idx, "elementName", elName);
-                      updateObservationField(idx, "structuralElement", elName);
-                      if (gridLoc && !obs.gridLocation) {
-                        updateObservationField(idx, "gridLocation", gridLoc);
+                    <MultiLevelElementSelect
+                      projectId={currentProjId}
+                      companyId={currentCompId}
+                      defaultLevelId={obs.levelId}
+                      selectedElements={
+                        (obs as any).elementsData ||
+                        (obs.elementId
+                          ? [
+                              {
+                                id: obs.elementId,
+                                elementName:
+                                  obs.elementName ||
+                                  obs.structuralElement ||
+                                  "Selected Element",
+                                levelId: obs.levelId,
+                                levelName: obs.levelName,
+                                grid: obs.gridLocation,
+                                elementType: obs.elementType,
+                              },
+                            ]
+                          : [])
                       }
-                    }}
-                    required
-                  />
+                      onChange={(items: SelectedElementItem[]) => {
+                        const names = items.map((i) => i.elementName).join(", ");
+                        const grids = Array.from(
+                          new Set(items.map((i) => i.grid).filter(Boolean)),
+                        ).join(", ");
+                        const levels = Array.from(
+                          new Set(items.map((i) => i.levelName).filter(Boolean)),
+                        ).join(", ");
+                        const firstLevelId = items[0]?.levelId || obs.levelId;
+
+                        updateObservationField(
+                          idx,
+                          "elementId",
+                          items[0]?.id || "",
+                        );
+                        updateObservationField(idx, "elementName", names);
+                        updateObservationField(idx, "structuralElement", names);
+                        updateObservationField(
+                          idx,
+                          "elementIds" as any,
+                          items.map((i) => i.id),
+                        );
+                        updateObservationField(
+                          idx,
+                          "elementNames" as any,
+                          items.map((i) => i.elementName),
+                        );
+                        updateObservationField(
+                          idx,
+                          "elementsData" as any,
+                          items,
+                        );
+                        if (firstLevelId) {
+                          updateObservationField(idx, "levelId", firstLevelId);
+                        }
+                        if (levels) {
+                          updateObservationField(idx, "levelName", levels);
+                        }
+                        if (grids && !obs.gridLocation) {
+                          updateObservationField(idx, "gridLocation", grids);
+                        }
+                      }}
+                      required
+                      label="Structural Elements Subject to Observation"
+                    />
 
                   <TradeSubtradeSelect
                     companyId={currentCompId}

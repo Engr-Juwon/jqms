@@ -31,8 +31,8 @@ export const ProjectSelector: React.FC = () => {
   const [filterType, setFilterType] = useState("ALL");
 
   useEffect(() => {
-    loadProjects(currentUser?.companyId, currentUser);
-  }, [currentUser]);
+    loadProjects(currentUser?.companyId || company?.id, currentUser);
+  }, [currentUser?.companyId, company?.id]);
 
   const canCreate = hasMinRole(currentUser?.role, 4);
 
@@ -42,7 +42,9 @@ export const ProjectSelector: React.FC = () => {
       p.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (p.clientName &&
         p.clientName.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchType = filterType === "ALL" || p.type === filterType;
+    const matchType =
+      filterType === "ALL" ||
+      p.type?.toLowerCase() === filterType.toLowerCase();
     return matchSearch && matchType;
   });
 
@@ -148,14 +150,29 @@ export const ProjectSelector: React.FC = () => {
               <Building2 className="w-8 h-8" />
             </div>
             <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-              No Construction Projects Provisioned
+              {projects.length > 0 && (filterType !== "ALL" || searchTerm)
+                ? `No Matching Projects Found`
+                : "No Construction Projects Provisioned"}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-              There are no active projects found for this company in the
-              database. Provision your first project to configure structural
-              grids, BIM elements, and ISO 9001 QA/QC inspection matrices.
+              {projects.length > 0 && (filterType !== "ALL" || searchTerm)
+                ? "No projects match your current filter or search criteria. Try selecting 'ALL' or resetting your search filter."
+                : "There are no active projects found for this company in the database. Provision your first project to configure structural grids, BIM elements, and ISO 9001 QA/QC inspection matrices."}
             </p>
-            {canCreate && (
+            {projects.length > 0 && (filterType !== "ALL" || searchTerm) ? (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType("ALL");
+                    setSearchTerm("");
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-white text-xs font-semibold transition"
+                >
+                  Clear Filters & Show All Projects
+                </button>
+              </div>
+            ) : canCreate ? (
               <div className="pt-2">
                 <Link
                   to="/company/projects/create"
@@ -165,7 +182,7 @@ export const ProjectSelector: React.FC = () => {
                   <span>Provision First Project</span>
                 </Link>
               </div>
-            )}
+            ) : null}
           </div>
         )}
 

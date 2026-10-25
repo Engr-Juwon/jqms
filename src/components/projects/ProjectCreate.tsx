@@ -16,7 +16,7 @@ import { dbService } from "../../lib/db";
 import { writeAudit } from "../../lib/audit";
 import { useProjectStore } from "../../stores/useProjectStore";
 import { useAuthStore } from "../../stores/useAuthStore";
-import { Project, UserProfile } from "../../types";
+import { Project, UserProfile, DEFAULT_BIM_SETTINGS } from "../../types";
 import { isGlobalManagerRole, isQAQCEngineerRole } from "../../lib/permissions";
 import { uploadMultiple } from "../../lib/cloudinary";
 import { toast } from "react-hot-toast";
@@ -27,7 +27,7 @@ export const ProjectCreate: React.FC = () => {
   const { setActiveProject, loadProjects } = useProjectStore();
   const { currentUser, company } = useAuthStore();
   const currentCompId =
-    company?.id || currentUser?.companyId || "comp-apex-civil";
+    company?.id || currentUser?.companyId || "";
 
   const [activeTab, setActiveTab] = useState<"details" | "matrix">("details");
   const [saving, setSaving] = useState(false);
@@ -147,7 +147,7 @@ export const ProjectCreate: React.FC = () => {
       const newProj: Project = {
         id: newProjId,
         companyId: currentCompId,
-        companyName: company?.name || "Collection Developments LTD",
+        companyName: company?.name || company?.legalName || "Organization",
         name: name.trim(),
         code: resolvedCode,
         type: resolvedType,
@@ -171,6 +171,8 @@ export const ProjectCreate: React.FC = () => {
         currentLevelId: `lvl-${newProjId}-gf`,
         currentLevelName: "Ground Floor",
         createdBy: currentUser?.uid || "",
+        enableBim: true,
+        bimSettings: { ...DEFAULT_BIM_SETTINGS },
         createdAt: Date.now(),
         updatedAt: new Date().toISOString(),
       };

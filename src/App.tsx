@@ -4,11 +4,13 @@ import { Toaster } from "react-hot-toast";
 import { OfflineSyncIndicator } from "./components/common/OfflineSyncIndicator";
 import { ProjectGuard } from "./components/common/ProjectGuard";
 import { ProjectLayout } from "./components/common/ProjectLayout";
+import { BIMRouteGuard } from "./components/common/BIMRouteGuard";
 import { CompanyGuard } from "./components/common/CompanyGuard";
 import { CompanyLayout } from "./components/common/CompanyLayout";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { PageLoadingFallback } from "./components/common/PageLoadingFallback";
 import { NavigationProgressBar } from "./components/common/NavigationProgressBar";
+import { CookielessAnalyticsTracker } from "./components/common/CookielessAnalyticsTracker";
 
 // Helper for robust lazy loading of named or default exported components
 const lazyPage = <T extends Record<string, any>>(
@@ -282,6 +284,9 @@ export const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <BrowserRouter>
+        {/* Cookieless & Privacy-First Telemetry (Zero Cookies / GDPR Compliant) */}
+        <CookielessAnalyticsTracker />
+
         {/* Instant Top Navigation Progress Bar */}
         <NavigationProgressBar />
 
@@ -293,7 +298,14 @@ export const App: React.FC = () => {
             {/* Public Landing & Login */}
             <Route path="/" element={<Index />} />
             <Route path="/login" element={<Login />} />
-            <Route path="/projects" element={<ProjectSelector />} />
+            <Route
+              path="/projects"
+              element={
+                <CompanyGuard minRole={1}>
+                  <ProjectSelector />
+                </CompanyGuard>
+              }
+            />
             <Route path="/error" element={<ErrorPage />} />
 
             {/* Top-level Profile Redirect */}
@@ -346,22 +358,22 @@ export const App: React.FC = () => {
               <Route path="dashboard" element={<Dashboard />} />
 
               {/* Elements & BIM Dimensions (2D to 7D) */}
-              <Route path="elements" element={<ElementRegistry />} />
-              <Route path="elements/:id" element={<ElementDetail />} />
-              <Route path="registry/element/:id" element={<ElementDetail />} />
-              <Route path="elements/:id/passport" element={<ElementDetail />} />
-              <Route path="grid-plan" element={<GridPlanPage />} />
-              <Route path="bim-3d" element={<BIM3DViewerPage />} />
-              <Route path="3d-twin" element={<BIM3DViewerPage />} />
-              <Route path="5d-cost" element={<BIM5DCostPage />} />
-              <Route path="cost-takeoff" element={<BIM5DCostPage />} />
-              <Route path="6d-carbon" element={<BIM6DCarbonPage />} />
-              <Route path="sustainability" element={<BIM6DCarbonPage />} />
-              <Route path="levels" element={<FloorLevelsPage />} />
-              <Route path="packages" element={<WorkPackagesPage />} />
-              <Route path="gridlines" element={<GridlinesPage />} />
-              <Route path="mto" element={<MaterialTakeoff />} />
-              <Route path="size-schedule" element={<MaterialTakeoff />} />
+              <Route path="elements" element={<BIMRouteGuard><ElementRegistry /></BIMRouteGuard>} />
+              <Route path="elements/:id" element={<BIMRouteGuard><ElementDetail /></BIMRouteGuard>} />
+              <Route path="registry/element/:id" element={<BIMRouteGuard><ElementDetail /></BIMRouteGuard>} />
+              <Route path="elements/:id/passport" element={<BIMRouteGuard><ElementDetail /></BIMRouteGuard>} />
+              <Route path="grid-plan" element={<BIMRouteGuard><GridPlanPage /></BIMRouteGuard>} />
+              <Route path="bim-3d" element={<BIMRouteGuard><BIM3DViewerPage /></BIMRouteGuard>} />
+              <Route path="3d-twin" element={<BIMRouteGuard><BIM3DViewerPage /></BIMRouteGuard>} />
+              <Route path="5d-cost" element={<BIMRouteGuard><BIM5DCostPage /></BIMRouteGuard>} />
+              <Route path="cost-takeoff" element={<BIMRouteGuard><BIM5DCostPage /></BIMRouteGuard>} />
+              <Route path="6d-carbon" element={<BIMRouteGuard><BIM6DCarbonPage /></BIMRouteGuard>} />
+              <Route path="sustainability" element={<BIMRouteGuard><BIM6DCarbonPage /></BIMRouteGuard>} />
+              <Route path="levels" element={<BIMRouteGuard><FloorLevelsPage /></BIMRouteGuard>} />
+              <Route path="packages" element={<BIMRouteGuard><WorkPackagesPage /></BIMRouteGuard>} />
+              <Route path="gridlines" element={<BIMRouteGuard><GridlinesPage /></BIMRouteGuard>} />
+              <Route path="mto" element={<BIMRouteGuard><MaterialTakeoff /></BIMRouteGuard>} />
+              <Route path="size-schedule" element={<BIMRouteGuard><MaterialTakeoff /></BIMRouteGuard>} />
 
               {/* Site Comments & Observations */}
               <Route path="site-comments" element={<SiteCommentsRegistry />} />
@@ -497,7 +509,7 @@ export const App: React.FC = () => {
               <Route path="daily-log" element={<DailySiteLogRegistry />} />
               <Route path="daily-log/create" element={<DailySiteLogCreate />} />
               <Route path="daily-log/:id" element={<DailySiteLogDetail />} />
-              <Route path="planner" element={<ConstructionPlanner />} />
+              <Route path="planner" element={<BIMRouteGuard><ConstructionPlanner /></BIMRouteGuard>} />
               <Route path="photos" element={<Photos />} />
               <Route path="documents" element={<Documents />} />
               <Route path="weekly-reports" element={<WeeklyReports />} />
@@ -521,6 +533,9 @@ export const App: React.FC = () => {
               <Route path="rams" element={<MethodStatementsPage />} />
               <Route path="settings" element={<ProjectEdit />} />
               <Route path="edit" element={<ProjectEdit />} />
+              <Route path="assignments" element={<ProjectAssignmentsPage />} />
+              <Route path="team" element={<ProjectAssignmentsPage />} />
+              <Route path="staff" element={<ProjectAssignmentsPage />} />
               <Route path="profile" element={<ProfilePage />} />
             </Route>
 
@@ -537,16 +552,22 @@ export const App: React.FC = () => {
               <Route path="dashboard" element={<Dashboard />} />
 
               {/* Elements & BIM */}
-              <Route path="elements" element={<ElementRegistry />} />
-              <Route path="elements/:id" element={<ElementDetail />} />
-              <Route path="registry/element/:id" element={<ElementDetail />} />
-              <Route path="elements/:id/passport" element={<ElementDetail />} />
-              <Route path="grid-plan" element={<GridPlanPage />} />
-              <Route path="levels" element={<FloorLevelsPage />} />
-              <Route path="packages" element={<WorkPackagesPage />} />
-              <Route path="gridlines" element={<GridlinesPage />} />
-              <Route path="mto" element={<MaterialTakeoff />} />
-              <Route path="size-schedule" element={<MaterialTakeoff />} />
+              <Route path="elements" element={<BIMRouteGuard><ElementRegistry /></BIMRouteGuard>} />
+              <Route path="elements/:id" element={<BIMRouteGuard><ElementDetail /></BIMRouteGuard>} />
+              <Route path="registry/element/:id" element={<BIMRouteGuard><ElementDetail /></BIMRouteGuard>} />
+              <Route path="elements/:id/passport" element={<BIMRouteGuard><ElementDetail /></BIMRouteGuard>} />
+              <Route path="grid-plan" element={<BIMRouteGuard><GridPlanPage /></BIMRouteGuard>} />
+              <Route path="bim-3d" element={<BIMRouteGuard><BIM3DViewerPage /></BIMRouteGuard>} />
+              <Route path="3d-twin" element={<BIMRouteGuard><BIM3DViewerPage /></BIMRouteGuard>} />
+              <Route path="5d-cost" element={<BIMRouteGuard><BIM5DCostPage /></BIMRouteGuard>} />
+              <Route path="cost-takeoff" element={<BIMRouteGuard><BIM5DCostPage /></BIMRouteGuard>} />
+              <Route path="6d-carbon" element={<BIMRouteGuard><BIM6DCarbonPage /></BIMRouteGuard>} />
+              <Route path="sustainability" element={<BIMRouteGuard><BIM6DCarbonPage /></BIMRouteGuard>} />
+              <Route path="levels" element={<BIMRouteGuard><FloorLevelsPage /></BIMRouteGuard>} />
+              <Route path="packages" element={<BIMRouteGuard><WorkPackagesPage /></BIMRouteGuard>} />
+              <Route path="gridlines" element={<BIMRouteGuard><GridlinesPage /></BIMRouteGuard>} />
+              <Route path="mto" element={<BIMRouteGuard><MaterialTakeoff /></BIMRouteGuard>} />
+              <Route path="size-schedule" element={<BIMRouteGuard><MaterialTakeoff /></BIMRouteGuard>} />
 
               {/* Site Comments & Observations */}
               <Route path="site-comments" element={<SiteCommentsRegistry />} />
@@ -682,7 +703,7 @@ export const App: React.FC = () => {
               <Route path="daily-log" element={<DailySiteLogRegistry />} />
               <Route path="daily-log/create" element={<DailySiteLogCreate />} />
               <Route path="daily-log/:id" element={<DailySiteLogDetail />} />
-              <Route path="planner" element={<ConstructionPlanner />} />
+              <Route path="planner" element={<BIMRouteGuard><ConstructionPlanner /></BIMRouteGuard>} />
               <Route path="photos" element={<Photos />} />
               <Route path="documents" element={<Documents />} />
               <Route path="weekly-reports" element={<WeeklyReports />} />

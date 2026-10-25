@@ -1,22 +1,22 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Company, CompanySettings, Project } from "@/types";
 import { dbService } from "@/lib/db";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
+import { DEFAULT_THEME_PALETTE, applyCompanyTheme } from "@/lib/theme";
+import { generateUniversalName } from "@/lib/naming";
 
 // ==========================================
-// DEFAULT COMPANY FALLBACK VALUES
+// NEUTRAL ENTERPRISE DEFAULTS (Zero Tenant Leakage)
 // ==========================================
-export const DEFAULT_COMPANY_ID = "-Oubn5JnM98I3QvSzHCB";
-export const DEFAULT_COMPANY_NAME = "Collection Developments LTD";
-export const DEFAULT_COMPANY_LEGAL_NAME = "Collection Developments Limited";
-export const DEFAULT_COMPANY_EMAIL = "quality@collectiondev.com";
-export const DEFAULT_COMPANY_PHONE = "+44 (0) 20 7946 0912";
-export const DEFAULT_COMPANY_ADDRESS =
-  "14 Bankside Boulevard, London SE1 9SG, United Kingdom";
-export const DEFAULT_COMPANY_WEBSITE = "https://collectiondevelopments.com";
-export const DEFAULT_COMPANY_REG_NO = "CR-2024-8849102";
-export const DEFAULT_COMPANY_TAX_NO = "GB 992 819 021";
+export const DEFAULT_COMPANY_NAME = "Organization Workspace";
+export const DEFAULT_COMPANY_LEGAL_NAME = "";
+export const DEFAULT_COMPANY_EMAIL = "";
+export const DEFAULT_COMPANY_PHONE = "";
+export const DEFAULT_COMPANY_ADDRESS = "";
+export const DEFAULT_COMPANY_WEBSITE = "";
+export const DEFAULT_COMPANY_REG_NO = "";
+export const DEFAULT_COMPANY_TAX_NO = "";
 
 export const DEFAULT_COMPANY_STANDARDS: string[] = [
   "ISO 9001:2015 Quality Management Systems",
@@ -26,8 +26,6 @@ export const DEFAULT_COMPANY_STANDARDS: string[] = [
   "BS 8110 Structural Use of Concrete",
   "BS 4449 Carbon Steel Bars for the Reinforcement of Concrete",
 ];
-
-import { DEFAULT_THEME_PALETTE, applyCompanyTheme } from "@/lib/theme";
 
 export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
   ncrPrefix: "NCR",
@@ -67,13 +65,33 @@ export type FormModuleType =
   | "STEEL"
   | "DELIVERY";
 
+function escapeBrandHtml(input: unknown): string {
+  return String(input ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeBrandLogoSrc(src?: string): string | undefined {
+  if (!src) return undefined;
+  const trimmed = src.trim();
+  if (
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("/") ||
+    /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  return undefined;
+}
+
 // ==========================================
 // PURE UTILITY EXTRACTORS (Static Helpers)
 // ==========================================
 
-/**
- * Returns the company display name with graceful fallback
- */
 export function getCompanyName(
   company?: Partial<Company> | null,
   fallback = DEFAULT_COMPANY_NAME,
@@ -82,19 +100,13 @@ export function getCompanyName(
   return company.name?.trim() || company.legalName?.trim() || fallback;
 }
 
-/**
- * Returns company logo image URL or base64 data URL
- */
 export function getCompanyLogo(
   company?: Partial<Company> | null,
 ): string | undefined {
   if (!company) return undefined;
-  return company.logoUrl || company.logo || undefined;
+  return sanitizeBrandLogoSrc(company.logoUrl || company.logo);
 }
 
-/**
- * Returns official company email
- */
 export function getCompanyEmail(
   company?: Partial<Company> | null,
   fallback = DEFAULT_COMPANY_EMAIL,
@@ -103,9 +115,6 @@ export function getCompanyEmail(
   return company.email?.trim() || fallback;
 }
 
-/**
- * Returns official company telephone number
- */
 export function getCompanyPhone(
   company?: Partial<Company> | null,
   fallback = DEFAULT_COMPANY_PHONE,
@@ -114,9 +123,6 @@ export function getCompanyPhone(
   return company.phone?.trim() || fallback;
 }
 
-/**
- * Returns physical head office address
- */
 export function getCompanyAddress(
   company?: Partial<Company> | null,
   fallback = DEFAULT_COMPANY_ADDRESS,
@@ -125,9 +131,6 @@ export function getCompanyAddress(
   return company.address?.trim() || fallback;
 }
 
-/**
- * Returns official corporate website
- */
 export function getCompanyWebsite(
   company?: Partial<Company> | null,
   fallback = DEFAULT_COMPANY_WEBSITE,
@@ -136,9 +139,6 @@ export function getCompanyWebsite(
   return company.website?.trim() || fallback;
 }
 
-/**
- * Returns commercial registration number
- */
 export function getCompanyRegistration(
   company?: Partial<Company> | null,
   fallback = DEFAULT_COMPANY_REG_NO,
@@ -147,9 +147,6 @@ export function getCompanyRegistration(
   return company.registrationNo?.trim() || fallback;
 }
 
-/**
- * Returns corporate technical standards
- */
 export function getCompanyStandards(
   company?: Partial<Company> | null,
 ): string[] {
@@ -159,9 +156,6 @@ export function getCompanyStandards(
   return company.standards;
 }
 
-/**
- * Returns company settings with defaults merged
- */
 export function getCompanySettings(
   company?: Partial<Company> | null,
 ): CompanySettings {
@@ -177,9 +171,6 @@ export function getCompanySettings(
   };
 }
 
-/**
- * Fetches the prefix configured for a specific QA/QC module
- */
 export function getModulePrefix(
   formType: FormModuleType,
   companyOrSettings?: Partial<Company> | CompanySettings | null,
@@ -239,7 +230,8 @@ export function getModulePrefix(
 }
 
 /**
- * Generates an official standardized document number using the company's live prefix
+ * Generates an official standardized document number adhering to the universal naming system:
+ * {projectcode}_{prefix}_{random()}_{ddmmyy}
  */
 export function generateModuleDocNumber(
   formType: FormModuleType,
@@ -251,48 +243,32 @@ export function generateModuleDocNumber(
     projectCode?: string;
   },
 ): string {
-  const prefix = getModulePrefix(formType, companyOrSettings);
-  const year = options?.year || new Date().getFullYear();
-  const seq =
-    options?.count !== undefined
-      ? String(options.count).padStart(3, "0")
-      : String(Math.floor(Math.random() * 800 + 100)).padStart(3, "0");
-
+  let prefix = getModulePrefix(formType, companyOrSettings);
   if (formType === "SITE_COMMENT") {
-    return `${prefix}/${year}/${seq}`;
+    prefix = "COM";
+  } else if (formType === "POUR_PERMIT" || formType === "PTP") {
+    prefix = "PTP";
+  } else if (formType === "WEEKLY_REPORT") {
+    prefix = "WQR";
+  } else if (formType === "SITE_INSTRUCTION" || formType === "SI") {
+    prefix = "SI";
   }
 
-  if (formType === "WEEKLY_REPORT") {
-    const weekNumber = Math.ceil(
-      (new Date().getTime() -
-        new Date(new Date().getFullYear(), 0, 1).getTime()) /
-        (7 * 24 * 60 * 60 * 1000),
-    );
-    return `${prefix}-${year}-W${String(weekNumber).padStart(2, "0")}`;
-  }
-
-  if (formType === "SITE_INSTRUCTION" || formType === "SI") {
-    const pCode = (options?.projectCode || "").trim().toUpperCase();
-    return pCode
-      ? `${pCode}-${prefix}-${year}-${seq}`
-      : `${prefix}-${year}-${seq}`;
-  }
-
-  return `${prefix}-${year}-${seq}`;
+  return generateUniversalName(options?.projectCode, prefix);
 }
 
-/**
- * Generates two-letter initials from company name for logo avatars
- */
 export function getCompanyInitials(name?: string): string {
-  const compName = name || DEFAULT_COMPANY_NAME;
-  const parts = compName.trim().split(/\s+/);
+  const compName = (name || DEFAULT_COMPANY_NAME).trim();
+  if (!compName) return "JQ";
+  const parts = compName.split(/\s+/);
   if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 // ==========================================
 // REACT HOOK: useCompany()
+// Consumes the single shared company subscription in useAuthStore
+// (zero duplicate onSnapshot listeners, zero cross-tenant fallback queries)
 // ==========================================
 
 export interface UseCompanyReturn {
@@ -317,125 +293,66 @@ export interface UseCompanyReturn {
   getPrefix: (formType: FormModuleType) => string;
   generateDocNumber: (
     formType: FormModuleType,
-    options?: { count?: number; customSuffix?: string },
+    options?: { count?: number; customSuffix?: string; projectCode?: string },
   ) => string;
 }
 
 export function useCompany(): UseCompanyReturn {
-  const { currentUser, company: authCompany, setCompany } = useAuthStore();
+  const {
+    currentUser,
+    company: authCompany,
+    isLoading: isAuthLoading,
+    setCompany,
+  } = useAuthStore();
   const { activeProject } = useProjectStore();
 
-  const [activeCompanyId, setActiveCompanyId] = useState<string>(
+  const resolvedCompanyId =
     currentUser?.companyId ||
-      authCompany?.id ||
-      activeProject?.companyId ||
-      DEFAULT_COMPANY_ID,
-  );
+    authCompany?.id ||
+    activeProject?.companyId ||
+    "";
 
-  const [liveCompany, setLiveCompany] = useState<Company | null>(authCompany);
-  const [isLoading, setIsLoading] = useState<boolean>(!authCompany);
+  const [isFetching, setIsFetching] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load and subscribe live to Firestore
   useEffect(() => {
     let isMounted = true;
-    setIsLoading(true);
+    if (!resolvedCompanyId || authCompany?.id === resolvedCompanyId) {
+      return;
+    }
 
-    async function loadCompany() {
-      try {
-        let targetId =
-          currentUser?.companyId ||
-          authCompany?.id ||
-          activeProject?.companyId ||
-          DEFAULT_COMPANY_ID;
-
-        // 1. Try to fetch directly with targetId
-        let comp = await dbService.getCompany(targetId);
-
-        // 2. If not found, look up all companies in DB and pick the existing active one
-        if (!comp) {
-          const allComps = await dbService.getCompanies();
-          if (allComps.length > 0) {
-            comp = allComps[0];
-            targetId = comp.id;
-          }
-        }
-
+    setIsFetching(true);
+    dbService
+      .getCompany(resolvedCompanyId)
+      .then((comp) => {
         if (!isMounted) return;
-
         if (comp) {
-          setActiveCompanyId(comp.id);
-          setLiveCompany(comp);
           setCompany(comp);
           if (comp.settings?.themePalette) {
             applyCompanyTheme(comp.settings.themePalette);
           }
-        } else {
-          // If no company exists in DB at all, construct default
-          const defaultComp: Company = {
-            id: targetId,
-            name: DEFAULT_COMPANY_NAME,
-            legalName: DEFAULT_COMPANY_LEGAL_NAME,
-            ownerId: currentUser?.uid || "admin",
-            email: DEFAULT_COMPANY_EMAIL,
-            phone: DEFAULT_COMPANY_PHONE,
-            address: DEFAULT_COMPANY_ADDRESS,
-            website: DEFAULT_COMPANY_WEBSITE,
-            registrationNo: DEFAULT_COMPANY_REG_NO,
-            taxNumber: DEFAULT_COMPANY_TAX_NO,
-            standards: DEFAULT_COMPANY_STANDARDS,
-            settings: DEFAULT_COMPANY_SETTINGS,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-          setActiveCompanyId(targetId);
-          setLiveCompany(defaultComp);
-          setCompany(defaultComp);
-          if (defaultComp.settings?.themePalette) {
-            applyCompanyTheme(defaultComp.settings.themePalette);
-          }
         }
-        setIsLoading(false);
-      } catch (err: any) {
+      })
+      .catch((err: any) => {
         if (!isMounted) return;
         console.warn("Error fetching company details:", err);
-        setError("Failed to fetch live company details.");
-        setIsLoading(false);
-      }
-    }
-
-    loadCompany();
-
-    // Real-time subscription
-    const unsubscribe = dbService.subscribeCompany(activeCompanyId, (comp) => {
-      if (!isMounted) return;
-      if (comp) {
-        setLiveCompany(comp);
-        setCompany(comp);
-        if (comp.settings?.themePalette) {
-          applyCompanyTheme(comp.settings.themePalette);
-        }
-      }
-    });
+        setError("Failed to fetch company details.");
+      })
+      .finally(() => {
+        if (isMounted) setIsFetching(false);
+      });
 
     return () => {
       isMounted = false;
-      unsubscribe();
     };
-  }, [
-    currentUser?.companyId,
-    authCompany?.id,
-    activeProject?.companyId,
-    activeCompanyId,
-    setCompany,
-  ]);
+  }, [resolvedCompanyId, authCompany?.id, setCompany]);
 
   const refreshCompany = useCallback(async () => {
-    setIsLoading(true);
+    if (!resolvedCompanyId) return;
+    setIsFetching(true);
     try {
-      const comp = await dbService.getCompany(activeCompanyId);
+      const comp = await dbService.getCompany(resolvedCompanyId);
       if (comp) {
-        setLiveCompany(comp);
         setCompany(comp);
         if (comp.settings?.themePalette) {
           applyCompanyTheme(comp.settings.themePalette);
@@ -444,162 +361,177 @@ export function useCompany(): UseCompanyReturn {
     } catch (err: any) {
       setError(err?.message || "Failed to refresh company.");
     } finally {
-      setIsLoading(false);
+      setIsFetching(false);
     }
-  }, [activeCompanyId, setCompany]);
+  }, [resolvedCompanyId, setCompany]);
 
   const updateCompany = useCallback(
     async (updates: Partial<Company>) => {
-      try {
-        const targetId =
-          liveCompany?.id || activeCompanyId || DEFAULT_COMPANY_ID;
-        const currentSettings = getCompanySettings(liveCompany);
-        const incomingSettings = updates.settings || {};
-
-        const mergedSettings: CompanySettings = {
-          ncrPrefix:
-            incomingSettings.ncrPrefix ||
-            currentSettings.ncrPrefix ||
-            DEFAULT_COMPANY_SETTINGS.ncrPrefix,
-          rfiPrefix:
-            incomingSettings.rfiPrefix ||
-            currentSettings.rfiPrefix ||
-            DEFAULT_COMPANY_SETTINGS.rfiPrefix,
-          marPrefix:
-            incomingSettings.marPrefix ||
-            currentSettings.marPrefix ||
-            DEFAULT_COMPANY_SETTINGS.marPrefix,
-          siteCommentPrefix:
-            incomingSettings.siteCommentPrefix ||
-            currentSettings.siteCommentPrefix ||
-            DEFAULT_COMPANY_SETTINGS.siteCommentPrefix,
-          inspectionPrefix:
-            incomingSettings.inspectionPrefix ||
-            currentSettings.inspectionPrefix ||
-            DEFAULT_COMPANY_SETTINGS.inspectionPrefix,
-          ptpPrefix:
-            incomingSettings.ptpPrefix ||
-            currentSettings.ptpPrefix ||
-            DEFAULT_COMPANY_SETTINGS.ptpPrefix,
-          weeklyReportPrefix:
-            incomingSettings.weeklyReportPrefix ||
-            currentSettings.weeklyReportPrefix ||
-            DEFAULT_COMPANY_SETTINGS.weeklyReportPrefix,
-          siteInstructionPrefix:
-            incomingSettings.siteInstructionPrefix ||
-            currentSettings.siteInstructionPrefix ||
-            DEFAULT_COMPANY_SETTINGS.siteInstructionPrefix,
-          cubeTestStandard:
-            incomingSettings.cubeTestStandard ||
-            currentSettings.cubeTestStandard ||
-            DEFAULT_COMPANY_SETTINGS.cubeTestStandard,
-          rebarStandard:
-            incomingSettings.rebarStandard ||
-            currentSettings.rebarStandard ||
-            DEFAULT_COMPANY_SETTINGS.rebarStandard,
-          notifications: {
-            ...DEFAULT_COMPANY_SETTINGS.notifications,
-            ...(currentSettings.notifications || {}),
-            ...(incomingSettings.notifications || {}),
-          },
-          smtpServer:
-            incomingSettings.smtpServer !== undefined
-              ? incomingSettings.smtpServer
-              : currentSettings.smtpServer,
-          themePalette:
-            incomingSettings.themePalette !== undefined
-              ? incomingSettings.themePalette
-              : currentSettings.themePalette || DEFAULT_THEME_PALETTE,
-        };
-
-        if (mergedSettings.themePalette) {
-          applyCompanyTheme(mergedSettings.themePalette);
-        }
-
-        const merged: Company = {
-          id: targetId,
-          name: updates.name || liveCompany?.name || DEFAULT_COMPANY_NAME,
-          legalName:
-            updates.legalName ||
-            liveCompany?.legalName ||
-            DEFAULT_COMPANY_LEGAL_NAME,
-          ownerId: liveCompany?.ownerId || currentUser?.uid || "admin",
-          logo: updates.logo !== undefined ? updates.logo : liveCompany?.logo,
-          logoUrl:
-            updates.logoUrl !== undefined
-              ? updates.logoUrl
-              : liveCompany?.logoUrl,
-          email:
-            updates.email !== undefined ? updates.email : liveCompany?.email,
-          phone:
-            updates.phone !== undefined ? updates.phone : liveCompany?.phone,
-          address:
-            updates.address !== undefined
-              ? updates.address
-              : liveCompany?.address,
-          website:
-            updates.website !== undefined
-              ? updates.website
-              : liveCompany?.website,
-          registrationNo:
-            updates.registrationNo !== undefined
-              ? updates.registrationNo
-              : liveCompany?.registrationNo,
-          taxNumber:
-            updates.taxNumber !== undefined
-              ? updates.taxNumber
-              : liveCompany?.taxNumber,
-          standards:
-            updates.standards ||
-            liveCompany?.standards ||
-            DEFAULT_COMPANY_STANDARDS,
-          settings: mergedSettings,
-          createdAt: liveCompany?.createdAt || Date.now(),
-          updatedAt: Date.now(),
-        };
-
-        await dbService.saveCompany(merged);
-        setLiveCompany(merged);
-        setCompany(merged);
-      } catch (err: any) {
-        console.error("Failed to update company in DB:", err);
-        throw err;
+      const targetId = authCompany?.id || resolvedCompanyId;
+      if (!targetId) {
+        throw new Error("Cannot update company: no active company workspace is bound to your account.");
       }
+
+      const currentSettings = getCompanySettings(authCompany);
+      const incomingSettings = updates.settings || {};
+
+      const mergedSettings: CompanySettings = {
+        ncrPrefix:
+          incomingSettings.ncrPrefix ||
+          currentSettings.ncrPrefix ||
+          DEFAULT_COMPANY_SETTINGS.ncrPrefix,
+        rfiPrefix:
+          incomingSettings.rfiPrefix ||
+          currentSettings.rfiPrefix ||
+          DEFAULT_COMPANY_SETTINGS.rfiPrefix,
+        marPrefix:
+          incomingSettings.marPrefix ||
+          currentSettings.marPrefix ||
+          DEFAULT_COMPANY_SETTINGS.marPrefix,
+        mirPrefix:
+          incomingSettings.mirPrefix ||
+          currentSettings.mirPrefix ||
+          DEFAULT_COMPANY_SETTINGS.mirPrefix,
+        siteCommentPrefix:
+          incomingSettings.siteCommentPrefix ||
+          currentSettings.siteCommentPrefix ||
+          DEFAULT_COMPANY_SETTINGS.siteCommentPrefix,
+        inspectionPrefix:
+          incomingSettings.inspectionPrefix ||
+          currentSettings.inspectionPrefix ||
+          DEFAULT_COMPANY_SETTINGS.inspectionPrefix,
+        ptpPrefix:
+          incomingSettings.ptpPrefix ||
+          currentSettings.ptpPrefix ||
+          DEFAULT_COMPANY_SETTINGS.ptpPrefix,
+        weeklyReportPrefix:
+          incomingSettings.weeklyReportPrefix ||
+          currentSettings.weeklyReportPrefix ||
+          DEFAULT_COMPANY_SETTINGS.weeklyReportPrefix,
+        siteInstructionPrefix:
+          incomingSettings.siteInstructionPrefix ||
+          currentSettings.siteInstructionPrefix ||
+          DEFAULT_COMPANY_SETTINGS.siteInstructionPrefix,
+        cubeTestStandard:
+          incomingSettings.cubeTestStandard ||
+          currentSettings.cubeTestStandard ||
+          DEFAULT_COMPANY_SETTINGS.cubeTestStandard,
+        rebarStandard:
+          incomingSettings.rebarStandard ||
+          currentSettings.rebarStandard ||
+          DEFAULT_COMPANY_SETTINGS.rebarStandard,
+        notifications: {
+          ...DEFAULT_COMPANY_SETTINGS.notifications,
+          ...(currentSettings.notifications || {}),
+          ...(incomingSettings.notifications || {}),
+        },
+        smtpServer:
+          incomingSettings.smtpServer !== undefined
+            ? incomingSettings.smtpServer
+            : currentSettings.smtpServer,
+        themePalette:
+          incomingSettings.themePalette !== undefined
+            ? incomingSettings.themePalette
+            : currentSettings.themePalette || DEFAULT_THEME_PALETTE,
+      };
+
+      if (mergedSettings.themePalette) {
+        applyCompanyTheme(mergedSettings.themePalette);
+      }
+
+      const merged: Company = {
+        id: targetId,
+        name:
+          updates.name ||
+          authCompany?.name ||
+          currentUser?.companyName ||
+          DEFAULT_COMPANY_NAME,
+        legalName:
+          updates.legalName !== undefined
+            ? updates.legalName
+            : authCompany?.legalName || authCompany?.name || "",
+        ownerId: authCompany?.ownerId || currentUser?.uid || "",
+        logo: updates.logo !== undefined ? updates.logo : authCompany?.logo,
+        logoUrl:
+          updates.logoUrl !== undefined
+            ? updates.logoUrl
+            : authCompany?.logoUrl,
+        email:
+          updates.email !== undefined ? updates.email : authCompany?.email,
+        phone:
+          updates.phone !== undefined ? updates.phone : authCompany?.phone,
+        address:
+          updates.address !== undefined
+            ? updates.address
+            : authCompany?.address,
+        website:
+          updates.website !== undefined
+            ? updates.website
+            : authCompany?.website,
+        registrationNo:
+          updates.registrationNo !== undefined
+            ? updates.registrationNo
+            : authCompany?.registrationNo,
+        taxNumber:
+          updates.taxNumber !== undefined
+            ? updates.taxNumber
+            : authCompany?.taxNumber,
+        standards:
+          updates.standards ||
+          authCompany?.standards ||
+          DEFAULT_COMPANY_STANDARDS,
+        settings: mergedSettings,
+        createdAt: authCompany?.createdAt || Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      await dbService.saveCompany(merged);
+      setCompany(merged);
     },
-    [activeCompanyId, liveCompany, setCompany, currentUser?.uid],
+    [authCompany, resolvedCompanyId, setCompany, currentUser?.uid, currentUser?.companyName],
   );
 
-  const effectiveCompany = liveCompany || authCompany;
-
   const getPrefix = useCallback(
-    (formType: FormModuleType) => getModulePrefix(formType, effectiveCompany),
-    [effectiveCompany],
+    (formType: FormModuleType) => getModulePrefix(formType, authCompany),
+    [authCompany],
   );
 
   const generateDocNumber = useCallback(
     (
       formType: FormModuleType,
-      options?: { count?: number; customSuffix?: string },
-    ) => generateModuleDocNumber(formType, effectiveCompany, options),
-    [effectiveCompany],
+      options?: { count?: number; customSuffix?: string; projectCode?: string },
+    ) =>
+      generateModuleDocNumber(formType, authCompany, {
+        ...options,
+        projectCode: options?.projectCode || activeProject?.code,
+      }),
+    [authCompany, activeProject],
   );
 
   return {
-    company: effectiveCompany,
-    companyId: activeCompanyId,
-    name: getCompanyName(effectiveCompany),
-    legalName: effectiveCompany?.legalName || getCompanyName(effectiveCompany),
-    logo: getCompanyLogo(effectiveCompany),
-    logoUrl: getCompanyLogo(effectiveCompany),
-    email: getCompanyEmail(effectiveCompany),
-    phone: getCompanyPhone(effectiveCompany),
-    address: getCompanyAddress(effectiveCompany),
-    website: getCompanyWebsite(effectiveCompany),
-    registrationNo: getCompanyRegistration(effectiveCompany),
-    taxNumber: effectiveCompany?.taxNumber || DEFAULT_COMPANY_TAX_NO,
-    standards: getCompanyStandards(effectiveCompany),
-    settings: getCompanySettings(effectiveCompany),
-    isLoading,
+    company: authCompany,
+    companyId: resolvedCompanyId,
+    name: getCompanyName(
+      authCompany,
+      currentUser?.companyName || DEFAULT_COMPANY_NAME,
+    ),
+    legalName:
+      authCompany?.legalName ||
+      getCompanyName(
+        authCompany,
+        currentUser?.companyName || DEFAULT_COMPANY_NAME,
+      ),
+    logo: getCompanyLogo(authCompany),
+    logoUrl: getCompanyLogo(authCompany),
+    email: getCompanyEmail(authCompany),
+    phone: getCompanyPhone(authCompany),
+    address: getCompanyAddress(authCompany),
+    website: getCompanyWebsite(authCompany),
+    registrationNo: getCompanyRegistration(authCompany),
+    taxNumber: authCompany?.taxNumber || DEFAULT_COMPANY_TAX_NO,
+    standards: getCompanyStandards(authCompany),
+    settings: getCompanySettings(authCompany),
+    isLoading: isAuthLoading || isFetching,
     error,
     refreshCompany,
     updateCompany,
@@ -609,55 +541,53 @@ export function useCompany(): UseCompanyReturn {
 }
 
 /**
- * Standard dynamic company brand cell renderer for reports, printouts, and PDFs.
- * Resolves logo and company details dynamically from active Company or Project without hardcoding.
- * Matches the official NCR brand cell standard: Logo, Company Name, Address, Email & Phone.
+ * Standard XSS-escaped company brand cell renderer for reports, printouts, and PDFs.
  */
 export function renderCompanyBrandCell(
   company: Partial<Company> = {},
   project: Partial<Project> = {},
 ): string {
   let backendCompany: Partial<Company> | null = null;
+  let fallbackUserCompanyName = "";
   try {
-    backendCompany = useAuthStore.getState().company;
-  } catch (e) {}
-
-  if (!backendCompany && typeof window !== "undefined") {
-    try {
-      const stored = localStorage.getItem("jqms_current_company");
-      if (stored) backendCompany = JSON.parse(stored);
-    } catch (e) {}
+    const authState = useAuthStore.getState();
+    backendCompany = authState.company;
+    fallbackUserCompanyName = authState.currentUser?.companyName || "";
+  } catch {
+    // Ignore store access outside React lifecycle
   }
 
-  const logo =
+  const rawLogo =
     company.logoUrl ||
     company.logo ||
     backendCompany?.logoUrl ||
     backendCompany?.logo ||
     (project as any)?.logoUrl ||
     (project as any)?.logo;
+  const logo = sanitizeBrandLogoSrc(rawLogo);
 
-  const compName =
+  const compName = escapeBrandHtml(
     company.name?.trim() ||
-    company.legalName?.trim() ||
-    backendCompany?.name?.trim() ||
-    backendCompany?.legalName?.trim() ||
-    DEFAULT_COMPANY_NAME;
+      company.legalName?.trim() ||
+      backendCompany?.name?.trim() ||
+      backendCompany?.legalName?.trim() ||
+      fallbackUserCompanyName.trim() ||
+      (project as any)?.contractor?.trim() ||
+      project.contractorName?.trim() ||
+      DEFAULT_COMPANY_NAME,
+  );
 
-  const compAddress =
-    company.address?.trim() ||
-    backendCompany?.address?.trim() ||
-    DEFAULT_COMPANY_ADDRESS;
+  const compAddress = escapeBrandHtml(
+    company.address?.trim() || backendCompany?.address?.trim() || "",
+  );
 
-  const compEmail =
-    company.email?.trim() ||
-    backendCompany?.email?.trim() ||
-    DEFAULT_COMPANY_EMAIL;
+  const compEmail = escapeBrandHtml(
+    company.email?.trim() || backendCompany?.email?.trim() || "",
+  );
 
-  const compPhone =
-    company.phone?.trim() ||
-    backendCompany?.phone?.trim() ||
-    DEFAULT_COMPANY_PHONE;
+  const compPhone = escapeBrandHtml(
+    company.phone?.trim() || backendCompany?.phone?.trim() || "",
+  );
 
   const contactItems = [compEmail, compPhone].filter(Boolean);
   const contactHtml =
@@ -672,7 +602,7 @@ export function renderCompanyBrandCell(
   if (logo) {
     return `
       <div style="line-height: 1.2; padding: 2px 4px; text-align: center; font-family: 'Segoe UI', Arial, sans-serif;">
-        <img src="${logo}" style="max-height: 38px; max-width: 125px; object-fit: contain; margin-bottom: 2.5px; display: inline-block;" alt="${compName}" />
+        <img src="${escapeBrandHtml(logo)}" crossorigin="anonymous" style="max-height: 38px; max-width: 125px; object-fit: contain; margin-bottom: 2.5px; display: inline-block;" alt="${compName}" />
         <div style="font-weight: 800; font-size: 9.5px; color: #0f172a; text-transform: uppercase; letter-spacing: 0.3px; line-height: 1.15;">
           ${compName}
         </div>
@@ -682,7 +612,13 @@ export function renderCompanyBrandCell(
     `;
   }
 
-  const initial = (compName || "J")[0].toUpperCase();
+  const rawFirstChar = (
+    company.name?.trim() ||
+    backendCompany?.name?.trim() ||
+    fallbackUserCompanyName.trim() ||
+    "J"
+  )[0];
+  const initial = escapeBrandHtml((rawFirstChar || "J").toUpperCase());
 
   return `
     <div style="line-height: 1.2; padding: 2px 4px; text-align: center; font-family: 'Segoe UI', Arial, sans-serif;">

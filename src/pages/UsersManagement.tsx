@@ -32,8 +32,7 @@ import toast from "react-hot-toast";
 
 export const UsersManagement: React.FC = () => {
   const { currentUser, company } = useAuthStore();
-  const currentCompId =
-    currentUser?.companyId || company?.id || "comp-apex-civil";
+  const currentCompId = currentUser?.companyId || company?.id || "";
 
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -156,22 +155,35 @@ export const UsersManagement: React.FC = () => {
       return;
     }
 
+    if (!currentCompId) {
+      toast.error("Active company workspace not loaded yet.");
+      return;
+    }
+
     // ONLY Corporate Executives / Governance Managers (Super Admin, Quality Director, Exec Mgmt, PM, Ops Mgr) get global project access by default.
     // QA/QC engineers and site inspectors are assigned project-specifically.
     const isAutoProjectAccess = isGlobalManagerRole(role);
+    const normalizedEmail = email.trim().toLowerCase();
+    const generatedId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? `usr-${crypto.randomUUID()}`
+        : `usr-${Date.now()}`;
     const newUser: UserProfile = {
-      uid: `usr-${Date.now()}`,
-      email,
-      fullName: name,
+      uid: generatedId,
+      email: normalizedEmail,
+      fullName: name.trim(),
       role,
       title: designation.trim() || undefined,
       designation: designation.trim() || undefined,
       companyId: currentCompId,
-      department: department || "Field Quality & Assurance",
+      companyName: company?.name || currentUser?.companyName || undefined,
+      department: department.trim() || "Field Quality & Assurance",
       projectIds: isAutoProjectAccess ? ["*"] : [],
       projectAccess: isAutoProjectAccess ? { "*": true } : {},
       status: "ACTIVE",
-      createdAt: new Date().toISOString(),
+      isActive: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
 
     await dbService.saveUser(newUser);
@@ -242,7 +254,7 @@ export const UsersManagement: React.FC = () => {
       projectAccess: isAutoProjectAccess
         ? { ...(editingUser.projectAccess || {}), "*": true }
         : editingUser.projectAccess || {},
-      updatedAt: new Date().toISOString(),
+      updatedAt: Date.now(),
     };
 
     await dbService.saveUser(updated);
@@ -286,7 +298,12 @@ export const UsersManagement: React.FC = () => {
       return;
     }
     const nextStatus = user.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
-    const updated: UserProfile = { ...user, status: nextStatus };
+    const updated: UserProfile = {
+      ...user,
+      status: nextStatus,
+      isActive: nextStatus === "ACTIVE",
+      updatedAt: Date.now(),
+    };
     await dbService.saveUser(updated);
     setUsers(users.map((u) => (u.uid === user.uid ? updated : u)));
 

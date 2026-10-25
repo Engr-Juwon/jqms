@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { generateUniversalName } from '@/lib/naming';
+import { useProjectStore } from '@/stores/useProjectStore';
 import { uploadMultiple, getThumbnail, getOptimized } from '@/lib/cloudinary';
 import { syncMultiplePhotosToSiteGallery, syncPhotoToSiteGallery } from '@/lib/photoSync';
 import { FieldPhotoCapture, FieldPhotoMetadata } from '@/components/common/FieldPhotoCapture';
@@ -98,13 +100,28 @@ export const UniversalPhotoUploader: React.FC<UniversalPhotoUploaderProps> = ({
     const toastId = toast.loading('Compressing & uploading photos to Cloudinary...');
 
     try {
+      const activeProjectCode = useProjectStore.getState()?.activeProject?.code;
       const fileList = Array.from(files);
-      const results = await uploadMultiple(fileList, folder);
+      const standardizedFiles = fileList.map((file) => {
+        const ext = file.name.split('.').pop() || 'jpg';
+        const universalName = generateUniversalName(
+          activeProjectCode || projectId,
+          'PHOTO',
+          { extension: ext }
+        );
+        return new File([file], universalName, { type: file.type });
+      });
+      const results = await uploadMultiple(standardizedFiles, folder);
 
-      const newPhotoItems: PhotoItem[] = results.map((res) => ({
-        url: res.url,
-        caption: `${sourceModule || 'Site'} Record - ${elementName || floorLevel || 'General'} (${new Date().toLocaleDateString()})`,
-      }));
+      const newPhotoItems: PhotoItem[] = results.map((res, idx) => {
+        const photoCode =
+          standardizedFiles[idx]?.name.replace(/\.[^/.]+$/, '') ||
+          generateUniversalName(activeProjectCode || projectId, 'PHOTO');
+        return {
+          url: res.url,
+          caption: `${photoCode} - ${sourceModule || 'Site'} (${elementName || floorLevel || 'General'})`,
+        };
+      });
 
       const updated = [...normalizedPhotos, ...newPhotoItems];
       onChange(updated);
@@ -150,10 +167,20 @@ export const UniversalPhotoUploader: React.FC<UniversalPhotoUploaderProps> = ({
     const toastId = toast.loading('Uploading camera snapshot to Cloudinary...');
 
     try {
-      const results = await uploadMultiple([file], folder);
+      const activeProjectCode = useProjectStore.getState()?.activeProject?.code;
+      const universalName = generateUniversalName(
+        activeProjectCode || projectId,
+        'PHOTO',
+        { extension: 'jpg' }
+      );
+      const renamedFile = new File([file], universalName, {
+        type: file.type || 'image/jpeg',
+      });
+      const results = await uploadMultiple([renamedFile], folder);
       const res = results[0];
 
-      const captionText = `${sourceModule || 'Site'} Snapshot - ${elementName || floorLevel || 'Field'} (${new Date().toLocaleDateString()})`;
+      const photoCode = universalName.replace(/\.[^/.]+$/, '');
+      const captionText = `${photoCode} - ${sourceModule || 'Site'} Snapshot (${elementName || floorLevel || 'Field'})`;
       const newItem: PhotoItem = {
         url: res.url,
         caption: captionText,

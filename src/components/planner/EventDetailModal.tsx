@@ -40,9 +40,9 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
     if (event.eventType === 'INSPECTION') {
       navigate(`/project/inspections/${event.referenceId}`);
     } else if (event.eventType === 'CONCRETE_POUR') {
-      navigate(`/project/permits-to-pour/${event.referenceId}`);
+      navigate(`/project/permit-to-pour/${event.referenceId}`);
     } else if (event.eventType === 'CUBE_TEST_DUE') {
-      navigate(`/project/concrete/cubes/${event.referenceId}`);
+      navigate(`/project/concrete/${event.referenceId}`);
     } else if (event.eventType === 'NCR_DEADLINE') {
       navigate(`/project/ncr/${event.referenceId}`);
     } else if (event.eventType === 'RFI_DUE') {

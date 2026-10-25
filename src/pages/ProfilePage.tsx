@@ -1,15 +1,12 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useCompany } from "@/lib/companyHelper";
 import { dbService } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
-import {
-  ROLE_TITLES,
-  ROLE_LEVELS,
-  getUserSigningTitle,
-  isQAQCUser,
-} from "@/lib/permissions";
+import { auth } from "@/firebase";
+import { updateProfile } from "firebase/auth";
+import { ROLE_TITLES, ROLE_LEVELS } from "@/lib/permissions";
 import { UserProfile } from "@/types";
 import { toast } from "react-hot-toast";
 import {
@@ -17,33 +14,27 @@ import {
   Camera,
   Trash2,
   Upload,
-  Shield,
   ShieldCheck,
-  Building2,
   Mail,
-  Phone,
-  Briefcase,
-  Layers,
   Save,
   CheckCircle2,
   Sparkles,
   Lock,
   ArrowLeft,
-  FileCheck,
   Eye,
   EyeOff,
   Send,
   Server,
   AlertCircle,
-  Key,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { EmailService } from "@/services/emailService";
+import { uploadMediaAsset } from "@/lib/cloudinary";
 
 export const ProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser, setUser, refreshUserProfile } = useAuthStore();
-  const { activeProject, projects } = useProjectStore();
+  const { activeProject } = useProjectStore();
   const { company, name: companyName } = useCompany();
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -63,13 +54,18 @@ export const ProfilePage: React.FC = () => {
   const [avatarUrl, setAvatarUrl] = useState<string>(
     currentUser?.avatarUrl || "",
   );
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  // Personal SMTP Credentials
+  // Personal SMTP Credentials (never populate plaintext password into state)
   const [smtpUsername, setSmtpUsername] = useState(
     currentUser?.smtpCredentials?.username || currentUser?.email || "",
   );
-  const [smtpPassword, setSmtpPassword] = useState(
-    currentUser?.smtpCredentials?.password || "",
+  const [smtpPassword, setSmtpPassword] = useState("");
+  const [hasEncryptedPassword, setHasEncryptedPassword] = useState<boolean>(
+    Boolean(
+      currentUser?.smtpCredentials?.encryptedPassword ||
+        currentUser?.smtpCredentials?.hasSavedPassword,
+    ),
   );
   const [smtpSenderDisplayName, setSmtpSenderDisplayName] = useState(
     currentUser?.smtpCredentials?.senderDisplayName ||
@@ -82,11 +78,12 @@ export const ProfilePage: React.FC = () => {
   );
   const [smtpSignature, setSmtpSignature] = useState(
     currentUser?.smtpCredentials?.emailSignature ||
-      `${currentUser?.fullName || "QA/QC Engineer"}\n${currentUser?.title || "QA/QC Engineer"}\nEmail: ${currentUser?.smtpCredentials?.senderEmail || currentUser?.email || ""}\nTel: ${currentUser?.phone || ""}`,
+      `${currentUser?.fullName || "QA/QC Engineer"}\n${currentUser?.title || "QA/QC Engineer"}\nEmail: ${currentUser?.smtpCredentials?.senderEmail || currentUser?.email || ""}${currentUser?.phone ? `\nTel: ${currentUser.phone}` : ""}`,
   );
-  const [includeCompanyLogoInSignature, setIncludeCompanyLogoInSignature] = useState<boolean>(
-    currentUser?.smtpCredentials?.includeCompanyLogoInSignature ?? true,
-  );
+  const [includeCompanyLogoInSignature, setIncludeCompanyLogoInSignature] =
+    useState<boolean>(
+      currentUser?.smtpCredentials?.includeCompanyLogoInSignature ?? true,
+    );
   const [saveSentToImap, setSaveSentToImap] = useState<boolean>(
     currentUser?.smtpCredentials?.saveSentToImap ?? true,
   );
@@ -102,11 +99,61 @@ export const ProfilePage: React.FC = () => {
 
   const [saving, setSaving] = useState(false);
 
-  const roleLevel = currentUser?.role ? ROLE_LEVELS[currentUser.role] || 1 : 1;
-  const currentCompId = currentUser?.companyId || "comp-apex-civil";
+  // Synchronize form fields whenever currentUser finishes loading or updates
+  useEffect(() => {
+    if (currentUser) {
+      setFullName(currentUser.fullName || "");
+      setDisplayName(currentUser.displayName || currentUser.fullName || "");
+      setPhone(currentUser.phone || "");
+      setTitle(currentUser.title || currentUser.designation || "");
+      setDepartment(currentUser.department || "Quality Assurance & Control");
+      setAvatarUrl(currentUser.avatarUrl || "");
 
-  // Handle Photo Upload via local File Reader
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (currentUser.smtpCredentials) {
+        setSmtpUsername(
+          currentUser.smtpCredentials.username || currentUser.email || "",
+        );
+        setHasEncryptedPassword(
+          Boolean(
+            currentUser.smtpCredentials.encryptedPassword ||
+              currentUser.smtpCredentials.hasSavedPassword,
+          ),
+        );
+        setSmtpSenderDisplayName(
+          currentUser.smtpCredentials.senderDisplayName ||
+            currentUser.displayName ||
+            currentUser.fullName ||
+            "",
+        );
+        setSmtpSenderEmail(
+          currentUser.smtpCredentials.senderEmail || currentUser.email || "",
+        );
+        if (currentUser.smtpCredentials.emailSignature) {
+          setSmtpSignature(currentUser.smtpCredentials.emailSignature);
+        }
+        if (
+          currentUser.smtpCredentials.includeCompanyLogoInSignature !==
+          undefined
+        ) {
+          setIncludeCompanyLogoInSignature(
+            currentUser.smtpCredentials.includeCompanyLogoInSignature,
+          );
+        }
+        if (currentUser.smtpCredentials.saveSentToImap !== undefined) {
+          setSaveSentToImap(currentUser.smtpCredentials.saveSentToImap);
+        }
+      }
+      if (currentUser.email) {
+        setTestEmailTarget(currentUser.email);
+      }
+    }
+  }, [currentUser]);
+
+  const roleLevel = currentUser?.role ? ROLE_LEVELS[currentUser.role] || 1 : 1;
+  const currentCompId = currentUser?.companyId || company?.id || "";
+
+  // Upload Profile Photo to signed Cloudinary / Firebase Cloud Storage (zero base64 in Firestore)
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -115,18 +162,20 @@ export const ProfilePage: React.FC = () => {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
-      const result = uploadEvent.target?.result as string;
-      if (result) {
-        setAvatarUrl(result);
-        toast.success("Profile photo loaded! Click Save to apply.");
-      }
-    };
-    reader.onerror = () => {
-      toast.error("Failed to read image file.");
-    };
-    reader.readAsDataURL(file);
+    setUploadingAvatar(true);
+    try {
+      const uploaded = await uploadMediaAsset(file, {
+        companyId: currentCompId,
+        category: "avatars",
+        maxBytes: 5 * 1024 * 1024,
+      });
+      setAvatarUrl(uploaded.url);
+      toast.success("Profile photo uploaded! Click Save Changes to apply.");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to upload profile photo.");
+    } finally {
+      setUploadingAvatar(false);
+    }
   };
 
   // Handle Remove Profile Photo
@@ -142,12 +191,13 @@ export const ProfilePage: React.FC = () => {
   const handleTestSmtp = async () => {
     if (!company?.settings?.smtpServer?.host) {
       toast.error(
-        "Company SMTP Server Host is not configured. Please ask your administrator to configure it in Company Settings.",
+        "Company SMTP Server Host is not configured. Ask your administrator to configure it in Company Settings, or rely on Platform Relay.",
       );
       return;
     }
-    if (!smtpUsername.trim() || !smtpPassword.trim()) {
-      toast.error("Please enter both your SMTP Username/Email and Password.");
+    const existingEncrypted = currentUser?.smtpCredentials?.encryptedPassword;
+    if (!smtpUsername.trim() || (!smtpPassword.trim() && !existingEncrypted)) {
+      toast.error("Please enter both your SMTP Username/Email and App Password.");
       return;
     }
 
@@ -160,10 +210,12 @@ export const ProfilePage: React.FC = () => {
         port: company.settings.smtpServer.port || 587,
         secure: company.settings.smtpServer.secure,
         username: smtpUsername.trim(),
-        password: smtpPassword.trim(),
+        password: smtpPassword.trim() || undefined,
+        encryptedPassword: !smtpPassword.trim() ? existingEncrypted : undefined,
         senderDisplayName: smtpSenderDisplayName.trim() || fullName,
         senderEmail: smtpSenderEmail.trim() || smtpUsername.trim(),
-        testRecipientEmail: testEmailTarget.trim() || currentUser?.email || smtpUsername.trim(),
+        testRecipientEmail:
+          testEmailTarget.trim() || currentUser?.email || smtpUsername.trim(),
       });
 
       if (res.success) {
@@ -201,6 +253,26 @@ export const ProfilePage: React.FC = () => {
 
     setSaving(true);
     try {
+      // Ensure any legacy data: URL avatar is migrated to cloud storage before saving
+      let resolvedAvatarUrl = avatarUrl.trim();
+      if (resolvedAvatarUrl.startsWith("data:")) {
+        const uploaded = await uploadMediaAsset(resolvedAvatarUrl, {
+          companyId: currentCompId,
+          category: "avatars",
+          filename: `avatar-${currentUser.uid}.jpg`,
+        });
+        resolvedAvatarUrl = uploaded.url;
+        setAvatarUrl(resolvedAvatarUrl);
+      }
+
+      // Encrypt new SMTP password server-side if provided; never persist plaintext `password`
+      let encryptedPassword = currentUser.smtpCredentials?.encryptedPassword;
+      if (smtpPassword.trim()) {
+        encryptedPassword = await EmailService.encryptSmtpPassword(
+          smtpPassword.trim(),
+        );
+      }
+
       const updatedUser: UserProfile = {
         ...currentUser,
         fullName: fullName.trim(),
@@ -209,42 +281,73 @@ export const ProfilePage: React.FC = () => {
         title: title.trim() || undefined,
         designation: title.trim() || undefined,
         department: department.trim() || undefined,
-        avatarUrl: avatarUrl.trim() || undefined,
+        avatarUrl: resolvedAvatarUrl || undefined,
         smtpCredentials: {
           username: smtpUsername.trim() || undefined,
-          password: smtpPassword.trim() || undefined,
+          encryptedPassword: encryptedPassword || undefined,
+          hasSavedPassword: Boolean(encryptedPassword),
           senderDisplayName: smtpSenderDisplayName.trim() || undefined,
           senderEmail: smtpSenderEmail.trim() || undefined,
           emailSignature: smtpSignature.trim() || undefined,
           saveSentToImap: saveSentToImap,
           includeCompanyLogoInSignature: includeCompanyLogoInSignature,
         },
-        updatedAt: new Date().toISOString(),
+        updatedAt: Date.now(),
       };
 
       await dbService.saveUser(updatedUser);
       setUser(updatedUser);
+      setSmtpPassword("");
+      setHasEncryptedPassword(Boolean(encryptedPassword));
+
+      // Keep Firebase Auth profile in sync (URL only, under 2KB limit)
+      try {
+        if (auth.currentUser) {
+          await updateProfile(auth.currentUser, {
+            displayName: updatedUser.fullName,
+            photoURL:
+              updatedUser.avatarUrl && updatedUser.avatarUrl.length < 2000
+                ? updatedUser.avatarUrl
+                : null,
+          });
+        }
+      } catch (authErr) {
+        console.warn("Firebase Auth updateProfile warning:", authErr);
+      }
 
       try {
         await refreshUserProfile();
-      } catch {}
+      } catch {
+        // ignore
+      }
 
-      await writeAudit({
-        companyId: currentCompId,
-        projectId: activeProject?.id || currentUser.lastActiveProjectId || "global",
-        userId: currentUser.uid,
-        userName: updatedUser.fullName,
-        userRole: currentUser.role,
-        action: "UPDATE_PROFILE",
-        module: "Auth",
-        details: `User updated personal profile details, signing title ("${title}") and SMTP mail credentials`,
-        newValue: updatedUser,
-      });
+      if (currentCompId) {
+        await writeAudit({
+          companyId: currentCompId,
+          projectId:
+            activeProject?.id || currentUser.lastActiveProjectId || "global",
+          userId: currentUser.uid,
+          userName: updatedUser.fullName,
+          userRole: currentUser.role,
+          action: "UPDATE_PROFILE",
+          module: "Auth",
+          details: `User updated personal profile details and signing title ("${title.trim() || ROLE_TITLES[currentUser.role]}")`,
+          newValue: {
+            fullName: updatedUser.fullName,
+            displayName: updatedUser.displayName,
+            title: updatedUser.title,
+            department: updatedUser.department,
+            hasEncryptedSmtp: Boolean(encryptedPassword),
+          },
+        });
+      }
 
-      toast.success("Profile & SMTP credentials updated successfully!");
-    } catch (err) {
+      toast.success("Profile & encrypted SMTP settings saved!");
+    } catch (err: any) {
       console.error("Failed to save user profile:", err);
-      toast.error("Failed to save profile changes.");
+      toast.error(
+        err?.message || "Failed to save profile changes to cloud database.",
+      );
     } finally {
       setSaving(false);
     }
@@ -265,14 +368,14 @@ export const ProfilePage: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                My Profile & Identity
+                My Profile &amp; Identity
               </h1>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-brand-500/10 text-brand-600 dark:text-brand-400 border border-brand-500/20 font-mono">
                 L{roleLevel}
               </span>
             </div>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-              Manage your personal credentials, official signing title, avatar photo, and project details.
+              Manage your personal credentials, official signing title, avatar photo, and encrypted email settings.
             </p>
           </div>
         </div>
@@ -280,7 +383,7 @@ export const ProfilePage: React.FC = () => {
         <button
           type="button"
           onClick={handleSaveProfile}
-          disabled={saving}
+          disabled={saving || uploadingAvatar}
           className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md transition disabled:opacity-50"
         >
           <Save className="w-4 h-4" />
@@ -294,7 +397,7 @@ export const ProfilePage: React.FC = () => {
           <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
             <Camera className="w-5 h-5 text-brand-600 dark:text-brand-400" />
             <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-              Profile Photo & Digital Avatar
+              Profile Photo &amp; Digital Avatar
             </h2>
           </div>
 
@@ -323,7 +426,7 @@ export const ProfilePage: React.FC = () => {
                   Profile Picture
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  This picture will be displayed on team chats, approval queues, activity logs, and your personnel card.
+                  Stored securely in cloud object storage and displayed on team chats, approval queues, activity logs, and your personnel card.
                 </p>
               </div>
 
@@ -338,11 +441,14 @@ export const ProfilePage: React.FC = () => {
 
                 <button
                   type="button"
+                  disabled={uploadingAvatar}
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-700 transition"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-700 transition disabled:opacity-50"
                 >
                   <Upload className="w-3.5 h-3.5 text-brand-600" />
-                  <span>Upload Image</span>
+                  <span>
+                    {uploadingAvatar ? "Uploading..." : "Upload Image"}
+                  </span>
                 </button>
 
                 {avatarUrl && (
@@ -368,7 +474,7 @@ export const ProfilePage: React.FC = () => {
           <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
             <User className="w-5 h-5 text-brand-600 dark:text-brand-400" />
             <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-              Personal Information & Official Designation
+              Personal Information &amp; Official Designation
             </h2>
           </div>
 
@@ -383,7 +489,7 @@ export const ProfilePage: React.FC = () => {
                 required
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="e.g. Liam Sterling"
+                placeholder="Enter your full name"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-900 dark:text-white text-xs font-semibold focus:border-brand-500 focus:outline-none transition"
               />
             </div>
@@ -397,7 +503,7 @@ export const ProfilePage: React.FC = () => {
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="e.g. Liam"
+                placeholder="Preferred short name"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-900 dark:text-white text-xs font-semibold focus:border-brand-500 focus:outline-none transition"
               />
             </div>
@@ -405,7 +511,7 @@ export const ProfilePage: React.FC = () => {
             {/* Official Title / Designation */}
             <div className="sm:col-span-2 p-4 rounded-xl bg-brand-50/50 dark:bg-brand-950/20 border border-brand-200/70 dark:border-brand-900/50 space-y-1.5">
               <label className="block text-xs font-bold text-brand-900 dark:text-brand-300">
-                Official Job / Signing Title (Printed on Signatures & Dossiers)
+                Official Job / Signing Title (Printed on Signatures &amp; Dossiers)
               </label>
               <input
                 type="text"
@@ -415,7 +521,11 @@ export const ProfilePage: React.FC = () => {
                 className="w-full bg-white dark:bg-slate-900 border border-brand-300 dark:border-brand-700 rounded-xl px-3.5 py-2.5 text-slate-900 dark:text-white text-xs font-bold focus:ring-2 focus:ring-brand-500 focus:outline-none transition"
               />
               <p className="text-[11px] text-brand-700 dark:text-brand-300/80 leading-relaxed">
-                💡 <strong>Important:</strong> Your system permissions are governed by your statutory role (<strong>{currentUser?.role ? ROLE_TITLES[currentUser.role] : "Role"}</strong>), but the title entered here is what will be formally stamped on your digital signatures, permits to pour, inspection hold points, Taking Over Certificates, and chat messages.
+                Your system permissions are governed by your statutory role (
+                <strong>
+                  {currentUser?.role ? ROLE_TITLES[currentUser.role] : "Role"}
+                </strong>
+                ), while the title entered here is stamped on your digital signatures, permits to pour, inspection hold points, Taking Over Certificates, and chat messages.
               </p>
             </div>
 
@@ -444,7 +554,7 @@ export const ProfilePage: React.FC = () => {
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                placeholder="+234 800 000 0000"
+                placeholder="+1 555 000 0000"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-900 dark:text-white text-xs font-semibold focus:border-brand-500 focus:outline-none transition"
               />
             </div>
@@ -470,7 +580,7 @@ export const ProfilePage: React.FC = () => {
           <div className="flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
             <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
             <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-              Statutory RBAC & Project Membership
+              Statutory RBAC &amp; Project Membership
             </h2>
           </div>
 
@@ -492,10 +602,10 @@ export const ProfilePage: React.FC = () => {
                 Employer / Company
               </span>
               <span className="text-xs font-bold text-slate-900 dark:text-white block truncate">
-                {companyName || "Apex Construction"}
+                {companyName || currentUser?.companyName || "Organization Workspace"}
               </span>
               <span className="text-[10px] text-slate-500 font-mono">
-                {currentCompId}
+                {currentCompId || "Unassigned"}
               </span>
             </div>
 
@@ -505,8 +615,8 @@ export const ProfilePage: React.FC = () => {
               </span>
               <span className="text-xs font-bold text-slate-900 dark:text-white block">
                 {currentUser?.projectIds?.includes("*")
-                  ? "All Projects (Global)"
-                  : `${currentUser?.projectIds?.length || 1} Workspaces`}
+                  ? "All Organization Projects"
+                  : `${currentUser?.projectIds?.length || 0} Workspaces`}
               </span>
               <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold">
                 Active: {activeProject?.name || "None"}
@@ -515,17 +625,17 @@ export const ProfilePage: React.FC = () => {
           </div>
         </div>
 
-        {/* ═══ Section 4: Personal Outgoing Email & SMTP Credentials ═══ */}
+        {/* ═══ Section 4: Personal Outgoing Email & Encrypted SMTP Credentials ═══ */}
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2">
               <Mail className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
               <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                Personal Email & Outgoing SMTP Credentials
+                Personal Email &amp; Encrypted Outgoing SMTP
               </h2>
             </div>
             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              Dispatches Quality Reports & Direct Correspondence
+              AES-256-GCM Server-Encrypted Credentials
             </span>
           </div>
 
@@ -537,12 +647,13 @@ export const ProfilePage: React.FC = () => {
                 <strong>Company Server:</strong>{" "}
                 {company?.settings?.smtpServer?.host ? (
                   <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">
-                    {company.settings.smtpServer.host}:{company.settings.smtpServer.port || 587} (
-                    {company.settings.smtpServer.secure ? "SSL" : "TLS"})
+                    {company.settings.smtpServer.host}:
+                    {company.settings.smtpServer.port || 587} (
+                    {company.settings.smtpServer.secure ? "TLS/465" : "STARTTLS"})
                   </span>
                 ) : (
-                  <span className="text-amber-600 dark:text-amber-400 font-bold">
-                    Not configured yet (configured by Admin in Settings)
+                  <span className="text-slate-600 dark:text-slate-400 font-semibold">
+                    Using Platform Default SMTP Relay (Custom host optional in Company Settings)
                   </span>
                 )}
               </span>
@@ -553,7 +664,7 @@ export const ProfilePage: React.FC = () => {
             {/* SMTP Username / Email */}
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Mailbox Username / Email *
+                Mailbox Username / Email
               </label>
               <input
                 type="text"
@@ -567,14 +678,24 @@ export const ProfilePage: React.FC = () => {
             {/* SMTP Password / App Password */}
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Email / App Password *
+                Email / App Password{" "}
+                {hasEncryptedPassword && (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-normal">
+                    (Encrypted on server)
+                  </span>
+                )}
               </label>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
                   value={smtpPassword}
                   onChange={(e) => setSmtpPassword(e.target.value)}
-                  placeholder="••••••••••••"
+                  placeholder={
+                    hasEncryptedPassword
+                      ? "Encrypted password saved (enter new to rotate)"
+                      : "Enter App Password to encrypt & save"
+                  }
+                  autoComplete="new-password"
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-900 dark:text-white text-xs font-semibold focus:border-indigo-500 focus:outline-none transition pr-10"
                 />
                 <button
@@ -590,7 +711,7 @@ export const ProfilePage: React.FC = () => {
                 </button>
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                For Gmail or Microsoft 365 with 2FA, create an <strong>App Password</strong> in your email account security settings.
+                Passwords are encrypted server-side via AES-256-GCM before storage and never exposed in plaintext.
               </p>
             </div>
 
@@ -603,7 +724,7 @@ export const ProfilePage: React.FC = () => {
                 type="text"
                 value={smtpSenderDisplayName}
                 onChange={(e) => setSmtpSenderDisplayName(e.target.value)}
-                placeholder="e.g. Engr. Liam Sterling | Senior QA/QC Lead"
+                placeholder="e.g. Senior QA/QC Lead"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-900 dark:text-white text-xs font-semibold focus:border-indigo-500 focus:outline-none transition"
               />
             </div>
@@ -631,10 +752,19 @@ export const ProfilePage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    const generatedSig = `${fullName || currentUser?.fullName || "Jesujuwon Oladejo"}\n${title || currentUser?.title || "QA/QC Engineer"}\nEmail: ${smtpSenderEmail || smtpUsername || currentUser?.email || "joladejo@collection.gp"}\nTel: ${phone || currentUser?.phone || "+2347011636030"}`;
-                    setSmtpSignature(generatedSig);
+                    const sigLines = [
+                      fullName || currentUser?.fullName || "QA/QC Engineer",
+                      title || currentUser?.title || "QA/QC Engineer",
+                      (smtpSenderEmail || smtpUsername || currentUser?.email)
+                        ? `Email: ${smtpSenderEmail || smtpUsername || currentUser?.email}`
+                        : "",
+                      (phone || currentUser?.phone)
+                        ? `Tel: ${phone || currentUser?.phone}`
+                        : "",
+                    ].filter(Boolean);
+                    setSmtpSignature(sigLines.join("\n"));
                     setIncludeCompanyLogoInSignature(true);
-                    toast.success("Signature template generated with company logo!");
+                    toast.success("Signature template generated!");
                   }}
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition"
                 >
@@ -647,7 +777,7 @@ export const ProfilePage: React.FC = () => {
                 rows={4}
                 value={smtpSignature}
                 onChange={(e) => setSmtpSignature(e.target.value)}
-                placeholder={`Jesujuwon Oladejo\nQA/QC Engineer\nEmail: joladejo@collection.gp\nTel: +2347011636030`}
+                placeholder={`Full Name\nJob Title\nEmail: engineer@organization.com`}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-900 dark:text-white text-xs font-mono focus:border-indigo-500 focus:outline-none transition"
               />
 
@@ -656,20 +786,22 @@ export const ProfilePage: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={includeCompanyLogoInSignature}
-                  onChange={(e) => setIncludeCompanyLogoInSignature(e.target.checked)}
+                  onChange={(e) =>
+                    setIncludeCompanyLogoInSignature(e.target.checked)
+                  }
                   className="w-4 h-4 rounded text-indigo-600 bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 focus:ring-indigo-500"
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                      Embed Company Logo in Email Signature
+                      Embed Organization Logo in Email Signature
                     </span>
                     <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300">
                       Recommended
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    Automatically displays the official Collection Developments company logo in your signature block on outgoing reports and correspondence.
+                    Automatically displays your organization logo in your signature block on outgoing reports and correspondence.
                   </p>
                 </div>
               </label>
@@ -680,40 +812,55 @@ export const ProfilePage: React.FC = () => {
                   <span>Live Email Signature Preview</span>
                   <span>Recipient View</span>
                 </div>
-                
+
                 <div className="p-4 bg-white dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs">
                   <div className="font-bold text-sm text-slate-900 dark:text-white">
-                    {fullName || currentUser?.fullName || "Jesujuwon Oladejo"}
+                    {fullName || currentUser?.fullName || "QA/QC Engineer"}
                   </div>
                   <div className="font-semibold text-xs text-slate-700 dark:text-slate-300 mt-0.5">
-                    {title || currentUser?.title || currentUser?.designation || "QA/QC Engineer"}
+                    {title ||
+                      currentUser?.title ||
+                      currentUser?.designation ||
+                      "QA/QC Engineer"}
                   </div>
 
                   {includeCompanyLogoInSignature && (
                     <div className="my-2.5">
                       <img
-                        src={company?.logoUrl || company?.logo || "/jqms-logo.png"}
-                        alt={companyName || "Collection Developments"}
+                        src={
+                          company?.logoUrl || company?.logo || "/jqms-logo.png"
+                        }
+                        alt={companyName || "Organization Logo"}
                         className="h-10 sm:h-11 max-w-[160px] object-contain block dark:brightness-110"
                         onError={(e) => {
-                          // Fallback gracefully to text badge if image not loaded
-                          (e.currentTarget as HTMLElement).style.display = "none";
+                          (e.currentTarget as HTMLElement).style.display =
+                            "none";
                         }}
                       />
                     </div>
                   )}
 
                   <div className="space-y-0.5 text-xs text-slate-600 dark:text-slate-400 mt-2 font-mono">
-                    <div>
-                      <strong className="font-sans text-slate-700 dark:text-slate-300">Email:</strong>{" "}
-                      <span className="text-indigo-600 dark:text-indigo-400">
-                        {smtpSenderEmail || smtpUsername || currentUser?.email || "joladejo@collection.gp"}
-                      </span>
-                    </div>
+                    {(smtpSenderEmail ||
+                      smtpUsername ||
+                      currentUser?.email) && (
+                      <div>
+                        <strong className="font-sans text-slate-700 dark:text-slate-300">
+                          Email:
+                        </strong>{" "}
+                        <span className="text-indigo-600 dark:text-indigo-400">
+                          {smtpSenderEmail ||
+                            smtpUsername ||
+                            currentUser?.email}
+                        </span>
+                      </div>
+                    )}
                     {(phone || currentUser?.phone) && (
                       <div>
-                        <strong className="font-sans text-slate-700 dark:text-slate-300">Tel:</strong>{" "}
-                        <span>{phone || currentUser?.phone || "+2347011636030"}</span>
+                        <strong className="font-sans text-slate-700 dark:text-slate-300">
+                          Tel:
+                        </strong>{" "}
+                        <span>{phone || currentUser?.phone}</span>
                       </div>
                     )}
                   </div>
@@ -735,7 +882,7 @@ export const ProfilePage: React.FC = () => {
                     Sync Outgoing Emails to My Official Sent Items Folder
                   </span>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                    Ensures a complete copy of every report or email sent from Jay-QMS appears in your Outlook, Gmail, or Webmail Sent box.
+                    Ensures a complete copy of every report or email sent from Jay-QMS appears in your mail client Sent folder.
                   </span>
                 </div>
               </label>
@@ -748,7 +895,7 @@ export const ProfilePage: React.FC = () => {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                   <Send className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                  Live Verification & Test Email Dispatch
+                  Live Verification &amp; Test Email Dispatch
                 </span>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
                   Verify before sending official reports
@@ -766,10 +913,16 @@ export const ProfilePage: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleTestSmtp}
-                  disabled={testingSmtp || !smtpUsername || !smtpPassword}
+                  disabled={
+                    testingSmtp ||
+                    !smtpUsername ||
+                    (!smtpPassword && !hasEncryptedPassword)
+                  }
                   className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs rounded-lg shadow-sm transition shrink-0"
                 >
-                  <Send className={`w-3.5 h-3.5 ${testingSmtp ? "animate-spin" : ""}`} />
+                  <Send
+                    className={`w-3.5 h-3.5 ${testingSmtp ? "animate-spin" : ""}`}
+                  />
                   <span>{testingSmtp ? "Testing..." : "Send Test Email"}</span>
                 </button>
               </div>
@@ -788,7 +941,10 @@ export const ProfilePage: React.FC = () => {
                     <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
                   )}
                   <div>
-                    <strong>{testResult.success ? "Success:" : "Error:"}</strong> {testResult.message}
+                    <strong>
+                      {testResult.success ? "Success:" : "Error:"}
+                    </strong>{" "}
+                    {testResult.message}
                   </div>
                 </div>
               )}
@@ -807,7 +963,7 @@ export const ProfilePage: React.FC = () => {
           </button>
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || uploadingAvatar}
             className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md transition disabled:opacity-50"
           >
             <Save className="w-4 h-4" />

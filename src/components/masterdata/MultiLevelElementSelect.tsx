@@ -41,6 +41,8 @@ export const MultiLevelElementSelect: React.FC<MultiLevelElementSelectProps> = (
   label = 'Structural Elements Subject to Issue',
 }) => {
   const { activeProject } = useProjectStore();
+  const effectiveProjId = projectId || activeProject?.id || '';
+  const effectiveCompId = companyId || activeProject?.companyId || '';
   const [levels, setLevels] = useState<ProjectLevel[]>(passedLevels || []);
   const [elements, setElements] = useState<StructuralElement[]>(passedElements || []);
   const [currentLevelId, setCurrentLevelId] = useState<string>(
@@ -53,29 +55,29 @@ export const MultiLevelElementSelect: React.FC<MultiLevelElementSelectProps> = (
   useEffect(() => {
     if (passedLevels && passedLevels.length > 0) {
       setLevels(passedLevels);
-    } else if (projectId) {
+    } else if (effectiveProjId) {
       dbService
-        .getLevels(projectId, companyId)
+        .getLevels(effectiveProjId, effectiveCompId)
         .then((lvls) => {
           if (lvls) setLevels(lvls);
         })
         .catch(console.error);
     }
-  }, [projectId, companyId, passedLevels]);
+  }, [effectiveProjId, effectiveCompId, passedLevels]);
 
   // Load elements if not passed
   useEffect(() => {
     if (passedElements && passedElements.length > 0) {
       setElements(passedElements);
-    } else if (projectId) {
+    } else if (effectiveProjId) {
       dbService
-        .getElements(projectId, companyId)
+        .getElements(effectiveProjId, effectiveCompId)
         .then((elems) => {
           if (elems) setElements(elems);
         })
         .catch(console.error);
     }
-  }, [projectId, companyId, passedElements]);
+  }, [effectiveProjId, effectiveCompId, passedElements]);
 
   // If defaultLevelId or activeProject level changes and we don't have a level selected, apply it
   useEffect(() => {
@@ -363,7 +365,7 @@ export const MultiLevelElementSelect: React.FC<MultiLevelElementSelectProps> = (
           </div>
         ) : (
           <p className="text-[11px] text-slate-400 dark:text-slate-500 italic">
-            No structural elements selected yet. Choose from the grid below to link them to this NCR.
+            No structural elements selected yet. Choose from the grid below to attach elements.
           </p>
         )}
       </div>

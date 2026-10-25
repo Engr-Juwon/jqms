@@ -48,9 +48,9 @@ import {
 import TradeSubtradeSelect, {
   type TradeSelection,
 } from "@/components/masterdata/TradeSubtradeSelect";
-import LevelElementSelect, {
-  type LevelElementSelection,
-} from "@/components/masterdata/LevelElementSelect";
+import MultiLevelElementSelect, {
+  SelectedElementItem,
+} from "@/components/masterdata/MultiLevelElementSelect";
 
 export const SiteInstructionCreate: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -78,9 +78,8 @@ export const SiteInstructionCreate: React.FC = () => {
   const [selectedNcrId, setSelectedNcrId] = useState<string>(ncrIdParam || "");
   const [instructionNumber, setInstructionNumber] = useState("");
   const [existingSIs, setExistingSIs] = useState<SiteInstruction[]>([]);
-  const [namingFormat, setNamingFormat] = useState<SiteInstructionFormat>(() =>
-    activeProject?.code ? "PROJECT_YEAR_SEQ" : "YEAR_SEQ",
-  );
+  const [namingFormat, setNamingFormat] =
+    useState<SiteInstructionFormat>("UNIVERSAL");
 
   const computeNextInstructionNumber = (
     siList: SiteInstruction[],
@@ -131,14 +130,23 @@ export const SiteInstructionCreate: React.FC = () => {
     subtradeName: "",
   });
 
-  const [levelSelection, setLevelSelection] = useState<LevelElementSelection>({
-    levelId: "",
-    levelName: "",
-    elementId: "",
-    elementName: "",
-    gridLocation: "",
-    elementType: "",
-  });
+  const [selectedElements, setSelectedElements] = useState<
+    SelectedElementItem[]
+  >([]);
+
+  const handleSelectedElementsChange = (items: SelectedElementItem[]) => {
+    setSelectedElements(items);
+    if (items.length > 0) {
+      const names = items.map((i) => i.elementName).join(", ");
+      const levels = Array.from(
+        new Set(items.map((i) => i.levelName).filter(Boolean)),
+      ).join(", ");
+      setElementName(names);
+      if (levels) setLocation(levels);
+    } else {
+      setElementName("");
+    }
+  };
 
   // Location & Element
   const [location, setLocation] = useState("");
@@ -302,14 +310,23 @@ export const SiteInstructionCreate: React.FC = () => {
       targetNcr.location ||
       "";
     const targetElement = targetNcr.elementName || "";
-    setLevelSelection({
-      levelId: targetNcr.levelId || "",
-      levelName: targetLevel,
-      elementId: targetNcr.elementId || targetNcr.structuralElementId || "",
-      elementName: targetElement,
-      gridLocation: targetNcr.gridLine || targetNcr.gridAxis || "",
-      elementType: targetNcr.elementType || "",
-    });
+    if (targetNcr.elementsData && targetNcr.elementsData.length > 0) {
+      setSelectedElements(targetNcr.elementsData);
+    } else if (targetNcr.elementId || targetElement) {
+      setSelectedElements([
+        {
+          id:
+            targetNcr.elementId ||
+            targetNcr.structuralElementId ||
+            `el-${Date.now()}`,
+          elementName: targetElement || "Selected Element",
+          levelId: targetNcr.levelId || "",
+          levelName: targetLevel,
+          grid: targetNcr.gridLine || targetNcr.gridAxis || "",
+          elementType: targetNcr.elementType || "",
+        },
+      ]);
+    }
 
     setLocation(targetLevel);
     setElementName(targetElement);
@@ -423,11 +440,14 @@ export const SiteInstructionCreate: React.FC = () => {
         ncrDeadline: selectedNcr?.deadline || undefined,
         ncrDaysOverdue: calculatedDaysOverdue || undefined,
 
-        location: levelSelection.levelName || location || undefined,
-        levelId: levelSelection.levelId || undefined,
-        levelName: levelSelection.levelName || location || undefined,
-        elementId: levelSelection.elementId || undefined,
-        elementName: levelSelection.elementName || elementName || undefined,
+        location: selectedElements[0]?.levelName || location || undefined,
+        levelId: selectedElements[0]?.levelId || undefined,
+        levelName: selectedElements[0]?.levelName || location || undefined,
+        elementId: selectedElements[0]?.id || undefined,
+        elementName: elementName || undefined,
+        elementIds: selectedElements.map((e) => e.id),
+        elementNames: selectedElements.map((e) => e.elementName),
+        elementsData: selectedElements,
         trade: tradeSelection.tradeName || tradeName || undefined,
         tradeId: tradeSelection.tradeId || undefined,
         tradeName: tradeSelection.tradeName || tradeName || undefined,
@@ -623,6 +643,9 @@ export const SiteInstructionCreate: React.FC = () => {
                       className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded px-1.5 py-0.5 border border-slate-200 dark:border-slate-700 outline-none font-medium cursor-pointer"
                       title="Naming pattern format"
                     >
+                      <option value="UNIVERSAL">
+                        {activeProject?.code || "PRJ"}_SI_XXXX_DDMMYY (Universal Standard)
+                      </option>
                       <option value="PROJECT_YEAR_SEQ">
                         {activeProject?.code
                           ? `${activeProject.code}-SI-2026-001`
@@ -877,15 +900,12 @@ export const SiteInstructionCreate: React.FC = () => {
                   <MapPin size={14} className="text-orange-500" />
                   Building Floor Level & Structural Element
                 </h3>
-                <LevelElementSelect
+                <MultiLevelElementSelect
                   projectId={currentProjId}
                   companyId={currentCompId}
-                  value={levelSelection}
-                  onChange={(sel) => {
-                    setLevelSelection(sel);
-                    setLocation(sel.levelName);
-                    setElementName(sel.elementName);
-                  }}
+                  selectedElements={selectedElements}
+                  onChange={handleSelectedElementsChange}
+                  label="Structural Elements Subject to Directive"
                 />
               </div>
 

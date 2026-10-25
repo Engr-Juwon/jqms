@@ -2,6 +2,7 @@ import jsPDF from "jspdf";
 import autoTable, { RowInput } from "jspdf-autotable";
 import { StructuralElement, Project, Company } from "@/types";
 import { renderCompanyBrandCell } from "@/lib/companyHelper";
+import { generateUniversalName } from "@/lib/naming";
 
 export interface ElementScheduleExportOptions {
   fileName?: string;
@@ -18,10 +19,10 @@ export function exportElementSchedulePDF(
   company?: Partial<Company>,
   options: ElementScheduleExportOptions = {},
 ): void {
-  const companyName = company?.name || company?.legalName || "Collection Developments LTD";
-  const compAddress = company?.address || "14 Bankside Boulevard, London SE1 9SG, United Kingdom";
-  const compEmail = company?.email || "quality@collectiondev.com";
-  const compPhone = company?.phone || "+44 (0) 20 7946 0912";
+  const companyName = company?.name || company?.legalName || "Corporate Quality Framework";
+  const compAddress = company?.address || "";
+  const compEmail = company?.email || "";
+  const compPhone = company?.phone || "";
   const projectName = project?.name || "Structural Engineering Project";
   const projectCode = project?.code || "PRJ-001";
   const qaqcEngineer = (project as any)?.qaqcEngineerName || "Lead QA/QC Engineer";
@@ -34,7 +35,7 @@ export function exportElementSchedulePDF(
 
   const fileName =
     options.fileName ||
-    `${projectCode}_Structural_Element_Schedule_${Date.now().toString().slice(-6)}.pdf`;
+    generateUniversalName(projectCode, "MTO", { extension: "pdf" });
 
   const totalVolume = elements.reduce(
     (sum, el) => sum + (parseFloat(String(el.calculatedVolume || el.volume || 0)) || 0),
@@ -309,7 +310,9 @@ export function exportElementScheduleCSV(
   levelNameMap?: Map<string, string>,
 ): void {
   const projectCode = project?.code || "PRJ-001";
-  const fileName = `${projectCode}_Element_Schedule_${Date.now().toString().slice(-6)}.csv`;
+  const fileName = generateUniversalName(projectCode, "MTO", {
+    extension: "csv",
+  });
 
   const headers = [
     "S/N",

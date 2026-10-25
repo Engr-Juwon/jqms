@@ -13,6 +13,8 @@ import {
 } from "@/types";
 import { getUserSigningTitle, ROLE_TITLES } from "@/lib/permissions";
 import { toast } from "react-hot-toast";
+import { uploadMediaAsset } from "@/lib/cloudinary";
+import { safeSetLocalStorage } from "@/lib/idbVault";
 import {
   MessageSquare,
   Users,
@@ -492,10 +494,7 @@ export const ChatPage: React.FC = () => {
     // Update last read map for unread calculations
     setChannelLastReadMap((prev) => {
       const updated = { ...prev, [selectedChannel.id]: now };
-      localStorage.setItem(
-        "jqms_chat_last_read_map",
-        JSON.stringify(updated),
-      );
+      safeSetLocalStorage("jqms_chat_last_read_map", JSON.stringify(updated));
       return updated;
     });
 
@@ -734,35 +733,55 @@ export const ChatPage: React.FC = () => {
   };
 
   // File Upload
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
     const newAttachments: ChatAttachment[] = [];
 
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        const url = uploadEvent.target?.result as string;
+    try {
+      for (const file of Array.from(files)) {
         const isImg = file.type.startsWith("image/");
         const isPdf = file.type === "application/pdf";
+        let fileUrl = "";
 
-        newAttachments.push({
-          id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          name: file.name,
-          url,
-          type: isImg ? "image" : isPdf ? "pdf" : "document",
-          size: file.size,
-        });
-
-        if (newAttachments.length === files.length) {
-          setSelectedAttachments((prev) => [...prev, ...newAttachments]);
-          setIsUploading(false);
+        try {
+          const uploaded = await uploadMediaAsset(file, {
+            folder: "chat_attachments",
+            category: isImg ? "photos" : "documents",
+            companyId: currentCompId,
+            projectId: currentProjId,
+          });
+          fileUrl = uploaded.url;
+        } catch (uploadErr) {
+          console.warn("Server upload failed, using local fallback:", uploadErr);
+          // Fallback to object URL or data URL only if network failure
+          fileUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => resolve(ev.target?.result as string || "");
+            reader.readAsDataURL(file);
+          });
         }
-      };
-      reader.readAsDataURL(file);
-    });
+
+        if (fileUrl) {
+          newAttachments.push({
+            id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            name: file.name,
+            url: fileUrl,
+            type: isImg ? "image" : isPdf ? "pdf" : "document",
+            size: file.size,
+          });
+        }
+      }
+
+      setSelectedAttachments((prev) => [...prev, ...newAttachments]);
+    } catch (err) {
+      console.error("Failed to process file attachments:", err);
+      toast.error("Failed to process attached files");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   // Voice Note Recording Methods
@@ -779,14 +798,32 @@ export const ChatPage: React.FC = () => {
         }
       };
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, {
           type: "audio/webm",
         });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const audioUrl = reader.result as string;
-          const dur = recordingDuration || 1;
+        const dur = recordingDuration || 1;
+        let audioUrl = "";
+
+        try {
+          const uploaded = await uploadMediaAsset(audioBlob, {
+            folder: "chat_audio",
+            category: "documents",
+            companyId: currentCompId,
+            projectId: currentProjId,
+            filename: `voice_note_${Date.now()}.webm`,
+          });
+          audioUrl = uploaded.url;
+        } catch (upErr) {
+          console.warn("Failed to upload audio, fallback to data url:", upErr);
+          audioUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string || "");
+            reader.readAsDataURL(audioBlob);
+          });
+        }
+
+        if (audioUrl) {
           const audioAttachment: ChatAttachment = {
             id: `att-audio-${Date.now()}`,
             name: `Voice Note (${dur}s)`,
@@ -795,8 +832,7 @@ export const ChatPage: React.FC = () => {
             duration: dur,
           };
           setSelectedAttachments((prev) => [...prev, audioAttachment]);
-        };
-        reader.readAsDataURL(audioBlob);
+        }
         stream.getTracks().forEach((track) => track.stop());
       };
 

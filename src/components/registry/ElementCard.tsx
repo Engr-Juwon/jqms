@@ -202,6 +202,11 @@ export const ElementCard: React.FC<ElementCardProps> = ({
                 <Icon className="w-3 h-3 text-slate-500" />
                 {element.elementType}
               </span>
+              {(element.isInclined || element.verticality === "inclined") && (
+                <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 shrink-0">
+                  Slanted ⤢ {element.inclinationAngle || 10}°
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">
               <span>Grid: <strong className="text-slate-700 dark:text-slate-300">{element.grid || element.gridAxis || "—"}</strong></span>

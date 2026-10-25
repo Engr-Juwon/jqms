@@ -35,9 +35,9 @@ import { useProjectStore } from "@/stores/useProjectStore";
 import TradeSubtradeSelect, {
   type TradeSelection,
 } from "@/components/masterdata/TradeSubtradeSelect";
-import LevelElementSelect, {
-  type LevelElementSelection,
-} from "@/components/masterdata/LevelElementSelect";
+import MultiLevelElementSelect, {
+  SelectedElementItem,
+} from "@/components/masterdata/MultiLevelElementSelect";
 import { toast } from "react-hot-toast";
 import { dbService } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
@@ -132,7 +132,20 @@ export const InspectionCreate: React.FC = () => {
   const [templateSearchQuery, setTemplateSearchQuery] = useState("");
   const [showChecklistPreview, setShowChecklistPreview] = useState(true);
 
+  const [selectedElements, setSelectedElements] = useState<
+    SelectedElementItem[]
+  >([]);
+
   useEffect(() => {
+    if (elementIdParam || elementNameParam) {
+      const initialItem: SelectedElementItem = {
+        id: elementIdParam || `ctx-${Date.now()}`,
+        elementName: elementNameParam || "Selected Element",
+        levelName: locationLevelParam || "",
+        grid: gridLineParam || "",
+      };
+      setSelectedElements([initialItem]);
+    }
     if (elementIdParam) setSelectedElementId(elementIdParam);
     if (elementNameParam) setElementRef(elementNameParam);
     if (gridLineParam) setZone(gridLineParam);
@@ -170,23 +183,45 @@ export const InspectionCreate: React.FC = () => {
     loadTemplates();
   }, [activeCompId]);
 
-  // Auto-align template filter when element is selected from structural register
-  const handleLevelElementChange = (selection: LevelElementSelection) => {
-    setFloor(selection.levelName);
-    setElementRef(selection.elementName);
-    setSelectedElementId(selection.elementId || "");
-    if (selection.elementType) {
-      setElementType(selection.elementType);
-      const matched = ELEMENTS.find(
-        (el) =>
-          selection.elementType?.toLowerCase().includes(el.toLowerCase()) ||
-          el.toLowerCase().includes(selection.elementType?.toLowerCase() || ""),
+  // Auto-align template filter when elements are selected from structural register
+  const handleSelectedElementsChange = (items: SelectedElementItem[]) => {
+    setSelectedElements(items);
+    if (items.length > 0) {
+      const names = items.map((i) => i.elementName).join(", ");
+      const grids = Array.from(
+        new Set(items.map((i) => i.grid).filter(Boolean)),
+      ).join(", ");
+      const levels = Array.from(
+        new Set(items.map((i) => i.levelName).filter(Boolean)),
+      ).join(", ");
+      const types = Array.from(
+        new Set(
+          items
+            .map((i) => i.elementType)
+            .filter((t): t is string => Boolean(t)),
+        ),
       );
-      if (matched) {
-        setTemplateFilterElement(matched);
+
+      if (levels) setFloor(levels);
+      setElementRef(names);
+      setSelectedElementId(items[0].id);
+      if (grids) setZone(grids);
+      if (types.length > 0 && types[0]) {
+        const primaryType = types[0];
+        setElementType(primaryType);
+        const matched = ELEMENTS.find(
+          (el) =>
+            primaryType.toLowerCase().includes(el.toLowerCase()) ||
+            el.toLowerCase().includes(primaryType.toLowerCase()),
+        );
+        if (matched) {
+          setTemplateFilterElement(matched);
+        }
       }
+    } else {
+      setElementRef("");
+      setSelectedElementId("");
     }
-    if (selection.gridLocation) setZone(selection.gridLocation);
   };
 
   // Filtered Templates calculation
@@ -263,7 +298,7 @@ export const InspectionCreate: React.FC = () => {
 
     try {
       setIsSubmitting(true);
-      const nextNumber = generateInspectionNumber();
+      const nextNumber = generateInspectionNumber(activeProject?.code);
 
       const initialItems: InspectionItem[] = (template?.items || []).map(
         (item, idx) => ({
@@ -331,7 +366,10 @@ export const InspectionCreate: React.FC = () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         elementId: selectedElementId,
-      };
+        elementIds: selectedElements.map((e) => e.id),
+        elementNames: selectedElements.map((e) => e.elementName),
+        elementsData: selectedElements,
+      } as any;
 
       await dbService.saveInspection(newInspection);
 
@@ -700,18 +738,13 @@ export const InspectionCreate: React.FC = () => {
                 Structural Location Placement Context
               </h3>
 
-              <LevelElementSelect
+              <MultiLevelElementSelect
                 projectId={activeProjId}
                 companyId={activeCompId}
-                value={{
-                  levelName: floor,
-                  elementName: elementRef,
-                  gridLocation: zone,
-                  elementType,
-                  elementId: selectedElementId,
-                }}
-                onChange={handleLevelElementChange}
+                selectedElements={selectedElements}
+                onChange={handleSelectedElementsChange}
                 required
+                label="Structural Elements Under Inspection"
               />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

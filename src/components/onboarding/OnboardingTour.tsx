@@ -89,6 +89,11 @@ export const OnboardingTour: React.FC = () => {
   const measureTarget = useCallback(() => {
     if (!step) return;
 
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const cardWidth = Math.min(CARD_WIDTH, vw - 32);
+    const cardH = 240; // estimated card height
+
     if (!step.targetSelector) {
       // Centred modal — no spotlight
       setSpotlight(null);
@@ -97,7 +102,7 @@ export const OnboardingTour: React.FC = () => {
         top: "50%",
         left: "50%",
         transform: "translate(-50%, -50%)",
-        width: CARD_WIDTH,
+        width: cardWidth,
       });
       return;
     }
@@ -105,6 +110,7 @@ export const OnboardingTour: React.FC = () => {
     const el = document.querySelector(
       step.targetSelector,
     ) as HTMLElement | null;
+
     if (!el) {
       // Element not found — fall back to centred
       setSpotlight(null);
@@ -113,45 +119,59 @@ export const OnboardingTour: React.FC = () => {
         top: "50%",
         left: "50%",
         transform: "translate(-50%, -50%)",
-        width: CARD_WIDTH,
+        width: cardWidth,
       });
       return;
     }
 
     const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      // Element hidden or zero-size — fall back to centred
+      setSpotlight(null);
+      setCardStyle({
+        position: "fixed",
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: cardWidth,
+      });
+      return;
+    }
+
     const sp: SpotlightRect = {
-      top: rect.top - PADDING,
-      left: rect.left - PADDING,
+      top: Math.max(0, rect.top - PADDING),
+      left: Math.max(0, rect.left - PADDING),
       width: rect.width + PADDING * 2,
       height: rect.height + PADDING * 2,
     };
     setSpotlight(sp);
 
-    // Place the card to the right of spotlight by default
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const cardH = 220; // approx
-    let cs: React.CSSProperties = { position: "fixed", width: CARD_WIDTH };
+    let cs: React.CSSProperties = { position: "fixed", width: cardWidth };
 
     if (step.placement === "right") {
       const leftPos = sp.left + sp.width + 16;
-      if (leftPos + CARD_WIDTH < vw) {
+      if (leftPos + cardWidth < vw) {
         cs.left = leftPos;
         cs.top = Math.max(16, Math.min(sp.top, vh - cardH - 16));
       } else {
-        // Flip to left if no room
-        cs.right = vw - sp.left + 16;
+        cs.left = Math.max(16, sp.left - cardWidth - 16);
         cs.top = Math.max(16, Math.min(sp.top, vh - cardH - 16));
       }
     } else if (step.placement === "left") {
-      cs.right = vw - sp.left + 16;
-      cs.top = Math.max(16, Math.min(sp.top, vh - cardH - 16));
+      const leftPos = sp.left - cardWidth - 16;
+      if (leftPos >= 16) {
+        cs.left = leftPos;
+        cs.top = Math.max(16, Math.min(sp.top, vh - cardH - 16));
+      } else {
+        cs.left = Math.min(vw - cardWidth - 16, sp.left + sp.width + 16);
+        cs.top = Math.max(16, Math.min(sp.top, vh - cardH - 16));
+      }
     } else if (step.placement === "bottom") {
-      cs.top = sp.top + sp.height + 16;
-      cs.left = Math.max(16, sp.left);
+      cs.top = Math.min(vh - cardH - 16, sp.top + sp.height + 16);
+      cs.left = Math.max(16, Math.min(sp.left, vw - cardWidth - 16));
     } else if (step.placement === "top") {
-      cs.bottom = vh - sp.top + 16;
-      cs.left = Math.max(16, sp.left);
+      cs.top = Math.max(16, sp.top - cardH - 16);
+      cs.left = Math.max(16, Math.min(sp.left, vw - cardWidth - 16));
     } else {
       cs.top = "50%";
       cs.left = "50%";
@@ -161,16 +181,25 @@ export const OnboardingTour: React.FC = () => {
     setCardStyle(cs);
   }, [step]);
 
-  // Re-measure on step change and on resize
+  // Re-measure on step change, auto-switch domain if requested, and re-check on resize
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || !step) return;
+
+    if (step.domainId) {
+      window.dispatchEvent(
+        new CustomEvent("jqms-tour-select-domain", {
+          detail: { domainId: step.domainId },
+        }),
+      );
+    }
+
     setIsTransitioning(true);
     const t = setTimeout(() => {
       measureTarget();
       setIsTransitioning(false);
-    }, 50);
+    }, 70);
     return () => clearTimeout(t);
-  }, [isActive, currentStep, measureTarget]);
+  }, [isActive, currentStep, step, measureTarget]);
 
   useEffect(() => {
     if (!isActive) return;

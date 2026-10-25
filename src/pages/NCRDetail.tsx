@@ -263,7 +263,7 @@ export const NCRDetail: React.FC = () => {
   const { currentUser, company } = useAuthStore();
   const { activeProject } = useProjectStore();
   const navigate = useNavigate();
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+  const currentProjId = projectId || activeProject?.id || "";
 
   const [ncr, setNcr] = useState<NonConformanceReport | null>(null);
   const [loading, setLoading] = useState(true);

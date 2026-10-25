@@ -409,6 +409,7 @@ export const MIRCreate: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent, isDraft = false) => {
     e.preventDefault();
+    if (submitting) return;
     if (!canCreateMIR) {
       toast.error(
         "You do not have permission to issue Material Inspection Reports (Level 2+ required)",
@@ -419,9 +420,23 @@ export const MIRCreate: React.FC = () => {
       toast.error("Please provide a material title or description");
       return;
     }
+    if (!currentProjId || !currentCompId) {
+      toast.error("Active project workspace required");
+      return;
+    }
 
     setSubmitting(true);
     try {
+      let finalMirNumber = mirNumber;
+      if (!isEditMode && !existingMir) {
+        try {
+          const seq = await dbService.getNextSequenceNumber(currentCompId, currentProjId, "MIR");
+          finalMirNumber = seq.formattedCode;
+        } catch {
+          finalMirNumber = mirNumber;
+        }
+      }
+
       const selectedMAR = mars.find((m) => m.id === selectedMarId);
       const totalDelivered = items.reduce(
         (acc, i) => acc + (Number(i.quantityDelivered) || 0),
@@ -452,7 +467,7 @@ export const MIRCreate: React.FC = () => {
 
       const mirRecord: MaterialInspectionReport = {
         id: existingMir ? existingMir.id : `mir-${Date.now()}`,
-        mirNumber: existingMir ? existingMir.mirNumber : mirNumber,
+        mirNumber: existingMir ? existingMir.mirNumber : finalMirNumber,
         projectId: currentProjId,
         projectName:
           activeProject?.name ||

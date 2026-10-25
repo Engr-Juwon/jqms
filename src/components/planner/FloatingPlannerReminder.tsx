@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
+import { isBimModuleEnabled } from "@/lib/permissions";
 import { dbService } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { toast } from "react-hot-toast";
@@ -44,10 +45,11 @@ export const FloatingPlannerReminder: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
+  const isBimEnabled = isBimModuleEnabled(activeProject, "4d");
 
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+  const currentProjId = projectId || activeProject?.id || "";
   const currentCompId =
-    currentUser?.companyId || company?.id || activeProject?.companyId || "comp-apex-civil";
+    currentUser?.companyId || company?.id || activeProject?.companyId || "";
 
   const [isOpen, setIsOpen] = useState(false);
   const [isCompact, setIsCompact] = useState<boolean>(() => {
@@ -114,7 +116,7 @@ export const FloatingPlannerReminder: React.FC = () => {
   const todayStr = useMemo(() => formatLocalYYYYMMDD(new Date()), []);
 
   const loadData = useCallback(async () => {
-    if (!currentProjId) return;
+    if (!currentProjId || !isBimEnabled) return;
     setLoading(true);
     try {
       const [
@@ -428,6 +430,7 @@ export const FloatingPlannerReminder: React.FC = () => {
   }, [currentProjId, currentCompId, todayStr]);
 
   useEffect(() => {
+    if (!isBimEnabled) return;
     loadData();
     const interval = setInterval(loadData, 30000); // refresh every 30s
 
@@ -930,7 +933,7 @@ export const FloatingPlannerReminder: React.FC = () => {
         ? todayList
         : upcomingList;
 
-  if (totalActionable === 0 && !loading) {
+  if (!isBimEnabled || (totalActionable === 0 && !loading)) {
     return null;
   }
 

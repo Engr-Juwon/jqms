@@ -42,8 +42,8 @@ export const BarCuttingRegistryPage: React.FC = () => {
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-apex-civil";
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+    currentUser?.companyId || company?.id || "";
+  const currentProjId = projectId || activeProject?.id || "";
 
   const [schedules, setSchedules] = useState<BarCuttingSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -169,7 +169,7 @@ export const BarCuttingRegistryPage: React.FC = () => {
   // Detail URL helper
   const getDetailUrl = (scheduleId: string) => {
     if (projectId) {
-      return `/projects/${projectId}/steel/bar-cutting/${scheduleId}`;
+      return `/project/${projectId}/steel/bar-cutting/${scheduleId}`;
     }
     return `/project/steel/bar-cutting/${scheduleId}`;
   };
@@ -476,14 +476,14 @@ export const BarCuttingRegistryPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 mb-1">
             <Link
-              to={projectId ? `/projects/${projectId}/dashboard` : "/project/dashboard"}
+              to={projectId ? `/project/${projectId}/dashboard` : "/project/dashboard"}
               className="hover:text-amber-500 transition"
             >
               Dashboard
             </Link>
             <ChevronRight className="w-3.5 h-3.5" />
             <Link
-              to={projectId ? `/projects/${projectId}/steel` : "/project/steel"}
+              to={projectId ? `/project/${projectId}/steel` : "/project/steel"}
               className="hover:text-amber-500 transition"
             >
               Steel & Reinforcement

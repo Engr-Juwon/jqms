@@ -187,16 +187,13 @@ export const PhotoMarkupModal: React.FC<PhotoMarkupModalProps> = ({
   if (!isOpen) return null;
 
   return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
           <div className="flex items-center gap-3">
-            <span className="p-2 rounded-lg bg-red-500/20 text-red-400">
+            <div className="p-2 rounded-xl bg-red-500/10 text-red-500">
               <Square className="w-5 h-5" />
-            </span>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-            <div className="p-2 rounded-xl bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400">
-              <Circle className="w-5 h-5" />
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">Photo Markup & Defect Sketch</h3>

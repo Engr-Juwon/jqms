@@ -18,6 +18,7 @@ import {
 } from "@/types";
 import html2pdf from "html2pdf.js";
 import { createDefaultPermitChecklist } from "@/lib/permitChecklist";
+import { generateUniversalName } from "@/lib/naming";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { generateNewWeeklyPresentationPDF } from "@/services/pdf/weeklyReportGenerator";
@@ -493,7 +494,9 @@ export function generatePermitToPourPrint(
   const companyName = company.name;
   const projectName = project.name;
   const docRef =
-    ptp.ptpNumber || `PTP-${Math.floor(1000 + Math.random() * 9000)}`;
+    ptp.permitNumber ||
+    ptp.ptpNumber ||
+    generateUniversalName(project?.code, "PTP");
 
   const checklistItems = (
     ptp.checklistItems?.length
@@ -843,7 +846,9 @@ export function generatePermitToPourPDF(
   const companyName = company.name;
   const projectName = project.companyName;
   const docRef =
-    ptp.ptpNumber || `PTP-${Math.floor(1000 + Math.random() * 9000)}`;
+    ptp.permitNumber ||
+    ptp.ptpNumber ||
+    generateUniversalName(project?.code, "PTP");
 
   const checklistItems = (
     ptp.checklistItems?.length
@@ -1115,11 +1120,11 @@ export function generateInspectionRequestPDF(
   project: Partial<Project> = {},
   company: Partial<Company> = {},
 ): void {
-  const companyName = company.name || "Collection Developments LTD";
-  const projectName = project.name || "Bankside";
+  const companyName = company.name || "Corporate Quality Framework";
+  const projectName = project.name || "Site Project";
   const docRef =
     insp.inspectionNumber ||
-    `INSP-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    generateUniversalName(project.code, "INSP");
   const items = insp.items || [];
   const passItems = items.filter((it) => it.result === "PASS").length;
   const failItems = items.filter((it) => it.result === "FAIL").length;
@@ -1437,7 +1442,7 @@ export function generateSiteCommentsPDF(
   );
 
   const companyName =
-    company?.name || report.companyName || "Collection Developments LTD";
+    company?.name || report.companyName || "Corporate Quality Framework";
   const projectName =
     project?.name ||
     report.projectName ||
@@ -1446,7 +1451,8 @@ export function generateSiteCommentsPDF(
     storeProject?.name ||
     "Site Construction Operations";
   const docRef =
-    report.reportNumber || `QC-COMM-${Math.floor(1000 + Math.random() * 9000)}`;
+    report.reportNumber ||
+    generateUniversalName(matchedProject?.code || storeProject?.code, "COM");
 
   const observations = report.observations || [];
   const openObs = observations.filter(
@@ -1633,10 +1639,10 @@ export function generateRFIPDF(
   project: Partial<Project> = {},
   company: Partial<Company> = {},
 ): void {
-  const companyName = company.name || "Collection Developments LTD";
-  const projectName = project.name || "Bankside";
+  const companyName = company.name || "Corporate Quality Framework";
+  const projectName = project.name || "Site Project";
   const docRef =
-    rfi.rfiNumber || `RFI-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    rfi.rfiNumber || generateUniversalName(project.code, "RFI");
 
   const html = `
     <!-- Header -->
@@ -1765,10 +1771,10 @@ export function generateMARPDF(
   project: Partial<Project> = {},
   company: Partial<Company> = {},
 ): void {
-  const companyName = company.name || "Collection Developments LTD";
-  const projectName = project.name || "Bankside";
+  const companyName = company.name || "Corporate Quality Framework";
+  const projectName = project.name || "Site Project";
   const docRef =
-    mar.marNumber || `MAR-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    mar.marNumber || generateUniversalName(project.code, "MAR");
   const submitterName =
     mar.submittedByName ||
     (typeof mar.submittedBy === "string"
@@ -1909,7 +1915,7 @@ export function generateCubeTestPDF(
   const docRef =
     cube.sampleNumber ||
     cube.sampleId ||
-    `CUBE-${Math.floor(1000 + Math.random() * 9000)}`;
+    generateUniversalName(project.code, "CUBE");
 
   const target28d =
     cube.target28DayStrengthNmm2 ||
@@ -2281,9 +2287,9 @@ export function generateElementSchedulePDF(
   project: Partial<Project> = {},
   company: Partial<Company> = {},
 ): void {
-  const companyName = company.name || "Collection Developments LTD";
-  const projectName = project.name || "Bankside";
-  const docRef = `ESS-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+  const companyName = company.name || "Corporate Quality Framework";
+  const projectName = project.name || "Site Project";
+  const docRef = generateUniversalName(project.code, "MTO");
 
   const totalVol = elements.reduce(
     (acc, el) =>
@@ -2445,9 +2451,9 @@ export function generateWeeklyReportPDF(
     rawRevision && String(rawRevision).trim().length > 0
       ? String(rawRevision).trim()
       : "Rev 1.0 (Final Submission)";
-  const companyName = company.name || "Collection Developments LTD";
+  const companyName = company.name || "Corporate Quality Framework";
   const companyLegalName =
-    company.legalName || (company as any)?.companyName || "Collection Developments Limited";
+    company.legalName || (company as any)?.companyName || "Corporate Quality Assurance";
   const companyLogo =
     company.logoUrl ||
     company.logo ||
@@ -2458,7 +2464,7 @@ export function generateWeeklyReportPDF(
     project.name || report.projectName || "BANKSIDE";
   const docRef =
     report.reportNumber ||
-    `WQR-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    generateUniversalName(project.code || report.projectCode, "WQR");
 
   const showNcrs =
     options?.includeNcrs !== undefined
@@ -5106,7 +5112,7 @@ export function generateSiteInstructionPDF(
     project?.name || si.projectName || "Civil Engineering Construction Project";
   const projectCode = project?.code || "PRJ-001";
   const docRef =
-    si.instructionNumber || `SI-${si.id.slice(0, 8).toUpperCase()}`;
+    si.instructionNumber || generateUniversalName(projectCode, "SI");
   const issueDate = formatDate(si.signedBy?.signedAt || si.createdAt);
   const complianceDate = formatDate(si.complianceDeadline);
 
@@ -5417,7 +5423,7 @@ export function generateMIRPDF(
   const companyName = company.name || "JQMS ENTERPRISE QUALITY MANAGEMENT";
   const projectName = project.name || mir.projectName || "CONSTRUCTION PROJECT";
   const projectCode = project.code || "PRJ";
-  const docRef = mir.mirNumber || "MIR-DRAFT";
+  const docRef = mir.mirNumber || generateUniversalName(projectCode, "MIR");
 
   const getDispositionBadge = (disp?: string) => {
     switch (disp) {
@@ -5796,8 +5802,7 @@ export function generateDailySiteLogPDF(
   const projectName = project.name || log.projectName || "CONSTRUCTION PROJECT";
   const projectCode = project.code || log.projectCode || "PRJ";
   const docRef =
-    log.logNumber ||
-    `DSL-${projectCode}-${log.generalConditions?.date || "TODAY"}`;
+    log.logNumber || generateUniversalName(projectCode, "DSL");
 
   const gen = log.generalConditions || {
     date: new Date().toISOString().slice(0, 10),

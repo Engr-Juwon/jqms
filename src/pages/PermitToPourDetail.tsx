@@ -34,7 +34,9 @@ import {
   PermitChecklistStatus,
   createDefaultPermitChecklist,
 } from "@/lib/permitChecklist";
-import LevelElementSelect from "@/components/masterdata/LevelElementSelect";
+import MultiLevelElementSelect, {
+  SelectedElementItem,
+} from "@/components/masterdata/MultiLevelElementSelect";
 import TradeSubtradeSelect from "@/components/masterdata/TradeSubtradeSelect";
 
 export const PermitToPourDetail: React.FC = () => {
@@ -81,6 +83,9 @@ export const PermitToPourDetail: React.FC = () => {
   const [levelName, setLevelName] = useState("");
   const [elementId, setElementId] = useState("");
   const [elementName, setElementName] = useState("");
+  const [selectedElements, setSelectedElements] = useState<
+    SelectedElementItem[]
+  >([]);
   const [tradeId, setTradeId] = useState("");
   const [gridAxis, setGridAxis] = useState("");
   const [tradeName, setTradeName] = useState("Structural Concrete");
@@ -174,6 +179,23 @@ export const PermitToPourDetail: React.FC = () => {
         setGridAxis(match.gridAxis || match.zone || "");
         setElementId(match.elementId || "");
         setElementName(match.elementName || match.elementRef || "");
+        if (match.elementsData && match.elementsData.length > 0) {
+          setSelectedElements(match.elementsData);
+        } else if (match.elementId || match.elementName) {
+          setSelectedElements([
+            {
+              id: match.elementId || `el-${Date.now()}`,
+              elementName:
+                match.elementName ||
+                match.elementRef ||
+                "Structural Pour Zone",
+              levelId: match.levelId,
+              levelName: match.levelName,
+              grid: match.gridAxis || match.zone,
+              elementType: match.elementType,
+            },
+          ]);
+        }
         setTradeId(match.tradeId || "");
         setTradeName(match.tradeName || "Structural Concrete");
         setSubtradeName(match.subtradeName || "Concrete Placement & Pouring");
@@ -225,6 +247,9 @@ export const PermitToPourDetail: React.FC = () => {
         elementRef,
         elementId: elementId || ptp.elementId || "",
         elementName: elementName || elementRef || ptp.elementName || "",
+        elementIds: selectedElements.map((e) => e.id),
+        elementNames: selectedElements.map((e) => e.elementName),
+        elementsData: selectedElements,
         tradeId: tradeId || ptp.tradeId || "",
         tradeName: tradeName || ptp.tradeName || "Structural Concrete",
         subtradeName:
@@ -423,23 +448,34 @@ export const PermitToPourDetail: React.FC = () => {
           </button>
         </div>
         <div className="p-6 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl space-y-4">
-          <LevelElementSelect
+          <MultiLevelElementSelect
             projectId={currentProjId}
             companyId={currentCompId}
-            selectedLevelId={levelId}
-            selectedLevelName={levelName}
-            selectedElementId={elementId}
-            selectedElementName={elementName}
-            onLevelChange={(lId, lName) => {
-              setLevelId(lId);
-              setLevelName(lName);
-            }}
-            onElementChange={(elId, elName, elAxis) => {
-              setElementId(elId);
-              setElementName(elName);
-              if (elAxis) setGridAxis(elAxis);
+            selectedElements={selectedElements}
+            onChange={(items) => {
+              setSelectedElements(items);
+              if (items.length > 0) {
+                const names = items.map((i) => i.elementName).join(", ");
+                const grids = Array.from(
+                  new Set(items.map((i) => i.grid).filter(Boolean)),
+                ).join(", ");
+                const levels = Array.from(
+                  new Set(items.map((i) => i.levelName).filter(Boolean)),
+                ).join(", ");
+                setElementName(names);
+                setElementRef(names);
+                setElementId(items[0].id);
+                if (items[0].levelId) setLevelId(items[0].levelId);
+                if (levels) setLevelName(levels);
+                if (grids) setGridAxis(grids);
+              } else {
+                setElementName("");
+                setElementRef("");
+                setElementId("");
+              }
             }}
             required
+            label="Structural Elements Scheduled for Concrete Pour"
           />
 
           <TradeSubtradeSelect

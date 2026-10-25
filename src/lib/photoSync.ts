@@ -3,6 +3,7 @@ import { dbService } from "@/lib/db";
 import { rtdb } from "@/firebase";
 import { ref, set } from "firebase/database";
 import { getThumbnail } from "@/lib/cloudinary";
+import { safeSetLocalStorage } from "@/lib/idbVault";
 
 export interface SyncPhotoParams {
   projectId: string;
@@ -82,9 +83,11 @@ export async function syncPhotoToSiteGallery(
     console.warn('dbService.savePhoto warning:', error);
   }
 
-  // 2. Realtime Database mirror
+  // 2. Realtime Database mirror scoped to company and project
   try {
-    const photoRef = ref(rtdb, `sitePhotos/${params.projectId}/${photoId}`);
+    const compId = cleanPhoto.companyId || "global";
+    const projId = cleanPhoto.projectId || "global";
+    const photoRef = ref(rtdb, `sitePhotos/${compId}/${projId}/${photoId}`);
     await set(photoRef, cleanPhoto);
   } catch (error) {
     // RTDB fallback silently tolerated
@@ -92,12 +95,12 @@ export async function syncPhotoToSiteGallery(
 
   // 3. Local storage backup for offline resilience
   try {
-    const key = `jqms_photos_${params.projectId}`;
+    const key = `jqms_photos_${cleanPhoto.projectId}`;
     const existing = JSON.parse(localStorage.getItem(key) || '[]');
-    // Prevent duplicate URLs in local storage
-    const filtered = existing.filter((p: SitePhoto) => p.url !== cleanPhoto.url);
+    // Keep at most 50 recent photo previews to prevent storage overflow
+    const filtered = existing.filter((p: SitePhoto) => p.url !== cleanPhoto.url).slice(0, 49);
     filtered.unshift(cleanPhoto);
-    localStorage.setItem(key, JSON.stringify(filtered));
+    safeSetLocalStorage(key, filtered);
   } catch (e) {
     console.warn('Local photo gallery backup notice:', e);
   }

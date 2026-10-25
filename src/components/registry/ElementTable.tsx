@@ -18,6 +18,7 @@ import { StructuralElement, ElementStatus } from "@/types";
 import {
   getOrCalculateVolume,
   getOrCalculateFormworkArea,
+  getColumnInclinationInfo,
 } from "@/lib/elementCalculations";
 
 const ITEMS_PER_PAGE = 15;
@@ -230,6 +231,22 @@ export const ElementTable: React.FC<ElementTableProps> = ({
       );
     }
 
+    // Slanted / Inclined Column
+    if (type.includes("COLUMN") && (el.isInclined || el.verticality === "inclined")) {
+      const inc = getColumnInclinationInfo(el);
+      const isCirc = el.columnShape === "circular" || type.includes("CIRCULAR");
+      return (
+        <div className="flex flex-col items-end gap-0.5">
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/60 px-2 py-0.5 rounded-lg font-bold">
+            {isCirc ? `Ø ${dia}m` : `${l}m × ${w}m`} ⤢ {inc.inclinationAngleDeg}° {inc.direction}
+          </span>
+          <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+            H: {h}m (L_eff: {inc.effectiveLengthM}m)
+          </span>
+        </div>
+      );
+    }
+
     // Column (Circular)
     if (el.columnShape === "circular" || type.includes("CIRCULAR")) {
       return (
@@ -322,9 +339,16 @@ export const ElementTable: React.FC<ElementTableProps> = ({
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300">
-                        {el.elementType}
-                      </span>
+                      <div className="flex flex-col gap-1 items-start">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300">
+                          {el.elementType}
+                        </span>
+                        {(el.isInclined || el.verticality === "inclined") && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 whitespace-nowrap">
+                            Slanted ⤢ {el.inclinationAngle || 10}°
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       {renderDimensions(el)}

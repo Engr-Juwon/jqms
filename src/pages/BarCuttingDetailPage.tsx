@@ -52,8 +52,8 @@ export const BarCuttingDetailPage: React.FC = () => {
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
   const currentCompId =
-    currentUser?.companyId || company?.id || "comp-apex-civil";
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+    currentUser?.companyId || company?.id || "";
+  const currentProjId = projectId || activeProject?.id || "";
 
   const [schedules, setSchedules] = useState<BarCuttingSchedule[]>([]);
   const [activeSchedule, setActiveSchedule] =
@@ -116,12 +116,12 @@ export const BarCuttingDetailPage: React.FC = () => {
 
   // Registry URL helper
   const registryUrl = projectId
-    ? `/projects/${projectId}/steel/bar-cutting`
+    ? `/project/${projectId}/steel/bar-cutting`
     : `/project/steel/bar-cutting`;
 
   const getDetailUrl = (targetId: string) => {
     if (projectId) {
-      return `/projects/${projectId}/steel/bar-cutting/${targetId}`;
+      return `/project/${projectId}/steel/bar-cutting/${targetId}`;
     }
     return `/project/steel/bar-cutting/${targetId}`;
   };

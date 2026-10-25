@@ -1,5 +1,6 @@
 // services/pdf/weeklyReportGenerator.ts
 import { WeeklyReport } from "@/types";
+import { generateUniversalName } from "@/lib/naming";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { StructuralElementRow } from "./newReportGen";
@@ -252,7 +253,12 @@ const renderClosingSlide = (
   doc.rect(0, 0, 15, pageHeight, "F");
 
   if (logoUrl) {
-    doc.addImage(logoUrl, "PNG", pageWidth - 45, 15, 30, 30);
+    try {
+      const format = logoUrl.startsWith("data:image/jpeg") || logoUrl.endsWith(".jpg") || logoUrl.endsWith(".jpeg") ? "JPEG" : "PNG";
+      doc.addImage(logoUrl, format, pageWidth - 45, 15, 30, 30);
+    } catch (logoErr) {
+      console.warn("Closing slide logo render skipped:", logoErr);
+    }
   }
 
   doc.setFont("helvetica", "bold").setFontSize(40);
@@ -2367,9 +2373,12 @@ export async function generateNewWeeklyPresentationPDF(
   }
 
   if (options?.saveFile !== false) {
-    doc.save(
-      `Weekly-QAQC-Report-${report.reportNumber || "FILE"}-${report.weekEnd}.pdf`,
-    );
+    const finalName = report.reportNumber
+      ? `${report.reportNumber}.pdf`
+      : generateUniversalName(report.projectCode || report.projectName, "WQR", {
+          extension: "pdf",
+        });
+    doc.save(finalName);
   }
 }
 

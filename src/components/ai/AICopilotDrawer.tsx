@@ -51,7 +51,7 @@ import {
 } from "@/lib/aiSessionService";
 import { dbService } from "@/lib/db";
 import { toast } from "react-hot-toast";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { CopilotMarkdown } from "./CopilotMarkdown";
 import { GoogleWorkspaceSyncModal } from "./GoogleWorkspaceSyncModal";
 import { GoogleIcon } from "@/components/icons/GoogleIcon";
@@ -114,8 +114,59 @@ const QUICK_PROMPTS = [
   },
 ];
 
+const resolveRouteInfo = (pathname: string) => {
+  let currentModule = "Civil QA/QC Platform";
+  let currentDocumentId: string | undefined = undefined;
+
+  const segments = pathname.split("/").filter(Boolean);
+  const lastSegment = segments[segments.length - 1];
+
+  // Determine if URL contains an active document ID
+  if (
+    lastSegment &&
+    !["create", "edit", "dashboard", "new", "list", "schedule", "mto", "profile", "chat"].includes(lastSegment.toLowerCase()) &&
+    (lastSegment.startsWith("WQR-") ||
+      lastSegment.startsWith("NCR-") ||
+      lastSegment.startsWith("PTP-") ||
+      lastSegment.startsWith("SI-") ||
+      lastSegment.startsWith("SC-") ||
+      lastSegment.startsWith("WIR-") ||
+      lastSegment.startsWith("RFI-") ||
+      lastSegment.startsWith("MAR-") ||
+      lastSegment.startsWith("MIR-") ||
+      lastSegment.includes("-") ||
+      lastSegment.length >= 8)
+  ) {
+    currentDocumentId = lastSegment;
+  }
+
+  const p = pathname.toLowerCase();
+  if (p.includes("weekly-report")) currentModule = "Weekly QA/QC Reports";
+  else if (p.includes("ncr")) currentModule = "Non-Conformance Reports (NCR)";
+  else if (p.includes("site-instruction")) currentModule = "Site Instructions (SI)";
+  else if (p.includes("site-comment")) currentModule = "Site Observations & Comments";
+  else if (p.includes("permit-to-pour") || p.includes("ptp")) currentModule = "Permits to Pour (PTP)";
+  else if (p.includes("concrete") || p.includes("cube")) currentModule = "Concrete & Cube Tests";
+  else if (p.includes("inspection")) currentModule = "Work Inspections (WIR)";
+  else if (p.includes("element") || p.includes("bim")) currentModule = "Structural Elements (BIM)";
+  else if (p.includes("daily-site-log") || p.includes("site-diary") || p.includes("diary")) currentModule = "Daily Site Diary & Logs";
+  else if (p.includes("rfi")) currentModule = "Requests for Information (RFI)";
+  else if (p.includes("mar")) currentModule = "Material Approval Requests (MAR)";
+  else if (p.includes("mir")) currentModule = "Material Inspection Requests (MIR)";
+  else if (p.includes("punch")) currentModule = "Snag & Punch Items";
+  else if (p.includes("itp")) currentModule = "Inspection & Test Plans (ITP)";
+  else if (p.includes("method-statement")) currentModule = "Method Statements";
+  else if (p.includes("mto") || p.includes("takeoff")) currentModule = "Material Take-Off (MTO)";
+  else if (p.includes("grid")) currentModule = "Gridlines & Spatial Plan";
+  else if (p.includes("level")) currentModule = "Floor Levels";
+  else if (p.includes("dashboard")) currentModule = "Project Executive Dashboard";
+
+  return { currentModule, currentDocumentId, currentRoute: pathname };
+};
+
 export const AICopilotDrawer: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { currentUser } = useAuthStore();
   const { activeProject } = useProjectStore();
   const { standards, companyId, generateDocNumber, getPrefix } = useCompany();
@@ -138,7 +189,7 @@ export const AICopilotDrawer: React.FC = () => {
     role: "model",
     text: `Hello ${userName || "Engineer"}! I am your **Jay-QMS Civil Engineering Copilot**.
 
-I have **direct, live read access to all project database records** for **${projName || activeProject?.name || "your active project"}**, strictly filtered and authorized for your role (**${roleName || userRoleTitle}**).
+I have **complete, unrestricted access to all 24 project database registries and records** (including NCRs, Concrete Cubes, PTPs, Site Diaries, Material Deliveries, Weekly Reports, and BIM Elements) for **${projName || activeProject?.name || "First Floor Bankside"}**.
 
 You can ask me to:
 - 🔍 **Live Database Queries**: *"What NCRs are currently open?"*, *"Show me cube tests awaiting 28-day break"*, *"What permits to pour are pending signatures?"*, *"Summarize yesterday's daily site log"*
@@ -234,6 +285,7 @@ How can I assist your site operations, quality audit, or database queries today?
       const sessionObj: AICopilotSession = {
         id: currentSessionId,
         userId: currentUser.uid,
+        companyId: currentUser.companyId || activeProject?.companyId || "global",
         projectId: activeProject?.id || "global",
         projectName: activeProject?.name || "Civil Works",
         title,
@@ -421,16 +473,26 @@ How can I assist your site operations, quality audit, or database queries today?
       });
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
-      // Dynamically compile live project database context authorized for user's role
+      const routeInfo = resolveRouteInfo(location.pathname);
+      const effectiveProj = activeProject || useProjectStore.getState().projects[0] || null;
+      const effectiveProjId =
+        effectiveProj?.id ||
+        (typeof localStorage !== "undefined"
+          ? localStorage.getItem("jqms_active_project_id") || ""
+          : "");
+
+      // Dynamically compile live project database context with full transparency across all entities
       let projectDataSummary = "";
-      if (activeProject?.id) {
+      if (effectiveProjId) {
         try {
           projectDataSummary = await buildProjectDatabaseContext({
-            projectId: activeProject.id,
-            companyId: activeProject.companyId || companyId || undefined,
+            projectId: effectiveProjId,
+            companyId: effectiveProj?.companyId || companyId || undefined,
             user: currentUser,
-            activeProject,
+            activeProject: effectiveProj,
             userPrompt: textToSend,
+            currentRoute: routeInfo.currentRoute,
+            currentDocumentId: routeInfo.currentDocumentId,
           });
         } catch (dbErr) {
           console.warn("Could not compile live project database snapshot:", dbErr);
@@ -442,13 +504,15 @@ How can I assist your site operations, quality audit, or database queries today?
         imageBase64: attachedImg || undefined,
         history,
         context: {
-          projectName: activeProject?.name || "Civil Works Project",
-          projectCode: activeProject?.code || "PRJ",
+          projectName: effectiveProj?.name || "First Floor Bankside",
+          projectCode: effectiveProj?.code || "CDL-BS",
           standards: standards || [],
           roleTitle: userRoleTitle,
           userName: currentUser?.fullName || "Site Engineer",
           userRole: currentUser?.role || "ENGINEER",
-          currentModule: "Civil QA/QC Platform",
+          currentModule: routeInfo.currentModule,
+          currentRoute: routeInfo.currentRoute,
+          currentDocumentId: routeInfo.currentDocumentId,
           currentDateTime: now.toISOString(),
           currentDateFormatted,
           currentTimeFormatted,
@@ -762,7 +826,7 @@ How can I assist your site operations, quality audit, or database queries today?
             reportNumber: reportNo,
             projectId: pId,
             companyId: cId,
-            title: proposal.title || "Weekly QA/QC Quality Summary",
+            title: proposal.title || "QAQC WEEKLY REPORT - 01 - FIRST FLOOR BANKSIDE",
             executiveSummary: proposal.executiveSummary || "Weekly quality milestones achieved.",
             status: "DRAFT",
             createdAt: Date.now(),
@@ -889,6 +953,7 @@ How can I assist your site operations, quality audit, or database queries today?
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
+          data-tour="ai-copilot-pill"
           className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 flex items-center gap-2 p-3 sm:px-4 sm:py-2.5 rounded-full bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white shadow-xl shadow-brand-600/30 hover:shadow-2xl hover:scale-105 active:scale-95 transition-all group border border-white/20 backdrop-blur-md"
           title="Open Jay-QMS Civil QA/QC AI Copilot"
           aria-label="Open Jay-QMS AI Copilot"

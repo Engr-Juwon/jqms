@@ -1,4 +1,5 @@
 // services/pdf/newReportGen.ts
+import { generateUniversalName } from "@/lib/naming";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -2216,7 +2217,11 @@ export async function generateWeeklyPresentationPDF(
     report.companyName,
   );
 
-  // Save the document
-  const fileName = `Weekly-QAQC-Report-${report.reportNumber || "WQR"}-${report.weekEnd || "DRAFT"}.pdf`;
+  // Save the document using universal naming standard
+  const fileName = report.reportNumber
+    ? `${report.reportNumber}.pdf`
+    : generateUniversalName(report.projectCode || report.projectName, "WQR", {
+        extension: "pdf",
+      });
   doc.save(fileName);
 }

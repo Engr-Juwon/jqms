@@ -3,6 +3,39 @@ import { firestore } from "@/firebase";
 import { doc, setDoc } from "firebase/firestore";
 import { getVaultRecord, setVaultRecord } from "./idbVault";
 
+function compactAuditValue(val: any, depth = 0): any {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "string") {
+    if (val.startsWith("data:") && val.length > 200) {
+      return `[data-url: ${val.substring(0, 30)}... (${val.length} bytes)]`;
+    }
+    if (val.length > 2048) {
+      return val.substring(0, 2048) + "... [truncated]";
+    }
+    return val;
+  }
+  if (typeof val !== "object") return val;
+
+  if (Array.isArray(val)) {
+    if (val.length > 20) {
+      return `[Array of ${val.length} items; showing first 10]: ${JSON.stringify(val.slice(0, 10).map((v) => compactAuditValue(v, depth + 1)))}`;
+    }
+    return val.map((v) => compactAuditValue(v, depth + 1));
+  }
+
+  if (depth > 2) return "[Nested Object]";
+
+  const result: Record<string, any> = {};
+  for (const [k, v] of Object.entries(val)) {
+    if (k.toLowerCase().includes("password") || k.toLowerCase().includes("secret") || k.toLowerCase().includes("token")) {
+      result[k] = "******";
+    } else {
+      result[k] = compactAuditValue(v, depth + 1);
+    }
+  }
+  return result;
+}
+
 export async function writeAudit(params: {
   projectId?: string;
   companyId: string;
@@ -28,8 +61,8 @@ export async function writeAudit(params: {
     details: params.details,
     targetId: params.targetId,
     timestamp: new Date().toISOString(),
-    previousValue: params.previousValue ?? null,
-    newValue: params.newValue ?? null,
+    previousValue: compactAuditValue(params.previousValue),
+    newValue: compactAuditValue(params.newValue),
   };
 
   try {

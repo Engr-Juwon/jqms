@@ -17,7 +17,7 @@ interface ThemeState {
 }
 
 const getInitialTheme = (): ThemeMode => {
-  if (typeof window === 'undefined') return 'dark';
+  if (typeof window === 'undefined') return 'light';
   try {
     const saved = localStorage.getItem('jqms_theme_mode') as ThemeMode;
     if (saved === 'light' || saved === 'dark') {
@@ -26,7 +26,7 @@ const getInitialTheme = (): ThemeMode => {
   } catch (e) {
     console.error('Failed reading theme preference:', e);
   }
-  return 'dark';
+  return 'light';
 };
 
 const applyThemeToDOM = (theme: ThemeMode) => {

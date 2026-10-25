@@ -49,6 +49,7 @@ import {
 } from "@/types";
 import { uploadImage, getThumbnail } from "@/lib/cloudinary";
 import { syncPhotoToSiteGallery } from "@/lib/photoSync";
+import { generateUniversalName } from "@/lib/naming";
 
 export type SnapshotPreset =
   | "REPORT_HD"
@@ -393,8 +394,15 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
     async (targetScale = 1): Promise<HTMLCanvasElement | null> => {
       if (!svgRef.current) return null;
 
-      const exportWidth = Math.round(config.width * targetScale);
-      const exportHeight = Math.round(config.height * targetScale);
+      let exportWidth = Math.round(config.width * targetScale);
+      let exportHeight = Math.round(config.height * targetScale);
+      const MAX_PIXELS = 16_777_216; // 16.7 MP browser memory limit
+      const currentPixels = exportWidth * exportHeight;
+      if (currentPixels > MAX_PIXELS) {
+        const factor = Math.sqrt(MAX_PIXELS / currentPixels);
+        exportWidth = Math.floor(exportWidth * factor);
+        exportHeight = Math.floor(exportHeight * factor);
+      }
 
       // Clone SVG
       const svgClone = svgRef.current.cloneNode(true) as SVGSVGElement;
@@ -1221,7 +1229,9 @@ export const GridSnapshotModal: React.FC<GridSnapshotModalProps> = ({
           : config.format === "image/webp"
             ? "webp"
             : "png";
-      const fileName = `GridPlan_${cleanProj}_${cleanLvl}_${config.preset}_${Date.now()}.${ext}`;
+      const fileName = generateUniversalName(cleanProj, "PHOTO", {
+        extension: ext,
+      });
 
       const dataUrl = canvas.toDataURL(config.format, config.jpegQuality);
       const downloadLink = document.createElement("a");

@@ -229,13 +229,23 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
     setSending(true);
 
     try {
+      const esc = (v?: string) =>
+        String(v || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      const resolvedOrgName = companyName || company?.name || "Jay-QMS Enterprise";
+
       // 1. Build signature HTML
       const signatureHtml = includeSignature
         ? EmailService.formatSignatureHtml({
             signatureText: customSignatureText || undefined,
             fullName: authorName,
             title: authorTitle,
-            companyName: companyName || company?.name || "Collection Developments",
+            companyName: resolvedOrgName,
             companyLogoUrl: companyLogoUrl,
             email: authorEmail,
             phone: authorPhone,
@@ -243,10 +253,13 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
           })
         : "";
 
-      // 2. Build Message HTML body
+      // 2. Build Message HTML body (entity-escaped to prevent HTML/XSS injection)
       const messageBodyHtml = message
         .split("\n\n")
-        .map((paragraph) => `<p style="margin: 0 0 12px 0; line-height: 1.6;">${paragraph.replace(/\n/g, "<br/>")}</p>`)
+        .map(
+          (paragraph) =>
+            `<p style="margin: 0 0 12px 0; line-height: 1.6;">${esc(paragraph).replace(/\n/g, "<br/>")}</p>`,
+        )
         .join("");
 
       // 3. Complete Corporate HTML Email
@@ -254,9 +267,9 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; padding: 24px; color: #1e293b; background-color: #f8fafc;">
           <!-- Corporate Header -->
           <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 20px 24px; border-radius: 12px; color: #ffffff; margin-bottom: 20px;">
-            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 4px;">Quality Assurance & Control System</div>
-            <h2 style="margin: 0; font-size: 18px; font-weight: 700; color: #ffffff;">${companyName || company?.name || "Collection Developments"}</h2>
-            ${activeProject?.name ? `<div style="font-size: 12px; color: #38bdf8; margin-top: 4px;">Project: <strong>${activeProject.name}</strong></div>` : ""}
+            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 4px;">Quality Assurance &amp; Control System</div>
+            <h2 style="margin: 0; font-size: 18px; font-weight: 700; color: #ffffff;">${esc(resolvedOrgName)}</h2>
+            ${activeProject?.name ? `<div style="font-size: 12px; color: #38bdf8; margin-top: 4px;">Project: <strong>${esc(activeProject.name)}</strong></div>` : ""}
           </div>
           
           <!-- Message Body Card -->
@@ -270,7 +283,7 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
             referenceTitle
               ? `
               <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; font-size: 12px; color: #475569;">
-                <strong>Document Reference:</strong> ${referenceTitle} ${referenceId ? `<span style="font-family: monospace; color: #64748b;">(${referenceId})</span>` : ""}
+                <strong>Document Reference:</strong> ${esc(referenceTitle)} ${referenceId ? `<span style="font-family: monospace; color: #64748b;">(${esc(referenceId)})</span>` : ""}
               </div>
             `
               : ""
@@ -278,7 +291,7 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
 
           <!-- Audit Footer -->
           <div style="font-size: 11px; color: #94a3b8; text-align: center; padding-top: 8px;">
-            Sent securely via <strong>Jay-QMS Enterprise</strong> by ${authorName} (${authorEmail}).
+            Sent securely via <strong>Jay-QMS Enterprise</strong> by ${esc(authorName)}${authorEmail ? ` (${esc(authorEmail)})` : ""}.
           </div>
         </div>
       `;
@@ -335,11 +348,16 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 Dispatch Email Communication
                 <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
-                  Direct SMTP
+                  {smtpStatus.mode === "custom" ? "Encrypted Custom SMTP" : "Platform SMTP Relay"}
                 </span>
               </h3>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Server: <span className="font-mono">{company?.settings?.smtpServer?.host || "Not configured"}</span>
+                Server:{" "}
+                <span className="font-mono">
+                  {smtpStatus.mode === "custom"
+                    ? company?.settings?.smtpServer?.host
+                    : "Platform Environment Relay"}
+                </span>
               </p>
             </div>
           </div>

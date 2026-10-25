@@ -13,6 +13,7 @@ import {
   ProjectLevel,
   Gridline,
 } from "@/types";
+import { generateUniversalName } from "@/lib/naming";
 import {
   Box,
   Layers,
@@ -53,6 +54,7 @@ import {
   normalizeDimension,
   deriveStoreyHeightForLevel,
   getColumn2DDimensions,
+  getColumnInclinationInfo,
   getBeam2DDimensions,
   deriveBeamElevationDatums,
   calculateElementElevations,
@@ -364,12 +366,12 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
   const navigate = useNavigate();
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
-  const currentProjId = projectId || activeProject?.id || "proj-default";
+  const currentProjId = projectId || activeProject?.id || "";
   const currentCompId =
     currentUser?.companyId ||
     company?.id ||
     activeProject?.companyId ||
-    "comp-default";
+    "";
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -550,6 +552,18 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
     if (onSelectElements) onSelectElements([]);
     if (onSelectElement) onSelectElement(null);
   }, [onSelectElements, onSelectElement]);
+
+  const isMultiSelectModeRef = useRef(isMultiSelectMode);
+  isMultiSelectModeRef.current = isMultiSelectMode;
+
+  const toggleSelectRef = useRef(handleToggleElementSelect);
+  toggleSelectRef.current = handleToggleElementSelect;
+
+  const clearSelectionRef = useRef(handleClearSelection);
+  clearSelectionRef.current = handleClearSelection;
+
+  const elementsRef = useRef(elements);
+  elementsRef.current = elements;
 
   // Initialize Three.js Scene
   useEffect(() => {
@@ -778,12 +792,12 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
           if (intersects.length > 0) {
             const hitMesh = intersects[0].object as THREE.Mesh;
             const elemId = (hitMesh.userData as any)?.elementId;
-            const elem = elements.find((el) => el.id === elemId);
+            const elem = elementsRef.current.find((el) => el.id === elemId);
             if (elem) {
-              handleToggleElementSelect(elem, isMultiSelectMode);
+              toggleSelectRef.current(elem, isMultiSelectModeRef.current);
             }
-          } else if (!isMultiSelectMode) {
-            handleClearSelection();
+          } else if (!isMultiSelectModeRef.current) {
+            clearSelectionRef.current();
           }
         }
       }
@@ -810,16 +824,16 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
       if (intersects.length > 0) {
         const hitMesh = intersects[0].object as THREE.Mesh;
         const elemId = (hitMesh.userData as any)?.elementId;
-        const elem = elements.find((el) => el.id === elemId);
+        const elem = elementsRef.current.find((el) => el.id === elemId);
         if (elem) {
           const isMulti =
-            e.shiftKey || e.ctrlKey || e.metaKey || isMultiSelectMode;
-          handleToggleElementSelect(elem, isMulti);
+            e.shiftKey || e.ctrlKey || e.metaKey || isMultiSelectModeRef.current;
+          toggleSelectRef.current(elem, isMulti);
         }
       } else {
         // Clicking empty space unselects if not in multi-select mode
-        if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !isMultiSelectMode) {
-          handleClearSelection();
+        if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !isMultiSelectModeRef.current) {
+          clearSelectionRef.current();
         }
       }
     };
@@ -842,9 +856,16 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
     };
     window.addEventListener("resize", handleResize);
 
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+      console.warn("[BIMViewer3D] WebGL context lost; preserving viewport");
+    };
+    dom.addEventListener("webglcontextlost", handleContextLost, false);
+
     return () => {
       cancelAnimationFrame(animationId);
       window.removeEventListener("resize", handleResize);
+      dom.removeEventListener("webglcontextlost", handleContextLost);
       dom.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
@@ -853,13 +874,21 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
       dom.removeEventListener("touchstart", onTouchStart);
       window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("touchend", onTouchEnd);
+
+      scene.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          mesh.geometry?.dispose();
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach((m) => m?.dispose?.());
+          } else if (mesh.material) {
+            mesh.material?.dispose?.();
+          }
+        }
+      });
       renderer.dispose();
     };
-  }, [
-    elements,
-    isMultiSelectMode,
-    handleToggleElementSelect,
-  ]);
+  }, [elements]);
 
   // Dynamically update 3D Scene Background & Ground Grid on Theme Toggle
   useEffect(() => {
@@ -1145,6 +1174,8 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         index,
         el.gridX,
         el.gridZ,
+        el.baseOffsetX,
+        el.baseOffsetY,
       );
 
       // Parse Physical Dimensions (auto-normalizing m vs mm)
@@ -1185,16 +1216,11 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         type.includes("PIER") ||
         type.includes("STANCHION")
       ) {
-        posX = coords.x1 - centerOffsetX;
-        posZ = coords.y1 - centerOffsetZ;
-
-        // Actual physical height: if explicit height given, use it; otherwise height between top and bottom elevation datums
+        const incInfo = getColumnInclinationInfo(el);
         const colH =
           normalizeDimension(el.height) ||
           Math.max(0.2, elevCalc.top - elevCalc.bottom) ||
           storyHeight;
-        // The column's base sits directly on its datum elevation
-        posY = elevCalc.bottom * explodeFactor + colH / 2;
 
         const colShape = (el.columnShape || "").toLowerCase();
         const elTypeStr = (el.elementType || "").toUpperCase();
@@ -1210,46 +1236,96 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
           isExplicitCircular ||
           (colShape !== "rectangular" && !el.length && !el.width && Number(el.diameter) > 0);
 
-        if (isCircular) {
-          const dia = diameterM || widthM || 0.45;
-          const radius = dia / 2;
-          geo = new THREE.CylinderGeometry(radius, radius, colH, 32);
-        } else {
-          const dimL = lengthM || widthM || 0.45;
-          const dimW = widthM || lengthM || 0.45;
+        if (incInfo.isInclined) {
+          // Precise 3D spatial alignment for inclined / slanted column:
+          // Base grounded at (coords.x1, elevCalc.bottom, coords.y1)
+          // Top shifts by deltaX, deltaZ at upper level datum
+          const baseBottomY = elevCalc.bottom * explodeFactor;
+          const verticalH = colH;
+          const deltaX = incInfo.deltaX;
+          const deltaZ = incInfo.deltaZ; // In Three.js world space: X is East(+)/West(-), Z is South(+)/North(-)
+          const slantL = Math.sqrt(verticalH * verticalH + deltaX * deltaX + deltaZ * deltaZ);
 
-          const orientation = String(
-            el.columnOrientation || el.cantileverDirection || "HORIZONTAL",
-          ).toUpperCase();
-          const isVertical =
-            orientation === "VERTICAL" ||
-            orientation === "TOP" ||
-            orientation === "BOTTOM" ||
-            orientation === "NORTH" ||
-            orientation === "SOUTH" ||
-            orientation === "90";
+          posX = coords.x1 - centerOffsetX + deltaX / 2;
+          posY = baseBottomY + verticalH / 2;
+          posZ = coords.y1 - centerOffsetZ + deltaZ / 2;
 
-          let colX = dimL;
-          let colZ = dimW;
-
-          if (isVertical) {
-            // Major axis North-South (Z), Minor axis East-West (X)
-            colX = Math.min(dimL, dimW);
-            colZ = Math.max(dimL, dimW);
+          if (isCircular) {
+            const dia = diameterM || widthM || 0.45;
+            const radius = dia / 2;
+            geo = new THREE.CylinderGeometry(radius, radius, slantL, 32);
           } else {
-            // Major axis East-West (X), Minor axis North-South (Z)
-            colX = Math.max(dimL, dimW);
-            colZ = Math.min(dimL, dimW);
+            const dimL = lengthM || widthM || 0.45;
+            const dimW = widthM || lengthM || 0.45;
+
+            const orientation = String(
+              el.columnOrientation || el.cantileverDirection || "HORIZONTAL",
+            ).toUpperCase();
+            const isVertical =
+              orientation === "VERTICAL" ||
+              orientation === "TOP" ||
+              orientation === "BOTTOM" ||
+              orientation === "NORTH" ||
+              orientation === "SOUTH" ||
+              orientation === "90";
+
+            let colX = dimL;
+            let colZ = dimW;
+
+            if (isVertical) {
+              colX = Math.min(dimL, dimW);
+              colZ = Math.max(dimL, dimW);
+            } else {
+              colX = Math.max(dimL, dimW);
+              colZ = Math.min(dimL, dimW);
+            }
+
+            geo = new THREE.BoxGeometry(colX, slantL, colZ);
           }
 
-          geo = new THREE.BoxGeometry(colX, colH, colZ);
-        }
+          // Orient the column longitudinal axis along the slant vector from base to top
+          const vDir = new THREE.Vector3(deltaX, verticalH, deltaZ).normalize();
+          const up = new THREE.Vector3(0, 1, 0);
+          const quat = new THREE.Quaternion().setFromUnitVectors(up, vDir);
+          geo.applyQuaternion(quat);
+        } else {
+          // Standard straight vertical column
+          posX = coords.x1 - centerOffsetX;
+          posZ = coords.y1 - centerOffsetZ;
+          posY = elevCalc.bottom * explodeFactor + colH / 2;
 
-        // Slanted / Inclined column handling
-        if (el.isInclined || el.verticality === "inclined") {
-          const angleDeg = Number(el.inclinationAngle) || 10;
-          const angleRad = (angleDeg * Math.PI) / 180;
-          geo.rotateZ(angleRad);
+          if (isCircular) {
+            const dia = diameterM || widthM || 0.45;
+            const radius = dia / 2;
+            geo = new THREE.CylinderGeometry(radius, radius, colH, 32);
+          } else {
+            const dimL = lengthM || widthM || 0.45;
+            const dimW = widthM || lengthM || 0.45;
+
+            const orientation = String(
+              el.columnOrientation || el.cantileverDirection || "HORIZONTAL",
+            ).toUpperCase();
+            const isVertical =
+              orientation === "VERTICAL" ||
+              orientation === "TOP" ||
+              orientation === "BOTTOM" ||
+              orientation === "NORTH" ||
+              orientation === "SOUTH" ||
+              orientation === "90";
+
+            let colX = dimL;
+            let colZ = dimW;
+
+            if (isVertical) {
+              colX = Math.min(dimL, dimW);
+              colZ = Math.max(dimL, dimW);
+            } else {
+              colX = Math.max(dimL, dimW);
+              colZ = Math.min(dimL, dimW);
+            }
+
+            geo = new THREE.BoxGeometry(colX, colH, colZ);
+          }
         }
       } else if (type.includes("BEAM")) {
         const beamW =
@@ -1832,7 +1908,11 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
         "_",
       );
       const cleanLevel = currentLevelName.replace(/[^a-zA-Z0-9]/g, "_");
-      const fileName = `BIM_3D_${cleanProj}_${cleanLevel}_${Date.now()}.png`;
+      const fileName = generateUniversalName(
+        activeProject?.code || cleanProj,
+        "PHOTO",
+        { extension: "png" }
+      );
 
       const downloadLink = document.createElement("a");
       downloadLink.href = dataUrl;

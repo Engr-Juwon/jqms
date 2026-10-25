@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { TOUR_STEPS } from "@/lib/onboardingSteps";
 
 const TOUR_DONE_KEY = "jqms_tour_done";
 
@@ -17,10 +18,15 @@ interface OnboardingState {
 export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   isActive: false,
   currentStep: 0,
-  totalSteps: 12,
+  totalSteps: TOUR_STEPS.length,
 
   startTour: () => {
-    set({ isActive: true, currentStep: 0 });
+    try {
+      localStorage.removeItem(TOUR_DONE_KEY);
+    } catch {
+      // Ignore
+    }
+    set({ isActive: true, currentStep: 0, totalSteps: TOUR_STEPS.length });
   },
 
   nextStep: () => {
@@ -40,22 +46,34 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
   },
 
   skipTour: () => {
-    localStorage.setItem(TOUR_DONE_KEY, "true");
+    try {
+      localStorage.setItem(TOUR_DONE_KEY, "true");
+    } catch {
+      // Ignore
+    }
     set({ isActive: false, currentStep: 0 });
   },
 
   completeTour: () => {
-    localStorage.setItem(TOUR_DONE_KEY, "true");
+    try {
+      localStorage.setItem(TOUR_DONE_KEY, "true");
+    } catch {
+      // Ignore
+    }
     set({ isActive: false, currentStep: 0 });
   },
 
   checkAutoStart: () => {
-    const done = localStorage.getItem(TOUR_DONE_KEY);
-    if (!done) {
-      // Delay slightly so layout/sidebar are fully mounted
-      setTimeout(() => {
-        set({ isActive: true, currentStep: 0 });
-      }, 1500);
+    try {
+      const done = localStorage.getItem(TOUR_DONE_KEY);
+      if (!done) {
+        // Delay slightly so layout/sidebar are fully mounted
+        setTimeout(() => {
+          set({ isActive: true, currentStep: 0, totalSteps: TOUR_STEPS.length });
+        }, 1500);
+      }
+    } catch {
+      // Ignore
     }
   },
 }));

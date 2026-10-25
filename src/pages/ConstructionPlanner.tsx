@@ -53,8 +53,8 @@ export const ConstructionPlanner: React.FC = () => {
     currentUser?.companyId ||
     company?.id ||
     activeProject?.companyId ||
-    "comp-apex-civil";
-  const currentProjId = projectId || activeProject?.id || "proj-skyline-tower";
+    "";
+  const currentProjId = projectId || activeProject?.id || "";
 
   // Helper to add days to ISO date string
   const addDaysToDate = (dateStr: string, days: number): string => {

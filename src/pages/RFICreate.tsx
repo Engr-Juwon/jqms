@@ -11,7 +11,9 @@ import { DraftBanner } from "@/components/common/DraftBanner";
 import { saveFormDraft, getFormDraft, clearFormDraft } from "@/lib/idbVault";
 import { useCompany } from "@/lib/companyHelper";
 import { TradeSubtradeSelect } from "@/components/masterdata/TradeSubtradeSelect";
-import { LevelElementSelect } from "@/components/masterdata/LevelElementSelect";
+import MultiLevelElementSelect, {
+  SelectedElementItem,
+} from "@/components/masterdata/MultiLevelElementSelect";
 import {
   UniversalPhotoUploader,
   PhotoItem,
@@ -49,6 +51,30 @@ export const RFICreate: React.FC = () => {
   const [elementId, setElementId] = useState("");
   const [elementName, setElementName] = useState("");
   const [gridLocation, setGridLocation] = useState("");
+  const [selectedElements, setSelectedElements] = useState<
+    SelectedElementItem[]
+  >([]);
+
+  const handleSelectedElementsChange = (items: SelectedElementItem[]) => {
+    setSelectedElements(items);
+    if (items.length > 0) {
+      const names = items.map((i) => i.elementName).join(", ");
+      const grids = Array.from(
+        new Set(items.map((i) => i.grid).filter(Boolean)),
+      ).join(", ");
+      const levels = Array.from(
+        new Set(items.map((i) => i.levelName).filter(Boolean)),
+      ).join(", ");
+      setElementName(names);
+      setElementId(items[0].id);
+      if (items[0].levelId) setLevelId(items[0].levelId);
+      if (levels) setLevelName(levels);
+      if (grids) setGridLocation(grids);
+    } else {
+      setElementName("");
+      setElementId("");
+    }
+  };
   const [priority, setPriority] = useState<
     "LOW" | "MEDIUM" | "HIGH" | "URGENT"
   >("HIGH");
@@ -238,6 +264,9 @@ export const RFICreate: React.FC = () => {
       locationLevel: levelName,
       elementId,
       elementName,
+      elementIds: selectedElements.map((e) => e.id),
+      elementNames: selectedElements.map((e) => e.elementName),
+      elementsData: selectedElements,
       gridLine: gridLocation,
       question,
       proposedSolution,
@@ -377,22 +406,12 @@ export const RFICreate: React.FC = () => {
           </div>
 
           <div className="pt-2 border-t border-slate-200 dark:border-slate-800/80 space-y-4">
-            <LevelElementSelect
+            <MultiLevelElementSelect
               projectId={currentProjId}
               companyId={currentCompId}
-              selectedLevelId={levelId}
-              selectedLevelName={levelName}
-              selectedElementId={elementId}
-              selectedElementName={elementName}
-              onLevelChange={(lId, lName) => {
-                setLevelId(lId);
-                setLevelName(lName);
-              }}
-              onElementChange={(elId, elName, grid) => {
-                setElementId(elId);
-                setElementName(elName);
-                if (grid) setGridLocation(grid);
-              }}
+              selectedElements={selectedElements}
+              onChange={handleSelectedElementsChange}
+              label="Structural Elements Under Technical Query"
             />
 
             <TradeSubtradeSelect

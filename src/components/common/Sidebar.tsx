@@ -4,7 +4,11 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useUiStore } from "@/stores/useUiStore";
 import { useOnboardingStore } from "@/stores/useOnboardingStore";
-import { canAccessRoute } from "@/lib/permissions";
+import {
+  canAccessRoute,
+  isBimEnabledForProject,
+  canManageProjectFeatures,
+} from "@/lib/permissions";
 import {
   LayoutDashboard,
   Box,
@@ -455,21 +459,31 @@ export const Sidebar: React.FC = () => {
             description: "Organization branding, ISO 9001 policies & headers",
             dataTour: "nav-settings",
           },
+          ...(activeProject && canManageProjectFeatures(currentUser, activeProject)
+            ? [
+                {
+                  label: "BIM (2D-7D) Feature Controls",
+                  path: `/company/projects/${activeProject.id}/edit?tab=bim`,
+                  icon: Box,
+                  description: "Toggle & configure 2D-7D BIM access for this project",
+                },
+              ]
+            : []),
         ],
       },
     ],
-    [activeProject],
+    [activeProject, currentUser],
   );
 
-  // Filter items by user role permissions
+  // Filter items by user role permissions and granular project-level feature flags
   const visibleDomains = useMemo(() => {
     return NAV_DOMAINS.map((domain) => ({
       ...domain,
       items: domain.items.filter((item) =>
-        canAccessRoute(currentUser, item.path),
+        canAccessRoute(currentUser, item.path, activeProject),
       ),
     })).filter((domain) => domain.items.length > 0);
-  }, [NAV_DOMAINS, currentUser]);
+  }, [NAV_DOMAINS, currentUser, activeProject]);
 
   // Total count of accessible pages
   const totalAccessiblePages = useMemo(() => {
@@ -601,6 +615,18 @@ export const Sidebar: React.FC = () => {
     setHoveredDomainId(null);
   };
 
+  useEffect(() => {
+    const handleTourDomain = (e: Event) => {
+      const custom = e as CustomEvent<{ domainId: DomainId }>;
+      if (custom.detail?.domainId) {
+        handleDomainClick(custom.detail.domainId);
+      }
+    };
+    window.addEventListener("jqms-tour-select-domain", handleTourDomain);
+    return () =>
+      window.removeEventListener("jqms-tour-select-domain", handleTourDomain);
+  }, [isSecondarySidebarCollapsed]);
+
   // Hovered domain object for flyout menu
   const hoveredDomain = useMemo(() => {
     if (!hoveredDomainId) return null;
@@ -612,6 +638,7 @@ export const Sidebar: React.FC = () => {
   // ─────────────────────────────────────────────────────────────
   const renderPrimaryRail = (isMobile = false) => (
     <div
+      data-tour="primary-rail"
       className={`w-16 bg-slate-900 dark:bg-slate-950 text-slate-400 border-r border-slate-800 flex flex-col items-center justify-between h-full py-3 shrink-0 select-none relative z-30 transition-colors duration-200`}
     >
       {/* Top: Brand Logo Icon */}
@@ -619,6 +646,7 @@ export const Sidebar: React.FC = () => {
         <NavLink
           to="/project/dashboard"
           onClick={() => isMobile && closeMobileSidebar()}
+          data-tour="rail-brand"
           className="w-11 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/80 p-1 flex items-center justify-center shadow-lg transition-all group relative"
           title="JQMS Civil Quality Platform (ISO 9001)"
         >
@@ -646,6 +674,7 @@ export const Sidebar: React.FC = () => {
           <button
             type="button"
             onClick={() => handleDomainClick("all-pages")}
+            data-tour="all-pages-launcher"
             className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center transition-all duration-150 relative cursor-pointer ${
               selectedDomainId === "all-pages"
                 ? "bg-brand-600 text-white shadow-lg shadow-brand-600/30 ring-1 ring-brand-400/50 font-semibold scale-102"
@@ -712,6 +741,7 @@ export const Sidebar: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleDomainClick(domain.id)}
+                data-tour={`domain-${domain.id}`}
                 className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center transition-all duration-150 relative cursor-pointer ${
                   isSelected
                     ? "bg-brand-600 text-white shadow-lg shadow-brand-600/30 ring-1 ring-brand-400/50 font-semibold scale-102"
@@ -755,6 +785,7 @@ export const Sidebar: React.FC = () => {
           <button
             type="button"
             onClick={startTour}
+            data-tour="tour-launcher-btn"
             className="w-10 h-10 rounded-xl flex items-center justify-center text-amber-400 hover:text-amber-300 hover:bg-amber-950/40 border border-amber-500/20 hover:border-amber-500/40 transition group cursor-pointer"
             title="Take Interactive Tour"
           >

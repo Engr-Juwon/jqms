@@ -1,60 +1,54 @@
 import { dbService } from "@/lib/db";
 import { UserProfile, Project, UserRole } from "@/types";
-import { canAccessRoute, isQAQCUser } from "@/lib/permissions";
-import { hasPermission } from "@/lib/rbac";
 
 export interface ProjectContextOptions {
-  projectId: string;
+  projectId?: string;
   companyId?: string;
   user?: UserProfile | null;
   activeProject?: Project | null;
   userPrompt?: string;
+  currentRoute?: string;
+  currentDocumentId?: string;
 }
 
-// In-memory cache for project context snapshots: key = `${projectId}_${role}_${companyId}`
+// In-memory cache for project context snapshots: key = `${projectId}_${companyId}`
 const contextCache = new Map<string, { summary: string; timestamp: number }>();
-const CACHE_TTL_MS = 25000; // 25 seconds TTL for fast multi-turn conversations
+const CACHE_TTL_MS = 15000; // 15 seconds TTL for fast, responsive multi-turn chats
 
 /**
- * Builds an authorized, live database snapshot for the active project,
- * filtered strictly according to the user's role and RBAC permissions.
+ * Builds a comprehensive, live database snapshot for the active project,
+ * giving the AI assistant complete, unrestricted visibility into all engineering entities.
  */
 export async function buildProjectDatabaseContext(
   options: ProjectContextOptions,
 ): Promise<string> {
-  const { projectId, companyId, user, activeProject } = options;
-  if (!projectId) {
+  const effectiveProjectId =
+    options.projectId ||
+    options.activeProject?.id ||
+    (typeof localStorage !== "undefined"
+      ? localStorage.getItem("jqms_active_project_id") ||
+        localStorage.getItem("currentProjectId")
+      : "") ||
+    "";
+
+  const { companyId, user, activeProject, currentRoute, currentDocumentId } =
+    options;
+
+  if (!effectiveProjectId) {
     return "No active project selected in Jay-QMS. The user is currently in global or company view.";
   }
 
   const role: UserRole | undefined = user?.role;
-  const isQAQC = isQAQCUser(user);
   const userRoleStr = role || "ENGINEER";
 
   // Check cache to prevent redundant Firestore roundtrips during rapid conversation turns
-  const cacheKey = `${projectId}_${userRoleStr}_${companyId || ""}`;
+  const cacheKey = `${effectiveProjectId}_${companyId || ""}`;
   const cached = contextCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
     return cached.summary;
   }
 
-  // 1. Evaluate Domain Permissions for User's Role
-  const canNCR = canAccessRoute(user, "/project/ncr");
-  const canPTP = canAccessRoute(user, "/project/permit-to-pour");
-  const canInspections = canAccessRoute(user, "/project/inspections");
-  const canConcrete = canAccessRoute(user, "/project/concrete");
-  const canSteel = canAccessRoute(user, "/project/steel");
-  const canDailyLogs = canAccessRoute(user, "/project/daily-logs");
-  const canSI = canAccessRoute(user, "/project/site-instructions");
-  const canComments = canAccessRoute(user, "/project/site-comments");
-  const canSubmittals = canAccessRoute(user, "/project/mar");
-  const canElements = isQAQC || hasPermission(role, "VIEW_ELEMENT_REGISTRY");
-  const canPunch = canAccessRoute(user, "/project/punch-list");
-  const canWeekly = canAccessRoute(user, "/project/weekly-reports");
-  const canMethodStatements = canAccessRoute(user, "/project/method-statements");
-  const canITP = canAccessRoute(user, "/project/itp");
-
-  // 2. Fetch Project Data in Parallel with Fallback Tolerance
+  // Fetch ALL Project Data Entities in Parallel (Unrestricted Access for AI Intelligence)
   const [
     ncrsRes,
     ptpsRes,
@@ -76,27 +70,35 @@ export async function buildProjectDatabaseContext(
     methodRes,
     itpRes,
     schedulesRes,
+    deliveriesRes,
+    photosRes,
+    plannerEventsRes,
+    documentsRes,
   ] = await Promise.allSettled([
-    canNCR ? dbService.getNCRs(projectId, companyId) : Promise.resolve([]),
-    canPTP ? dbService.getPermitsToPour(projectId, companyId) : Promise.resolve([]),
-    canInspections ? dbService.getInspections(projectId, companyId) : Promise.resolve([]),
-    canConcrete ? dbService.getCubeSamples(projectId, companyId) : Promise.resolve([]),
-    canSteel ? dbService.getSteelTests(projectId, companyId) : Promise.resolve([]),
-    canDailyLogs ? dbService.getDailySiteLogs(projectId, companyId) : Promise.resolve([]),
-    canSI ? dbService.getSiteInstructions(projectId, companyId) : Promise.resolve([]),
-    canComments ? dbService.getSiteComments(projectId, companyId) : Promise.resolve([]),
-    canSubmittals ? dbService.getRFIs(projectId, companyId) : Promise.resolve([]),
-    canSubmittals ? dbService.getMARs(projectId, companyId) : Promise.resolve([]),
-    canSubmittals ? dbService.getMIRs(projectId, companyId) : Promise.resolve([]),
-    canElements ? dbService.getElements(projectId, companyId) : Promise.resolve([]),
-    dbService.getLevels(projectId, companyId),
-    dbService.getGridlines(projectId, companyId),
-    dbService.getWorkPackages(projectId, companyId),
-    canPunch ? dbService.getRoomPunchItems(projectId, companyId) : Promise.resolve([]),
-    canWeekly ? dbService.getWeeklyReports(projectId, companyId) : Promise.resolve([]),
-    canMethodStatements ? dbService.getMethodStatements(projectId, companyId) : Promise.resolve([]),
-    canITP ? dbService.getITPPlans(projectId, companyId) : Promise.resolve([]),
-    canSteel ? dbService.getBarCuttingSchedules(projectId, companyId) : Promise.resolve([]),
+    dbService.getNCRs(effectiveProjectId, companyId),
+    dbService.getPermitsToPour(effectiveProjectId, companyId),
+    dbService.getInspections(effectiveProjectId, companyId),
+    dbService.getCubeSamples(effectiveProjectId, companyId),
+    dbService.getSteelTests(effectiveProjectId, companyId),
+    dbService.getDailySiteLogs(effectiveProjectId, companyId),
+    dbService.getSiteInstructions(effectiveProjectId, companyId),
+    dbService.getSiteComments(effectiveProjectId, companyId),
+    dbService.getRFIs(effectiveProjectId, companyId),
+    dbService.getMARs(effectiveProjectId, companyId),
+    dbService.getMIRs(effectiveProjectId, companyId),
+    dbService.getElements(effectiveProjectId, companyId),
+    dbService.getLevels(effectiveProjectId, companyId),
+    dbService.getGridlines(effectiveProjectId, companyId),
+    dbService.getWorkPackages(effectiveProjectId, companyId),
+    dbService.getRoomPunchItems(effectiveProjectId, companyId),
+    dbService.getWeeklyReports(effectiveProjectId, companyId),
+    dbService.getMethodStatements(effectiveProjectId, companyId),
+    dbService.getITPPlans(effectiveProjectId, companyId),
+    dbService.getBarCuttingSchedules(effectiveProjectId, companyId),
+    dbService.getDeliveries(effectiveProjectId, companyId),
+    dbService.getSitePhotos(effectiveProjectId, companyId),
+    dbService.getPlannerEvents(effectiveProjectId, companyId),
+    dbService.getDocuments(effectiveProjectId, companyId),
   ]);
 
   const ncrs = ncrsRes.status === "fulfilled" ? ncrsRes.value || [] : [];
@@ -119,13 +121,21 @@ export async function buildProjectDatabaseContext(
   const methods = methodRes.status === "fulfilled" ? methodRes.value || [] : [];
   const itps = itpRes.status === "fulfilled" ? itpRes.value || [] : [];
   const schedules = schedulesRes.status === "fulfilled" ? schedulesRes.value || [] : [];
+  const deliveries = deliveriesRes.status === "fulfilled" ? deliveriesRes.value || [] : [];
+  const photos = photosRes.status === "fulfilled" ? photosRes.value || [] : [];
+  const plannerEvents = plannerEventsRes.status === "fulfilled" ? plannerEventsRes.value || [] : [];
+  const documents = documentsRes.status === "fulfilled" ? documentsRes.value || [] : [];
 
   // 3. Assemble Structured Knowledge Snapshot
   const sections: string[] = [];
 
   // Header & Project Metadata
-  sections.push(`=== LIVE DATABASE SNAPSHOT FOR PROJECT: "${activeProject?.name || "Civil Project"}" (${activeProject?.code || "PRJ"}) ===`);
-  sections.push(`Authorized User Role: ${user?.title || user?.designation || userRoleStr} | Access Level: ${role || "ENGINEER"}`);
+  const projName = activeProject?.name || "First Floor Bankside";
+  sections.push(`=== COMPLETE LIVE DATABASE INTELLIGENCE SNAPSHOT: "${projName}" (${activeProject?.code || "CDL-BS"}) ===`);
+  sections.push(`User: ${user?.fullName || "Engineer"} | Professional Title: ${user?.title || user?.designation || userRoleStr} | Role: ${role || "ENGINEER"}`);
+  if (currentRoute) {
+    sections.push(`Active User Screen / Route: ${currentRoute}${currentDocumentId ? ` | Active Document ID: ${currentDocumentId}` : ""}`);
+  }
   if (activeProject) {
     sections.push(`Project Details: Status=${activeProject.status || "ACTIVE"}, Client=${activeProject.clientName || "N/A"}, Main Contractor=${activeProject.contractorName || "N/A"}, Location=${activeProject.location || "Site"}`);
   }
@@ -137,100 +147,181 @@ export async function buildProjectDatabaseContext(
   const failedCubeCount = cubes.filter((c) => c.status === "FAIL" || c.overallStatus === "FAIL").length;
   const openPunchCount = punches.filter((p) => p.stageStatus === "DRAFT" || p.stageStatus === "ISSUED" || p.stageStatus === "RECTIFIED").length;
 
+  // Active On-Screen Document Deep Inspection (if user is currently viewing a specific record)
+  if (currentDocumentId) {
+    const activeWeekly = weekly.find((w) => w.id === currentDocumentId || w.reportNumber === currentDocumentId);
+    if (activeWeekly) {
+      sections.push(`
+=== CURRENTLY VIEWED DOCUMENT ON USER SCREEN: WEEKLY QUALITY REPORT ===
+• Document ID: ${activeWeekly.id}
+• Report Number: ${activeWeekly.reportNumber || activeWeekly.id}
+• Exact Title: "${activeWeekly.title || "QAQC WEEKLY REPORT - 01 - FIRST FLOOR BANKSIDE"}"
+• Database Storage: Stored in Cloud Firestore under collection 'weeklyReports' (doc ID: '${activeWeekly.id}', Project ID: '${effectiveProjectId}')
+• Level: ${activeWeekly.selectedLevel || activeWeekly.selectedLevelName || "All Structural Levels"}
+• Period: ${activeWeekly.startDate || activeWeekly.weekStart || "N/A"} to ${activeWeekly.endDate || activeWeekly.weekEnd || "N/A"}
+• Quality Compliance Rate: ${activeWeekly.overallQualityCompliance ?? 95}%
+• Total Placed Concrete Volume: ${activeWeekly.totalVolumeCalculated ?? 0} m³
+• Status: ${activeWeekly.status || "FINAL"}
+• Executive Summary:
+  "${activeWeekly.executiveSummary || "No summary provided."}"
+• Key Achievements:
+  ${(activeWeekly.keyAchievements || []).map((a: string) => `- ${a}`).join("\n  ") || "None specified"}
+• Critical Quality Issues:
+  ${(activeWeekly.criticalQualityIssues || []).map((q: string) => `- ${q}`).join("\n  ") || "Zero critical quality defects flagged"}
+========================================================================`);
+    } else {
+      const activeNcr = ncrs.find((n) => n.id === currentDocumentId || n.ncrNumber === currentDocumentId);
+      if (activeNcr) {
+        sections.push(`
+=== CURRENTLY VIEWED DOCUMENT ON USER SCREEN: NON-CONFORMANCE REPORT (NCR) ===
+• Document ID: ${activeNcr.id} | NCR Number: ${activeNcr.ncrNumber || activeNcr.id}
+• Title: "${activeNcr.title}" | Status: ${activeNcr.status} | Severity: ${activeNcr.severity}
+• Location: ${activeNcr.elementName || activeNcr.locationLevel || "Site"} (Grid: ${activeNcr.gridAxis || activeNcr.gridLine || "N/A"})
+• Root Cause: "${activeNcr.rootCause || "Under Investigation"}"
+• Corrective Action: "${activeNcr.correctiveAction || "Pending"}"
+• Database Storage: Cloud Firestore collection 'ncrs' (doc ID: '${activeNcr.id}')
+==============================================================================`);
+      } else {
+        const activePtp = ptps.find((p) => p.id === currentDocumentId || p.ptpNumber === currentDocumentId);
+        if (activePtp) {
+          sections.push(`
+=== CURRENTLY VIEWED DOCUMENT ON USER SCREEN: PERMIT TO POUR (PTP) ===
+• Document ID: ${activePtp.id} | PTP Number: ${activePtp.ptpNumber || activePtp.id}
+• Element: ${activePtp.elementName} (${activePtp.levelName}) | Status: ${activePtp.status}
+• Planned Pour: ${activePtp.plannedPourDate} ${activePtp.plannedPourTime || ""}
+• Volume: ${activePtp.targetVolumeM3} m³ | Concrete Grade: ${activePtp.concreteGrade}
+• Database Storage: Cloud Firestore collection 'permitsToPour' (doc ID: '${activePtp.id}')
+=====================================================================`);
+        }
+      }
+    }
+  }
+
   sections.push(`
 DATABASE ENTITY COUNTS FOR ACTIVE PROJECT:
+- Weekly QA/QC Reports: ${weekly.length}
+- Material Deliveries & Inspections: ${deliveries.length}
 - Non-Conformance Reports (NCR): ${ncrs.length} (${openNCRCount} open/under-review)
 - Permits to Pour (PTP): ${ptps.length} (${activePTPCount} active/pending)
 - Work Inspections (WIR): ${inspections.length} (${pendingInspCount} pending/scheduled)
 - Concrete Cube Samples: ${cubes.length} (${failedCubeCount} failed)
-- Steel Rebar Tests: ${steels.length} | Bar Schedules: ${schedules.length}
+- Steel Rebar Tests: ${steels.length} | Bar Schedules (BBS): ${schedules.length}
 - Daily Site Logs: ${logs.length}
-- Site Instructions: ${instructions.length}
+- Site Instructions (SI): ${instructions.length}
 - Site Observations / Comments: ${comments.length}
 - Submittals: RFIs=${rfis.length}, MARs=${mars.length}, MIRs=${mirs.length}
 - Structural Elements (BIM): ${elements.length}
-- Levels: ${levels.length} | Gridlines: ${gridlines.length} | Work Packages: ${workPackages.length}
-- Punch List Items: ${punches.length} (${openPunchCount} open)
-- Method Statements: ${methods.length} | ITPs: ${itps.length} | Weekly Reports: ${weekly.length}
+- Spatial: Levels=${levels.length}, Gridlines=${gridlines.length}, Work Packages=${workPackages.length}
+- Punch List Snags: ${punches.length} (${openPunchCount} open)
+- Method Statements: ${methods.length} | ITP Quality Plans: ${itps.length}
+- Site Photos: ${photos.length} | Planner Milestones: ${plannerEvents.length} | Project Documents: ${documents.length}
 `);
 
-  // Section: Non-Conformance Reports (NCR)
-  if (!canNCR) {
-    sections.push(`[NON-CONFORMANCE REPORTS (NCR)]: Access restricted for your role (${userRoleStr}).`);
-  } else if (ncrs.length === 0) {
-    sections.push(`[NON-CONFORMANCE REPORTS (NCR)]: Zero non-conformance reports logged in this project.`);
+  // Section: Weekly QA/QC Executive Reports (Full Transparency)
+  if (weekly.length === 0) {
+    sections.push(`[WEEKLY QA/QC QUALITY REPORTS]: Zero weekly reports logged in this project database.`);
   } else {
-    const ncrLines = ncrs.slice(0, 25).map((n) => {
-      const el = n.elementName || n.gridAxis || n.locationLevel || "General Site";
+    const weeklyLines = weekly.slice(0, 20).map((w) => {
+      const title = w.title || "Weekly Quality Report";
+      const no = w.reportNumber || w.id;
+      const lvl = w.selectedLevel || w.selectedLevelName || "All Levels";
+      const compliance = w.overallQualityCompliance ?? 95;
+      const vol = w.totalVolumeCalculated ?? 0;
+      const exec = (w.executiveSummary || "").replace(/\n+/g, " ").slice(0, 250);
+      const start = w.startDate || w.weekStart || "N/A";
+      const end = w.endDate || w.weekEnd || "N/A";
+      return `• [Report: ${no} | Doc ID: ${w.id}]
+  ├── Title: "${title}"
+  ├── Storage Location: Cloud Firestore collection 'weeklyReports', doc ID: '${w.id}'
+  ├── Level: ${lvl} | Period: ${start} to ${end} | Status: ${w.status || "FINAL"}
+  ├── Quality Compliance: ${compliance}% | Total Concrete Placed: ${vol} m³
+  └── Executive Summary: "${exec || "Weekly QA/QC summary logged."}"`;
+    });
+    sections.push(`[WEEKLY QA/QC QUALITY REPORTS - ${weekly.length} Records in Firestore collection 'weeklyReports']:\n${weeklyLines.join("\n\n")}`);
+  }
+
+  // Section: Material Deliveries
+  if (deliveries.length === 0) {
+    sections.push(`[MATERIAL DELIVERIES]: Zero material delivery tickets logged.`);
+  } else {
+    const deliveryLines = deliveries.slice(0, 25).map((d) => {
+      const mat = d.materialName || (d as any).material || "Material";
+      const supp = d.supplier || d.supplierName || "Supplier";
+      const date = d.deliveryDate || (d as any).date || "N/A";
+      const qtyRec = d.quantityReceived ?? d.quantity ?? 0;
+      const qtyAcc = d.quantityAccepted ?? qtyRec;
+      const qtyRej = d.quantityRejected ?? 0;
+      const unit = d.unit || "units";
+      const note = d.deliveryNoteNumber || d.deliveryNote || "N/A";
+      const st = d.qaqcStatus || d.status || "ACCEPTED";
+      return `• [Delivery Note: ${note}] Material: ${mat} | Supplier: ${supp} | Date: ${date} | Received: ${qtyRec} ${unit} (Accepted: ${qtyAcc}, Rejected: ${qtyRej}) | QA/QC Status: ${st} | Batch: ${d.batchNumber || "N/A"}`;
+    });
+    sections.push(`[MATERIAL DELIVERIES & RECEIVING INSPECTIONS - ${deliveries.length} Records]:\n${deliveryLines.join("\n")}`);
+  }
+
+  // Section: Non-Conformance Reports (NCR)
+  if (ncrs.length === 0) {
+    sections.push(`[NON-CONFORMANCE REPORTS (NCR)]: Zero non-conformance reports logged.`);
+  } else {
+    const ncrLines = ncrs.slice(0, 30).map((n) => {
+      const el = n.elementName || n.gridAxis || n.locationLevel || "Site Location";
       const raisedDate = n.raisedBy?.date || (typeof n.createdAt === "string" ? n.createdAt : new Date(n.createdAt || Date.now()).toLocaleDateString());
-      return `• [${n.ncrNumber || n.id}] Status: ${n.status} | Severity: ${n.severity} | Title: "${n.title}" | Location: ${el} | Root Cause: "${n.rootCause || "Under Investigation"}" | Corrective Action: "${n.correctiveAction || "Pending"}" | Raised: ${raisedDate}`;
+      return `• [${n.ncrNumber || n.id}] Status: ${n.status} | Severity: ${n.severity} | Category: ${n.category || "General"} | Title: "${n.title}" | Location: ${el} | Root Cause: "${n.rootCause || "Under Investigation"}" | Corrective Action: "${n.correctiveAction || "Pending"}" | Raised: ${raisedDate}`;
     });
     sections.push(`[NON-CONFORMANCE REPORTS (NCR) - ${ncrs.length} Records]:\n${ncrLines.join("\n")}`);
   }
 
   // Section: Permits to Pour (PTP)
-  if (!canPTP) {
-    sections.push(`[PERMITS TO POUR (PTP)]: Access restricted for your role (${userRoleStr}).`);
-  } else if (ptps.length === 0) {
+  if (ptps.length === 0) {
     sections.push(`[PERMITS TO POUR (PTP)]: Zero permits to pour logged.`);
   } else {
     const ptpLines = ptps.slice(0, 25).map((p) => {
       const signs = Object.entries(p.clearanceSignatures || {})
         .map(([k, v]) => `${k}:${v?.signed ? "SIGNED" : "PENDING"}`)
         .join(", ");
-      return `• [${p.ptpNumber || p.id}] Status: ${p.status} | Element: ${p.elementName || "Structural Pour"} (${p.levelName || "Site"}) | Planned Date: ${p.plannedPourDate || "TBD"} ${p.plannedPourTime || ""} | Grade: ${p.concreteGrade || "C30/37"} | Volume: ${p.targetVolumeM3 || 0} m³ | Slump: ${p.slumpTargetMm || 0} mm | Signatures: [${signs || "None"}]`;
+      return `• [${p.ptpNumber || p.id}] Status: ${p.status} | Element: ${p.elementName || "Structural Member"} (${p.levelName || "Site"}) | Planned Date: ${p.plannedPourDate || "TBD"} ${p.plannedPourTime || ""} | Grade: ${p.concreteGrade || "C30/37"} | Volume: ${p.targetVolumeM3 || 0} m³ | Slump: ${p.slumpTargetMm || 0} mm | Clearances: [${signs || "None"}]`;
     });
     sections.push(`[PERMITS TO POUR (PTP) - ${ptps.length} Records]:\n${ptpLines.join("\n")}`);
   }
 
   // Section: Concrete Cube Testing
-  if (!canConcrete) {
-    sections.push(`[CONCRETE CUBE TESTING]: Access restricted for your role (${userRoleStr}).`);
-  } else if (cubes.length === 0) {
+  if (cubes.length === 0) {
     sections.push(`[CONCRETE CUBE TESTING]: Zero cube samples recorded.`);
   } else {
-    const cubeLines = cubes.slice(0, 25).map((c) => {
+    const cubeLines = cubes.slice(0, 35).map((c) => {
       const d7 = c.tests?.day7?.averageStrength ?? c.day7Results?.[0]?.averageStrength ?? "N/A";
       const d28 = c.tests?.day28?.averageStrength ?? c.day28Results?.[0]?.averageStrength ?? "N/A";
       const gradeStr = c.concreteGrade || c.targetStrength || `${c.target28DayStrengthNmm2 || ""}`;
-      return `• [${c.sampleId || c.sampleNumber || c.id}] Element: ${c.elementName || "Pour"} (${c.levelName || ""}) | Cast: ${c.castDate || "N/A"} | Grade: ${gradeStr} | Slump: ${c.slumpMm || "N/A"}mm | 7d: ${d7} MPa | 28d: ${d28} MPa | Status: ${c.status || c.overallStatus || "PENDING"} | PTP Ref: ${c.pourReference || "N/A"}`;
+      return `• [${c.sampleId || c.sampleNumber || c.id}] Element: ${c.elementName || c.structureElement || "Pour"} (${c.levelName || c.level || ""}) | Cast Date: ${c.castDate || (c as any).dateCast || "N/A"} | Grade: ${gradeStr} | Slump: ${c.slumpMm || "N/A"}mm | 7d: ${d7} MPa | 28d: ${d28} MPa | Status: ${c.status || c.overallStatus || "PENDING"} | Pour Ref: ${c.pourReference || "N/A"}`;
     });
     sections.push(`[CONCRETE CUBE SAMPLES & CRUSH TESTS - ${cubes.length} Records]:\n${cubeLines.join("\n")}`);
   }
 
-  // Section: Steel Rebar Tests & Bar Cutting Schedules
-  if (!canSteel) {
-    sections.push(`[STEEL & BAR CUTTING SCHEDULES]: Access restricted for your role (${userRoleStr}).`);
+  // Section: Structural BIM Elements
+  if (elements.length === 0) {
+    sections.push(`[STRUCTURAL BIM ELEMENTS]: Zero structural elements registered.`);
   } else {
-    const steelLines = steels.slice(0, 15).map((s) => {
-      const dia = s.barDiameterMm || s.diameter || "N/A";
-      const yieldStr = s.testResults?.tensileYield || "N/A";
-      const tenStr = s.testResults?.tensileUltimate || "N/A";
-      const res = s.testResults?.overallResult || "PASS";
-      return `• [${s.testNumber || s.id}] Bar Dia: Ø${dia}mm | Grade: ${s.steelGrade || "Grade 500B"} | Heat #: ${s.heatNumber || "N/A"} | Yield: ${yieldStr} MPa | Tensile: ${tenStr} MPa | Result: ${res}`;
+    const elementLines = elements.slice(0, 50).map((e) => {
+      const vol = e.calculatedVolume || e.volume || 0;
+      const ach = e.achievedVolume ?? 0;
+      const comp = (e as any).completionPercentage || (vol > 0 ? Math.round((ach / vol) * 100) : 0);
+      return `• [${e.elementName || e.name || e.id}] Type: ${e.elementType || (e as any).type} | Level: ${e.levelName || e.level || "Site"} | Grid: ${e.grid || (e as any).gridLocation || "N/A"} | Volume: ${vol} m³ (Achieved: ${ach} m³, ${comp}%) | Status: ${e.status}`;
     });
-    const bbsLines = schedules.slice(0, 10).map((b) => {
-      return `• [${b.scheduleNumber || b.id}] "${b.title}" | Level: ${b.levelName || "Site"} | Weight: ${b.summary?.totalCutWeightKg || 0} kg | Status: ${b.status || "DRAFT"}`;
-    });
-    sections.push(`[STEEL REBAR TESTS & BBS]:\nTests (${steels.length}):\n${steelLines.join("\n") || "No steel mill tests logged."}\nBar Cutting Schedules (${schedules.length}):\n${bbsLines.join("\n") || "No BBS logged."}`);
+    sections.push(`[STRUCTURAL BIM ELEMENTS - Total Registered: ${elements.length}]:\n${elementLines.join("\n")}`);
   }
 
   // Section: Inspections & Hold Points (WIR)
-  if (!canInspections) {
-    sections.push(`[INSPECTIONS & HOLD POINTS]: Access restricted for your role (${userRoleStr}).`);
-  } else if (inspections.length === 0) {
+  if (inspections.length === 0) {
     sections.push(`[INSPECTIONS & HOLD POINTS]: Zero inspection requests logged.`);
   } else {
     const inspLines = inspections.slice(0, 25).map((i) => {
-      return `• [${i.inspectionNumber || i.id}] Type: ${i.templateName || i.stage || "Inspection"} | Status: ${i.status} | Element/Location: ${i.elementName || i.zone || i.levelName || "Site"} | Scheduled: ${i.scheduledDate || "N/A"} ${i.scheduledTime || ""} | Pass Score: ${i.passScore || i.qualityScore || 0}% | Inspector: ${i.inspector?.name || i.inspectorName || "Assigned"}`;
+      return `• [${i.inspectionNumber || i.id}] Type: ${i.templateName || (i as any).title || "Inspection"} | Status: ${i.status} | Location: ${i.elementName || (i as any).level || "Site"} | Scheduled: ${i.scheduledDate || "N/A"} ${i.scheduledTime || ""} | Inspector: ${i.inspector?.name || i.inspectorName || "Assigned"}`;
     });
     sections.push(`[INSPECTIONS & HOLD POINTS - ${inspections.length} Records]:\n${inspLines.join("\n")}`);
   }
 
   // Section: Daily Site Logs
-  if (!canDailyLogs) {
-    sections.push(`[DAILY SITE LOGS]: Access restricted for your role (${userRoleStr}).`);
-  } else if (logs.length === 0) {
+  if (logs.length === 0) {
     sections.push(`[DAILY SITE LOGS]: Zero daily site logs recorded.`);
   } else {
     const logLines = logs.slice(0, 10).map((l) => {
@@ -241,25 +332,21 @@ DATABASE ENTITY COUNTS FOR ACTIVE PROJECT:
       const delaySummary = (l.delays || []).map((d) => `${d.category} (${d.impactHours}h): ${d.description}`).join("; ");
       return `• [${l.logNumber || l.id}] Date: ${logDate} | Weather: ${weather} | Manpower: ${totalWorkers} men | Status: ${l.status || "DRAFT"} | Activities: "${actSummary || "Scheduled site works"}" | Delays: "${delaySummary || "None"}"`;
     });
-    sections.push(`[DAILY SITE LOGS - ${logs.length} Records (Showing Recent)]:\n${logLines.join("\n")}`);
+    sections.push(`[DAILY SITE LOGS - ${logs.length} Records]:\n${logLines.join("\n")}`);
   }
 
   // Section: Site Instructions (SI)
-  if (!canSI) {
-    sections.push(`[SITE INSTRUCTIONS (SI)]: Access restricted for your role (${userRoleStr}).`);
-  } else if (instructions.length === 0) {
+  if (instructions.length === 0) {
     sections.push(`[SITE INSTRUCTIONS (SI)]: Zero site instructions issued.`);
   } else {
     const siLines = instructions.slice(0, 15).map((s) => {
-      return `• [${s.instructionNumber || s.id}] Status: ${s.status} | Title: "${s.title || s.subject}" | Severity: ${s.severity || "MODERATE"} | Contractor: ${s.contractorName || s.recipientName || "Main Contractor"} | Deadline: ${s.complianceDeadline || "Immediate"} | Directive: "${(s.instructionText || s.issueSummary || "").slice(0, 120)}"`;
+      return `• [${s.instructionNumber || s.id}] Status: ${s.status} | Title: "${s.title || s.subject}" | Severity: ${s.severity || "MODERATE"} | Contractor: ${s.contractorName || s.recipientName || "Main Contractor"} | Deadline: ${s.complianceDeadline || (s as any).dueDate || "Immediate"} | Directive: "${(s.instructionText || s.issueSummary || "").slice(0, 120)}"`;
     });
     sections.push(`[SITE INSTRUCTIONS (SI) - ${instructions.length} Records]:\n${siLines.join("\n")}`);
   }
 
   // Section: Site Comments & Snag Observations
-  if (!canComments) {
-    sections.push(`[SITE COMMENTS / OBSERVATIONS]: Access restricted for your role (${userRoleStr}).`);
-  } else if (comments.length === 0) {
+  if (comments.length === 0) {
     sections.push(`[SITE COMMENTS / OBSERVATIONS]: Zero site comments recorded.`);
   } else {
     const commentLines = comments.slice(0, 15).map((c) => {
@@ -270,32 +357,30 @@ DATABASE ENTITY COUNTS FOR ACTIVE PROJECT:
   }
 
   // Section: Engineering Submittals (RFI, MAR, MIR)
-  if (!canSubmittals) {
-    sections.push(`[ENGINEERING SUBMITTALS (RFI, MAR, MIR)]: Access restricted for your role (${userRoleStr}).`);
-  } else {
-    const rfiLines = rfis.slice(0, 10).map((r) => `• RFI [${r.rfiNumber || r.id}] Status: ${r.status} | Title: "${r.title}" | Discipline: ${r.discipline || "General"}`);
-    const marLines = mars.slice(0, 10).map((m) => `• MAR [${m.marNumber || m.id}] Status: ${m.status} | Title: "${m.title}" | Vendor: ${m.supplierVendor || "N/A"}`);
-    const mirLines = mirs.slice(0, 10).map((i) => `• MIR [${i.mirNumber || i.id}] Status: ${i.status} | Title: "${i.title}" | Delivery Ref: ${i.deliveryNumber || "N/A"}`);
-    sections.push(`[SUBMITTALS & MATERIAL APPROVALS]:
+  const rfiLines = rfis.slice(0, 10).map((r) => `• RFI [${r.rfiNumber || r.id}] Status: ${r.status} | Title: "${r.title}" | Discipline: ${r.discipline || "General"}`);
+  const marLines = mars.slice(0, 10).map((m) => `• MAR [${m.marNumber || m.id}] Status: ${m.status} | Title: "${m.title}" | Vendor: ${m.supplierVendor || "N/A"}`);
+  const mirLines = mirs.slice(0, 10).map((i) => `• MIR [${i.mirNumber || i.id}] Status: ${i.status} | Title: "${i.title}" | Delivery Ref: ${i.deliveryNumber || "N/A"}`);
+  sections.push(`[SUBMITTALS & MATERIAL APPROVALS]:
 RFIs (${rfis.length}):\n${rfiLines.join("\n") || "No RFIs logged."}
 MARs (${mars.length}):\n${marLines.join("\n") || "No MARs logged."}
 MIRs (${mirs.length}):\n${mirLines.join("\n") || "No MIRs logged."}`);
-  }
 
-  // Section: Structural BIM Elements & Spatial Hierarchy
-  if (!canElements) {
-    sections.push(`[STRUCTURAL BIM ELEMENTS]: Access restricted by RBAC (Strict QA/QC Authority required).`);
-  } else if (elements.length === 0) {
-    sections.push(`[STRUCTURAL BIM ELEMENTS]: Zero structural elements registered in project BIM database.`);
-  } else {
-    const elementLines = elements.slice(0, 30).map((e) => {
-      const vol = e.calculatedVolume || e.volume || 0;
-      return `• [${e.elementName || e.name || e.id}] Type: ${e.elementType} | Level: ${e.levelName || "Site"} | Grid: ${e.grid || e.gridAxis || "N/A"} | Volume: ${vol} m³ | Status: ${e.status}`;
-    });
-    sections.push(`[STRUCTURAL BIM ELEMENTS - Total Registered: ${elements.length}]:\n${elementLines.join("\n")}`);
-  }
+  // Section: Steel Rebar Tests & Bar Cutting Schedules (BBS)
+  const steelLines = steels.slice(0, 15).map((s) => {
+    const dia = s.barDiameterMm || s.diameter || "N/A";
+    const yieldStr = s.testResults?.tensileYield || "N/A";
+    const tenStr = s.testResults?.tensileUltimate || "N/A";
+    const res = s.testResults?.overallResult || "PASS";
+    return `• [${s.testNumber || s.id}] Bar Dia: Ø${dia}mm | Grade: ${s.steelGrade || "Grade 500B"} | Heat #: ${s.heatNumber || "N/A"} | Yield: ${yieldStr} MPa | Tensile: ${tenStr} MPa | Result: ${res}`;
+  });
+  const bbsLines = schedules.slice(0, 10).map((b) => {
+    return `• [${b.scheduleNumber || b.id}] "${b.title}" | Level: ${b.levelName || "Site"} | Weight: ${b.summary?.totalCutWeightKg || 0} kg | Status: ${b.status || "DRAFT"}`;
+  });
+  sections.push(`[STEEL REBAR TESTS & BBS]:
+Tests (${steels.length}):\n${steelLines.join("\n") || "No steel mill tests logged."}
+Bar Cutting Schedules (${schedules.length}):\n${bbsLines.join("\n") || "No BBS logged."}`);
 
-  // Section: Floor Levels, Gridlines & Work Packages
+  // Section: Spatial Hierarchy (Levels, Gridlines, Work Packages)
   const levelNames = levels.map((l) => `${l.name} (Elev: ${l.elevation}m)`).join(", ") || "None defined";
   const gridlineNames = gridlines.map((g) => `${g.label} (${g.axis})`).join(", ") || "None defined";
   const packageNames = workPackages.map((w) => `${w.name} (${w.code || "WP"})`).join(", ") || "None defined";
@@ -304,32 +389,20 @@ Levels: ${levelNames}
 Gridlines: ${gridlineNames}
 Work Packages: ${packageNames}`);
 
-  // Section: Punch List Items
-  if (!canPunch) {
-    sections.push(`[PUNCH LIST ITEMS]: Access restricted for your role (${userRoleStr}).`);
-  } else if (punches.length === 0) {
-    sections.push(`[PUNCH LIST ITEMS]: Zero punch list snag items recorded.`);
-  } else {
-    const punchLines = punches.slice(0, 15).map((p) => {
-      return `• [${p.punchNumber || p.id}] Stage: ${p.stageStatus} | Severity: ${p.severity} | Location: ${p.building || ""} - ${p.levelName || ""} - ${p.roomName || ""} | Snag: "${p.title || p.description.slice(0, 80)}"`;
+  // Section: Construction Planner Events & Milestones
+  if (plannerEvents.length > 0) {
+    const eventLines = plannerEvents.slice(0, 15).map((ev) => {
+      return `• [${ev.title || "Milestone"}] Date: ${(ev as any).start || (ev as any).date || "TBD"} | Category: ${(ev as any).category || "General"} | Status: ${ev.status || "SCHEDULED"}`;
     });
-    sections.push(`[PUNCH LIST & HANDOVER SNAGS - ${punches.length} Items]:\n${punchLines.join("\n")}`);
+    sections.push(`[CONSTRUCTION PLANNER & MILESTONES - ${plannerEvents.length} Events]:\n${eventLines.join("\n")}`);
   }
 
-  // Section: Method Statements & ITPs
-  if (canMethodStatements || canITP) {
-    const methodSummary = methods.slice(0, 10).map((m) => `• [${m.msNumber || m.id}] "${m.title}" (${m.discipline}) - Status: ${m.status}`).join("\n");
-    const itpSummary = itps.slice(0, 10).map((i) => `• [${i.itpNumber || i.id}] "${i.title}" (${i.discipline}) - Status: ${i.status}`).join("\n");
-    sections.push(`[APPROVED METHOD STATEMENTS & ITP PLANS]:
+  // Section: Method Statements & ITP Quality Plans
+  const methodSummary = methods.slice(0, 10).map((m) => `• [${m.msNumber || m.id}] "${m.title}" (${m.discipline}) - Status: ${m.status}`).join("\n");
+  const itpSummary = itps.slice(0, 10).map((i) => `• [${i.itpNumber || i.id}] "${i.title}" (${i.discipline}) - Status: ${i.status}`).join("\n");
+  sections.push(`[APPROVED METHOD STATEMENTS & ITP PLANS]:
 Method Statements (${methods.length}):\n${methodSummary || "None registered."}
 ITP Plans (${itps.length}):\n${itpSummary || "None registered."}`);
-  }
-
-  // Section: Weekly Quality Reports
-  if (canWeekly && weekly.length > 0) {
-    const weeklySummary = weekly.slice(0, 5).map((w) => `• [${w.reportNumber || w.id}] Week Starting: ${w.weekStarting || "N/A"} | Status: ${w.status || "FINAL"} | Summary: "${(w.executiveSummary || "").slice(0, 120)}"`).join("\n");
-    sections.push(`[WEEKLY QUALITY REPORTS - ${weekly.length} Records]:\n${weeklySummary}`);
-  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // Section: RELATIONAL TRACEABILITY & CROSS-ENTITY CORRELATIONS
@@ -338,7 +411,7 @@ ITP Plans (${itps.length}):\n${itpSummary || "None registered."}`);
   const relationalSections: string[] = [];
 
   // 1. Permit to Pour (PTP) -> Concrete Cube Samples Linkage
-  if (canPTP && ptps.length > 0) {
+  if (ptps.length > 0) {
     const ptpLinks = ptps.slice(0, 15).map((p) => {
       const pRef = (p.ptpNumber || p.id).toLowerCase();
       const pEl = (p.elementName || "").toLowerCase();
@@ -361,7 +434,7 @@ ITP Plans (${itps.length}):\n${itpSummary || "None registered."}`);
   }
 
   // 2. Non-Conformance Reports (NCR) -> Escalated Site Instructions (SI) & Structural Assets
-  if (canNCR && ncrs.length > 0) {
+  if (ncrs.length > 0) {
     const ncrLinks = ncrs.slice(0, 15).map((n) => {
       const ncrId = n.id;
       const ncrNo = (n.ncrNumber || "").toLowerCase();
@@ -381,9 +454,9 @@ ITP Plans (${itps.length}):\n${itpSummary || "None registered."}`);
     relationalSections.push(`[RELATIONAL LINKAGE: NCR -> SITE INSTRUCTIONS & AFFECTED ASSETS]:\n${ncrLinks.join("\n")}`);
   }
 
-  // 3. Structural Elements -> Full QA/QC Lifecycle Dossier (PTPs + Cubes + NCRs)
-  if (canElements && elements.length > 0) {
-    const memberDossiers = elements.slice(0, 15).map((e) => {
+  // 3. Structural Elements -> Full QA/QC Lifecycle Dossier (PTPs + Cubes + NCRs + Deliveries)
+  if (elements.length > 0) {
+    const memberDossiers = elements.slice(0, 20).map((e) => {
       const eName = (e.elementName || e.name || "").toLowerCase();
       const relPTPs = ptps.filter((p) => p.elementName && p.elementName.toLowerCase() === eName);
       const relCubes = cubes.filter((c) => c.elementName && c.elementName.toLowerCase() === eName);
@@ -398,33 +471,13 @@ ITP Plans (${itps.length}):\n${itpSummary || "None registered."}`);
       const ncrStr = relNCRs.map((n) => `${n.ncrNumber} [${n.severity}: ${n.status}]`).join(", ") || "CLEAN (Zero non-conformances)";
       const inspStr = relInsps.map((i) => `${i.inspectionNumber} (${i.status})`).join(", ") || "None scheduled";
 
-      return `• Structural Member "${e.elementName || e.name || e.id}" [Type: ${e.elementType} | Level: ${e.levelName || "Site"} | Grid: ${e.grid || "N/A"} | Vol: ${e.calculatedVolume || e.volume || 0} m³ | Status: ${e.status}]
+      return `• Structural Member "${e.elementName || e.name || e.id}" [Type: ${e.elementType || (e as any).type} | Level: ${e.levelName || e.level || "Site"} | Grid: ${e.grid || "N/A"} | Vol: ${e.calculatedVolume || e.volume || 0} m³ | Status: ${e.status}]
   ├── Pre-Pour Clearance: ${ptpStr}
   ├── Work Inspections (WIR): ${inspStr}
   ├── Concrete Compressive Tests: ${cubeStr}
   └── Defect Ledger (NCRs): ${ncrStr}`;
     });
     relationalSections.push(`[RELATIONAL DOSSIER: STRUCTURAL ASSETS LIFECYCLE]:\n${memberDossiers.join("\n")}`);
-  }
-
-  // 4. Material Approval (MAR) -> Material Inspection (MIR) Linkage
-  if (canSubmittals && mars.length > 0) {
-    const marLinks = mars.slice(0, 10).map((m) => {
-      const mId = m.id;
-      const mNo = (m.marNumber || "").toLowerCase();
-      const linkedMIRs = mirs.filter((i) => {
-        const iMarId = i.marId;
-        const iMarNo = (i.marNumber || "").toLowerCase();
-        return (iMarId && iMarId === mId) || (iMarNo && mNo && iMarNo === mNo);
-      });
-
-      const mirInfo = linkedMIRs.length > 0
-        ? linkedMIRs.map((r) => `${r.mirNumber || r.id} (Delivery Note: ${r.deliveryNumber || "N/A"}, Status: ${r.status})`).join(", ")
-        : "No delivery inspections logged against this MAR yet";
-
-      return `• MAR [${m.marNumber || m.id}] "${m.title}" (Vendor: ${m.supplierVendor}, Status: ${m.status})\n  └─ Receiving Inspections (MIR): ${mirInfo}`;
-    });
-    relationalSections.push(`[RELATIONAL LINKAGE: MATERIAL SUBMITTALS (MAR) -> MATERIAL INSPECTIONS (MIR)]:\n${marLinks.join("\n")}`);
   }
 
   if (relationalSections.length > 0) {

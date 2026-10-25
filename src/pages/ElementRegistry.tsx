@@ -142,10 +142,10 @@ export const ElementRegistry: React.FC = () => {
   const [bulkLevelId, setBulkLevelId] = useState("");
 
   // Table Sorting (Default: arranged by name ascending, e.g. P01 before P02)
-  const [sortField, setSortField] = useState<"name" | "type" | "level" | "elevation" | "grid" | "volume" | "status">("name");
+  const [sortField, setSortField] = useState<"name" | "type" | "level" | "elevation" | "grid" | "volume" | "status" | "inclination">("name");
   const [sortAsc, setSortAsc] = useState<boolean>(true);
 
-  const handleSort = (field: "name" | "type" | "level" | "elevation" | "grid" | "volume" | "status") => {
+  const handleSort = (field: "name" | "type" | "level" | "elevation" | "grid" | "volume" | "status" | "inclination") => {
     if (sortField === field) {
       setSortAsc((prev) => !prev);
     } else {
@@ -489,14 +489,20 @@ export const ElementRegistry: React.FC = () => {
         if (filterStatus !== "ALL" && el.status !== filterStatus) return false;
 
         if (filterType !== "ALL") {
-          const normFilter = filterType.toLowerCase().replace(/_/g, " ").replace(/s$/, "").trim();
-          const normEl = elType.toLowerCase().replace(/_/g, " ").replace(/s$/, "").trim();
-          if (
-            normEl !== normFilter &&
-            !normEl.includes(normFilter) &&
-            !normFilter.includes(normEl)
-          ) {
-            return false;
+          if (filterType === "INCLINED_COLUMN") {
+            if (!el.isInclined && el.verticality !== "inclined") {
+              return false;
+            }
+          } else {
+            const normFilter = filterType.toLowerCase().replace(/_/g, " ").replace(/s$/, "").trim();
+            const normEl = elType.toLowerCase().replace(/_/g, " ").replace(/s$/, "").trim();
+            if (
+              normEl !== normFilter &&
+              !normEl.includes(normFilter) &&
+              !normFilter.includes(normEl)
+            ) {
+              return false;
+            }
           }
         }
 
@@ -552,6 +558,16 @@ export const ElementRegistry: React.FC = () => {
           cmp = vA - vB;
         } else if (sortField === "status") {
           cmp = (a.status || "").localeCompare(b.status || "");
+        } else if (sortField === "inclination") {
+          const isIncA = a.isInclined || a.verticality === "inclined" ? 1 : 0;
+          const isIncB = b.isInclined || b.verticality === "inclined" ? 1 : 0;
+          if (isIncA !== isIncB) {
+            cmp = isIncA - isIncB;
+          } else {
+            const angA = Number(a.inclinationAngle) || Number(a.horizontalOffset) || 0;
+            const angB = Number(b.inclinationAngle) || Number(b.horizontalOffset) || 0;
+            cmp = angA - angB;
+          }
         }
 
         if (cmp !== 0) {
@@ -1737,9 +1753,16 @@ export const ElementRegistry: React.FC = () => {
                             </button>
                           </td>
                           <td className="py-3 px-4">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                              {el.elementType}
-                            </span>
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                {el.elementType}
+                              </span>
+                              {(el.isInclined || el.verticality === "inclined") && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 whitespace-nowrap">
+                                  Slanted ⤢ {el.inclinationAngle || 10}° ({el.inclinationDirection || "EAST"})
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-3 px-4 text-slate-700 dark:text-slate-300">
                             {levelNameMap.get(el.levelId || "") ||

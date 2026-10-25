@@ -171,6 +171,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   const [levelId, setLevelId] = useState(activeProject?.currentLevelId || '');
   const [workPackageId, setWorkPackageId] = useState('');
   const [gridAxis, setGridAxis] = useState('B/2');
+  const [baseOffsetX, setBaseOffsetX] = useState<number>(0);
+  const [baseOffsetY, setBaseOffsetY] = useState<number>(0);
   const [concreteGrade, setConcreteGrade] = useState('C40/50');
   const [rebarSpec, setRebarSpec] = useState('');
   const [plannedCastingDate, setPlannedCastingDate] = useState('');
@@ -194,6 +196,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   const [inclinedCalcMode, setInclinedCalcMode] = useState<'offset' | 'angle'>('offset');
   const [horizontalOffset, setHorizontalOffset] = useState<number>(0.4);
   const [inclinationAngle, setInclinationAngle] = useState<number>(10);
+  const [inclinationDirection, setInclinationDirection] = useState<'EAST' | 'WEST' | 'NORTH' | 'SOUTH'>('EAST');
 
   // Slab specific (Curved & Geometric Profile)
   const [slabShape, setSlabShape] = useState<
@@ -313,6 +316,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setLevelId(editingElement.levelId || '');
       setWorkPackageId(editingElement.workPackageId || '');
       setGridAxis(editingElement.grid || editingElement.gridAxis || '');
+      setBaseOffsetX(editingElement.baseOffsetX ?? 0);
+      setBaseOffsetY(editingElement.baseOffsetY ?? 0);
       setConcreteGrade(editingElement.concreteGrade || 'C40/50');
       setRebarSpec(editingElement.rebarSpec || '');
       setPlannedCastingDate(
@@ -357,6 +362,13 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setInclinedCalcMode(editingElement.inclinedCalcMode || 'offset');
       setHorizontalOffset(editingElement.horizontalOffset ?? 0.4);
       setInclinationAngle(editingElement.inclinationAngle ?? 10);
+      setInclinationDirection(
+        (editingElement.inclinationDirection as any) === 'WEST' ||
+        (editingElement.inclinationDirection as any) === 'NORTH' ||
+        (editingElement.inclinationDirection as any) === 'SOUTH'
+          ? (editingElement.inclinationDirection as any)
+          : 'EAST'
+      );
 
       // Slab Profile & Curved Parameters
       setSlabShape(
@@ -459,6 +471,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
         setWorkPackageId(packages[0].id);
       }
       setGridAxis('A/1');
+      setBaseOffsetX(0);
+      setBaseOffsetY(0);
       setConcreteGrade('C40/50');
       setRebarSpec('');
       setPlannedCastingDate('');
@@ -479,6 +493,10 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setCantileverDirection('TOP');
       setCurvedInputMode('radius_rise');
       setIsInclined(false);
+      setInclinedCalcMode('offset');
+      setHorizontalOffset(0.4);
+      setInclinationAngle(10);
+      setInclinationDirection('EAST');
       setLength(0.6);
       setWidth(0.6);
       const initialStoreyHeight = deriveStoreyHeightForLevel(initialLvlId, levels);
@@ -537,16 +555,35 @@ export const ElementModal: React.FC<ElementModalProps> = ({
     }
   }, [gridAxis, gridlines, elementType]);
 
-  // Slanted column calculations
+  // Slanted column calculations & mutual derivation
+  const derivedSlantValues = useMemo(() => {
+    const H = Math.max(0.2, Number(height) || 3.2);
+    let off = Number(horizontalOffset) || 0;
+    let ang = Number(inclinationAngle) || 0;
+
+    if (inclinedCalcMode === 'offset') {
+      ang = off > 0 ? parseFloat(((Math.atan(off / H) * 180) / Math.PI).toFixed(1)) : 0;
+    } else {
+      const rad = (Math.min(85, Math.max(0, ang)) * Math.PI) / 180;
+      off = parseFloat((H * Math.tan(rad)).toFixed(3));
+    }
+
+    const slantL = parseFloat(Math.sqrt(H * H + off * off).toFixed(3));
+    const groundAngle = parseFloat(Math.max(5, 90 - ang).toFixed(1));
+
+    return {
+      H,
+      offset: off,
+      angle: ang,
+      slantLength: slantL,
+      groundAngle,
+    };
+  }, [height, horizontalOffset, inclinationAngle, inclinedCalcMode]);
+
   const effectiveColumnHeight = useMemo(() => {
     if (!isInclined) return height;
-    if (inclinedCalcMode === 'offset') {
-      return Math.sqrt(height * height + horizontalOffset * horizontalOffset);
-    } else {
-      const rad = (inclinationAngle * Math.PI) / 180;
-      return rad < Math.PI / 2 ? height / Math.cos(rad) : height;
-    }
-  }, [isInclined, inclinedCalcMode, height, horizontalOffset, inclinationAngle]);
+    return derivedSlantValues.slantLength;
+  }, [isInclined, height, derivedSlantValues.slantLength]);
 
   // Elevation Calculations
   const calculatedElevations = useMemo(() => {
@@ -944,6 +981,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       levelName: selectedLevel?.name || '',
       grid: gridAxis.trim(),
       gridAxis: gridAxis.trim(),
+      baseOffsetX: baseOffsetX !== 0 ? Number(baseOffsetX) : undefined,
+      baseOffsetY: baseOffsetY !== 0 ? Number(baseOffsetY) : undefined,
       workPackageId: workPackageId || undefined,
       workPackageName: selectedPkg?.name || undefined,
       concreteGrade,
@@ -986,6 +1025,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       inclinedCalcMode: isInclined ? inclinedCalcMode : undefined,
       horizontalOffset: isInclined ? Number(horizontalOffset) : undefined,
       inclinationAngle: isInclined ? Number(inclinationAngle) : undefined,
+      inclinationDirection: isInclined ? inclinationDirection : undefined,
+      verticalHeight: elementType === 'COLUMN' ? Number(height) : undefined,
 
       // Slab & Curved attributes
       slabShape: elementType === 'SLAB' ? slabShape : undefined,
@@ -1324,6 +1365,42 @@ export const ElementModal: React.FC<ElementModalProps> = ({
               {gridHint && (
                 <p className="text-[11px] text-brand-600 dark:text-brand-400/90 mt-1 font-mono">{gridHint}</p>
               )}
+
+              {/* Optional Base Offset from Grid Intersection (e.g. starts 1m away from Grid A') */}
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800/60 mt-2">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Base Shift X from Grid (m)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g. +1.0m (East from A')"
+                    value={baseOffsetX || ''}
+                    onChange={(e) => setBaseOffsetX(Number(e.target.value) || 0)}
+                    className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:border-brand-500"
+                  />
+                  <span className="text-[9.5px] text-slate-400 dark:text-slate-500">
+                    {baseOffsetX > 0 ? `+${baseOffsetX}m East` : baseOffsetX < 0 ? `${baseOffsetX}m West` : 'On grid intersection'}
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Base Shift Y from Grid (m)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g. 0.0m"
+                    value={baseOffsetY || ''}
+                    onChange={(e) => setBaseOffsetY(Number(e.target.value) || 0)}
+                    className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:border-brand-500"
+                  />
+                  <span className="text-[9.5px] text-slate-400 dark:text-slate-500">
+                    {baseOffsetY > 0 ? `+${baseOffsetY}m South` : baseOffsetY < 0 ? `${baseOffsetY}m North` : 'On grid line'}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1766,19 +1843,22 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                 )}
 
                 {isInclined && (
-                  <div className="p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-amber-300 dark:border-amber-500/30 space-y-3 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
-                        Slanted Column Derivation
-                      </span>
-                      <div className="flex items-center gap-2">
+                  <div className="p-4 bg-white dark:bg-slate-900/90 rounded-2xl border border-amber-300/80 dark:border-amber-500/40 space-y-4 shadow-md">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 dark:border-amber-950/60 pb-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                        <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
+                          Slanted / Inclined Column Geometry
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800">
                         <button
                           type="button"
                           onClick={() => setInclinedCalcMode('offset')}
-                          className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
                             inclinedCalcMode === 'offset'
                               ? 'bg-amber-500 text-slate-950 shadow-sm'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
                           Offset Mode (ΔX)
@@ -1786,10 +1866,10 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                         <button
                           type="button"
                           onClick={() => setInclinedCalcMode('angle')}
-                          className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
                             inclinedCalcMode === 'angle'
                               ? 'bg-amber-500 text-slate-950 shadow-sm'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
                           Angle Mode (θ°)
@@ -1797,34 +1877,177 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {inclinedCalcMode === 'offset' ? (
-                        <SmartField
-                          label="Horizontal Offset (ΔX)"
-                          unit="m"
-                          type="number"
-                          step="0.01"
-                          value={horizontalOffset}
-                          onChange={(v) => setHorizontalOffset(Number(v))}
-                        />
-                      ) : (
-                        <SmartField
-                          label="Inclination Angle from Vertical (θ)"
-                          unit="deg"
-                          type="number"
-                          step="1"
-                          value={inclinationAngle}
-                          onChange={(v) => setInclinationAngle(Number(v))}
-                        />
-                      )}
-                      <div className="p-2.5 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700/60 flex flex-col justify-center">
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Derived Slant Length
+                    {/* Lean Direction Selector */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          Inclination / Lean Direction
                         </span>
-                        <span className="text-sm font-mono font-bold text-amber-600 dark:text-amber-400">
-                          {effectiveColumnHeight.toFixed(3)} m
+                        <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 font-semibold">
+                          Leaning towards {inclinationDirection}
                         </span>
                       </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {[
+                          { id: 'EAST', label: 'East (+X / Right)', symbol: '→' },
+                          { id: 'WEST', label: 'West (-X / Left)', symbol: '←' },
+                          { id: 'NORTH', label: 'North (+Y / Up)', symbol: '↑' },
+                          { id: 'SOUTH', label: 'South (-Y / Down)', symbol: '↓' },
+                        ].map((d) => (
+                          <button
+                            key={d.id}
+                            type="button"
+                            onClick={() => setInclinationDirection(d.id as any)}
+                            className={`px-2 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center justify-center gap-1.5 ${
+                              inclinationDirection === d.id
+                                ? 'bg-amber-500/15 border-amber-500 text-amber-700 dark:text-amber-300 shadow-sm'
+                                : 'bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            <span className="text-xs font-black">{d.symbol}</span>
+                            <span>{d.id}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {inclinedCalcMode === 'offset' ? (
+                        <div className="space-y-1">
+                          <SmartField
+                            label="Horizontal Offset (ΔX)"
+                            unit="m"
+                            type="number"
+                            step="0.01"
+                            value={horizontalOffset}
+                            onChange={(v) => {
+                              const val = Number(v) || 0;
+                              setHorizontalOffset(val);
+                              if (val > 0 && height > 0) {
+                                setInclinationAngle(parseFloat(((Math.atan(val / height) * 180) / Math.PI).toFixed(1)));
+                              }
+                            }}
+                          />
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 italic">
+                            Auto-derived plumb angle: <strong className="text-amber-500 font-mono">{derivedSlantValues.angle}°</strong>
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <SmartField
+                            label="Inclination Angle from Vertical (θ)"
+                            unit="deg"
+                            type="number"
+                            step="0.5"
+                            value={inclinationAngle}
+                            onChange={(v) => {
+                              const val = Number(v) || 0;
+                              setInclinationAngle(val);
+                              if (val > 0 && height > 0) {
+                                const rad = (Math.min(85, val) * Math.PI) / 180;
+                                setHorizontalOffset(parseFloat((height * Math.tan(rad)).toFixed(3)));
+                              }
+                            }}
+                          />
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 italic">
+                            Auto-derived shift ΔX: <strong className="text-amber-500 font-mono">{derivedSlantValues.offset.toFixed(3)} m</strong>
+                          </p>
+                        </div>
+                      )}
+
+                      {/* True Slanted Length & Elevation Readout */}
+                      <div className="p-3 bg-gradient-to-br from-amber-50/60 to-orange-50/30 dark:from-amber-950/20 dark:to-orange-950/10 rounded-xl border border-amber-200/80 dark:border-amber-800/40 flex flex-col justify-between">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                            True Slanted Length (L)
+                          </span>
+                          <span className="text-sm font-mono font-black text-amber-600 dark:text-amber-400">
+                            {effectiveColumnHeight.toFixed(3)} m
+                          </span>
+                        </div>
+                        <div className="mt-2 pt-2 border-t border-amber-200/50 dark:border-amber-900/40 grid grid-cols-2 gap-1 text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                          <div>Storey H: <span className="font-bold text-slate-700 dark:text-slate-300">{derivedSlantValues.H.toFixed(3)}m</span></div>
+                          <div>Ground θ: <span className="font-bold text-slate-700 dark:text-slate-300">{derivedSlantValues.groundAngle}°</span></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Visual 2D Elevation Slant Schematic */}
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center">
+                      <svg width="240" height="95" viewBox="0 0 240 95" className="overflow-visible">
+                        {/* Floor and Ceiling slab lines */}
+                        <line x1="15" y1="18" x2="225" y2="18" stroke="#334155" strokeWidth="2" strokeDasharray="3 3" />
+                        <line x1="15" y1="80" x2="225" y2="80" stroke="#475569" strokeWidth="2" />
+                        <text x="20" y="14" fill="#64748b" fontSize="8" fontFamily="monospace">Upper Level (Top Datum)</text>
+                        <text x="20" y="90" fill="#64748b" fontSize="8" fontFamily="monospace">Current Floor (Base Datum)</text>
+
+                        {/* Plumb vertical line */}
+                        <line x1="80" y1="18" x2="80" y2="80" stroke="#64748b" strokeWidth="1" strokeDasharray="3 3" />
+
+                        {/* Slanted Column body */}
+                        {(() => {
+                          const isWest = inclinationDirection === 'WEST';
+                          const topX = isWest ? 45 : 125;
+                          return (
+                            <>
+                              {/* Slanted centerline */}
+                              <line
+                                x1="80"
+                                y1="80"
+                                x2={topX}
+                                y2="18"
+                                stroke="#f59e0b"
+                                strokeWidth="8"
+                                strokeLinecap="round"
+                                opacity="0.8"
+                              />
+                              <line
+                                x1="80"
+                                y1="80"
+                                x2={topX}
+                                y2="18"
+                                stroke="#fbbf24"
+                                strokeWidth="2"
+                              />
+                              {/* Offset delta dimension */}
+                              <line x1="80" y1="14" x2={topX} y2="14" stroke="#f59e0b" strokeWidth="1" />
+                              <text
+                                x={(80 + topX) / 2}
+                                y="11"
+                                fill="#f59e0b"
+                                fontSize="8.5"
+                                fontWeight="bold"
+                                textAnchor="middle"
+                                fontFamily="monospace"
+                              >
+                                ΔX = {derivedSlantValues.offset.toFixed(2)}m
+                              </text>
+                              {/* Slant Length label */}
+                              <text
+                                x={(80 + topX) / 2 + (isWest ? -18 : 18)}
+                                y="52"
+                                fill="#fbbf24"
+                                fontSize="9"
+                                fontWeight="bold"
+                                textAnchor="middle"
+                                fontFamily="monospace"
+                              >
+                                L = {derivedSlantValues.slantLength.toFixed(3)}m
+                              </text>
+                              {/* Plumb Angle arc text */}
+                              <text
+                                x="88"
+                                y="72"
+                                fill="#94a3b8"
+                                fontSize="8"
+                                fontFamily="monospace"
+                              >
+                                θ = {derivedSlantValues.angle}°
+                              </text>
+                            </>
+                          );
+                        })()}
+                      </svg>
                     </div>
                   </div>
                 )}

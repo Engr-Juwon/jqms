@@ -2,39 +2,51 @@ import React, { useEffect, Suspense } from "react";
 import { Outlet, useParams, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
-import { OfflineSyncIndicator } from "./OfflineSyncIndicator";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { FloatingPlannerReminder } from "@/components/planner/FloatingPlannerReminder";
 import { Footer } from "./Footer";
 import { useProjectStore } from "@/stores/useProjectStore";
+import { useAuthStore } from "@/stores/useAuthStore";
 import { useNavigationStore } from "@/stores/useNavigationStore";
 import { PageLoadingFallback } from "./PageLoadingFallback";
 import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
 import { useOnboardingStore } from "@/stores/useOnboardingStore";
-
 import { AICopilotDrawer } from "@/components/ai/AICopilotDrawer";
 
 export const ProjectLayout: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const location = useLocation();
   const isChatPage = location.pathname.includes("/chat");
-  const { selectProjectById, loadProjects } = useProjectStore();
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const { selectProjectById, loadProjects, hasHydrated } = useProjectStore();
   const isNavigating = useNavigationStore((s) => s.isNavigating);
   const checkAutoStart = useOnboardingStore((s) => s.checkAutoStart);
 
   useEffect(() => {
-    loadProjects();
-    if (projectId) {
-      selectProjectById(projectId);
+    let cancelled = false;
+    async function syncWorkspace() {
+      if (!currentUser?.companyId) return;
+      if (!hasHydrated) {
+        await loadProjects(currentUser.companyId, currentUser, projectId);
+      } else if (projectId) {
+        selectProjectById(projectId);
+      }
+      if (!cancelled && projectId) {
+        selectProjectById(projectId);
+      }
     }
-  }, [projectId]);
+    syncWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.companyId, currentUser?.uid, projectId, hasHydrated, loadProjects, selectProjectById]);
 
   // Auto-start tour for first-time users (desktop only)
   useEffect(() => {
     if (window.innerWidth >= 768) {
       checkAutoStart();
     }
-  }, []);
+  }, [checkAutoStart]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-brand-500 selection:text-white transition-colors duration-200">

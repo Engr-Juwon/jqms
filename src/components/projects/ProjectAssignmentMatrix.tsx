@@ -307,23 +307,25 @@ export const ProjectAssignmentMatrix: React.FC<
   return (
     <div className="space-y-6">
       {/* ═══ Header Notice & Rules Banner ═══ */}
-      <div className="bg-gradient-to-br from-slate-900 to-slate-950 text-white rounded-2xl p-5 border border-slate-800 shadow-sm relative overflow-hidden">
+      <div className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-950 text-slate-900 dark:text-white rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <ShieldCheck className="w-5 h-5 text-emerald-400" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+              <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                 ISO 9001:2015 Governance &amp; Security Matrix
               </span>
             </div>
-            <h3 className="text-lg font-bold text-white tracking-tight">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
               Project Personnel Assignment Matrix
             </h3>
-            <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 max-w-2xl leading-relaxed">
               Define staff authorized to access and issue QA/QC dossiers,
               inspection checklists, and testing reports for{" "}
-              <strong className="text-amber-300">{projectName}</strong> (
-              {projectCode}).
+              <strong className="text-amber-600 dark:text-amber-300">
+                {projectName}
+              </strong>{" "}
+              ({projectCode}).
             </p>
           </div>
 
@@ -332,10 +334,10 @@ export const ProjectAssignmentMatrix: React.FC<
               <button
                 type="button"
                 onClick={handleResetToDefaults}
-                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition border border-white/10"
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white text-xs font-semibold flex items-center gap-1.5 transition border border-slate-200 dark:border-white/10"
                 title="Reset to ISO Default Matrix: All Governance Managers + All QA/QC Engineers"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-300" />
                 <span>Reset to ISO Defaults</span>
               </button>
             )}
@@ -343,38 +345,38 @@ export const ProjectAssignmentMatrix: React.FC<
         </div>
 
         {/* Matrix Rules Checklist */}
-        <div className="mt-4 pt-4 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px]">
-          <div className="flex items-start gap-2 bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/60">
-            <Lock className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+        <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px]">
+          <div className="flex items-start gap-2 bg-slate-50/80 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700/60">
+            <Lock className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold text-purple-300 block">
+              <span className="font-bold text-purple-900 dark:text-purple-300 block">
                 Managers (Except CM):
               </span>
-              <span className="text-slate-400">
+              <span className="text-slate-600 dark:text-slate-400">
                 Automatically assigned to all company projects for executive
                 oversight.
               </span>
             </div>
           </div>
-          <div className="flex items-start gap-2 bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/60">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+          <div className="flex items-start gap-2 bg-slate-50/80 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700/60">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold text-emerald-300 block">
+              <span className="font-bold text-emerald-900 dark:text-emerald-300 block">
                 QA/QC Engineers:
               </span>
-              <span className="text-slate-400">
+              <span className="text-slate-600 dark:text-slate-400">
                 Automatically added to all projects. Can only be removed or
                 re-added by Level 5 (Directors &amp; Executives).
               </span>
             </div>
           </div>
-          <div className="flex items-start gap-2 bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/60">
-            <HardHat className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex items-start gap-2 bg-slate-50/80 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700/60">
+            <HardHat className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold text-amber-300 block">
+              <span className="font-bold text-amber-900 dark:text-amber-300 block">
                 CM &amp; Field Staff:
               </span>
-              <span className="text-slate-400">
+              <span className="text-slate-600 dark:text-slate-400">
                 Construction Manager (CM), site engineers, and foremen are
                 assigned per project.
               </span>

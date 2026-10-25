@@ -11,7 +11,11 @@ export const AuditTrail: React.FC = () => {
   const [actionFilter, setActionFilter] = useState("ALL");
 
   const loadLogs = async () => {
-    const compId = company?.id || "comp-apex-civil";
+    const compId = company?.id || "";
+    if (!compId) {
+      setLogs([]);
+      return;
+    }
     const data = await dbService.getAuditLogs(compId);
     setLogs(data);
   };

@@ -25,8 +25,10 @@ import {
   MessageSquare,
   CheckCheck,
   UserCheck,
+  GraduationCap,
 } from "lucide-react";
 import { useCompany } from "@/lib/companyHelper";
+import { useOnboardingStore } from "@/stores/useOnboardingStore";
 
 import { ProjectLevelSelector } from "./ProjectLevelSelector";
 import { useThemeStore } from "@/stores/useThemeStore";
@@ -40,9 +42,10 @@ export const Header: React.FC<{ className?: string }> = ({
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { isOnline, queuedItems, isSyncing, latencyMs } = useOfflineStore();
-  const { currentUser, logout } = useAuthStore();
+  const { currentUser, logout, company } = useAuthStore();
   const { name: companyName, logoUrl: companyLogo } = useCompany();
   const { projects, activeProject, setActiveProject } = useProjectStore();
+  const { startTour } = useOnboardingStore();
   const { theme, toggleTheme } = useThemeStore();
   const { toggleMobileSidebar } = useUiStore();
   const [showProjectMenu, setShowProjectMenu] = useState(false);
@@ -53,7 +56,7 @@ export const Header: React.FC<{ className?: string }> = ({
     const refreshCount = () => {
       if (currentUser?.uid) {
         const count = dbService.getAllChannelsUnreadCount(
-          currentUser.companyId || "comp-apex-civil",
+          currentUser.companyId || company?.id || "",
           currentUser.uid,
         );
         setChatUnreadCount(count);
@@ -112,6 +115,7 @@ export const Header: React.FC<{ className?: string }> = ({
         <div className="relative flex-shrink-0">
           <button
             onClick={() => setShowProjectMenu(!showProjectMenu)}
+            data-tour="header-project-select"
             className="flex items-center gap-1.5 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-brand-500/50 text-slate-800 dark:text-slate-200 text-xs font-semibold shadow-sm transition max-w-[140px] sm:max-w-[220px] md:max-w-[260px]"
           >
             <Building2 className="w-4 h-4 text-brand-600 dark:text-brand-400 flex-shrink-0" />
@@ -284,6 +288,7 @@ export const Header: React.FC<{ className?: string }> = ({
 
         {/* Real-time Network Connectivity Badge */}
         <div
+          data-tour="header-network-badge"
           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition select-none ${
             !isOnline
               ? "bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
@@ -334,6 +339,7 @@ export const Header: React.FC<{ className?: string }> = ({
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
+            data-tour="header-user-menu"
             className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
           >
             {currentUser?.avatarUrl ? (
@@ -391,6 +397,16 @@ export const Header: React.FC<{ className?: string }> = ({
                 >
                   <UserCheck className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
                   <span>My Profile & Details</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    startTour();
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition"
+                >
+                  <GraduationCap className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Take Guided Tour</span>
                 </button>
                 {roleLevel >= 4 && (
                   <>

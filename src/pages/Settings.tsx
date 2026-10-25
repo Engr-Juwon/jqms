@@ -37,6 +37,8 @@ import {
 } from "@/lib/theme";
 import { CompanyThemePalette } from "@/types";
 import { useThemeStore } from "@/stores/useThemeStore";
+import { uploadMediaAsset } from "@/lib/cloudinary";
+import { toast } from "react-hot-toast";
 
 export const Settings: React.FC = () => {
   const { currentUser } = useAuthStore();
@@ -314,24 +316,34 @@ export const Settings: React.FC = () => {
     }
   }, [company]);
 
-  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+
+  const handleLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (file.size > 2 * 1024 * 1024) {
-      alert(
+      toast.error(
         "Logo file size exceeds 2MB limit. Please upload an optimized image.",
       );
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setLogoUrl(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    setIsUploadingLogo(true);
+    try {
+      const uploaded = await uploadMediaAsset(file, {
+        companyId: companyId || undefined,
+        category: "logos",
+        preserveAlpha: true,
+        maxBytes: 2 * 1024 * 1024,
+      });
+      setLogoUrl(uploaded.url);
+      toast.success("Organization logo uploaded! Click Save Changes to apply.");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to upload organization logo.");
+    } finally {
+      setIsUploadingLogo(false);
+    }
   };
 
   const handleRemoveLogo = () => {
@@ -361,17 +373,30 @@ export const Settings: React.FC = () => {
     setSaveError(null);
 
     try {
+      let resolvedLogoUrl = logoUrl.trim();
+      if (resolvedLogoUrl.startsWith("data:")) {
+        const uploaded = await uploadMediaAsset(resolvedLogoUrl, {
+          companyId: companyId || undefined,
+          category: "logos",
+          preserveAlpha: true,
+          filename: `logo-${companyId || "org"}.png`,
+        });
+        resolvedLogoUrl = uploaded.url;
+        setLogoUrl(resolvedLogoUrl);
+      }
+
+      const trimmedName = name.trim() || company?.name || "Organization";
       const updatedPayload = {
-        name: name.trim() || "Collection Developments LTD",
-        legalName: legalName.trim() || name.trim(),
+        name: trimmedName,
+        legalName: legalName.trim() || trimmedName,
         registrationNo: registrationNo.trim(),
         taxNumber: taxNumber.trim(),
         email: email.trim(),
         phone: phone.trim(),
         address: address.trim(),
         website: website.trim(),
-        logo: logoUrl || undefined,
-        logoUrl: logoUrl || undefined,
+        logo: resolvedLogoUrl || undefined,
+        logoUrl: resolvedLogoUrl || undefined,
         standards,
         settings: {
           ncrPrefix: ncrPrefix.trim() || "NCR",
@@ -573,7 +598,7 @@ export const Settings: React.FC = () => {
                 type="text"
                 value={legalName}
                 onChange={(e) => setLegalName(e.target.value)}
-                placeholder="e.g. Collection Developments Limited"
+                placeholder="e.g. Meridian Civil Engineering Limited"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:border-indigo-500 focus:outline-none"
               />
             </div>
@@ -586,7 +611,7 @@ export const Settings: React.FC = () => {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Collection Developments LTD"
+                placeholder="e.g. Meridian Civil"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:border-indigo-500 focus:outline-none"
                 required
               />
@@ -910,7 +935,7 @@ export const Settings: React.FC = () => {
                 type="text"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder="14 Bankside Boulevard, London SE1 9SG, United Kingdom"
+                placeholder="Registered head office street address, city, country"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:border-indigo-500 focus:outline-none"
               />
             </div>
@@ -1324,7 +1349,7 @@ export const Settings: React.FC = () => {
             </label>
             <input
               type="text"
-              placeholder="e.g. Collection Developments QA/QC Quality Portal"
+              placeholder="e.g. Corporate QA/QC Quality Portal"
               value={defaultSenderName}
               onChange={(e) => setDefaultSenderName(e.target.value)}
               className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-900 dark:text-white text-sm focus:border-indigo-500 focus:outline-none"

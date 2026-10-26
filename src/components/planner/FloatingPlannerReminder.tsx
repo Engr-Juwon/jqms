@@ -940,7 +940,7 @@ export const FloatingPlannerReminder: React.FC = () => {
   return (
     <aside
       aria-label="Quality and Planner Reminders"
-      className="fixed bottom-20 lg:bottom-6 right-4 z-40 font-sans pointer-events-auto"
+      className="fixed bottom-[134px] right-4 sm:right-6 z-40 font-sans pointer-events-auto"
     >
       {/* Expanded Modal / Card */}
       {isOpen && (

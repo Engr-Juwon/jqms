@@ -954,7 +954,7 @@ How can I assist your site operations, quality audit, or database queries today?
         <button
           onClick={() => setIsOpen(true)}
           data-tour="ai-copilot-pill"
-          className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 flex items-center gap-2 p-3 sm:px-4 sm:py-2.5 rounded-full bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white shadow-xl shadow-brand-600/30 hover:shadow-2xl hover:scale-105 active:scale-95 transition-all group border border-white/20 backdrop-blur-md"
+          className="fixed bottom-20 right-4 sm:right-6 z-40 flex items-center gap-2 p-3 sm:px-4 sm:py-2.5 rounded-full bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white shadow-xl shadow-brand-600/30 hover:shadow-2xl hover:scale-105 active:scale-95 transition-all group border border-white/20 backdrop-blur-md"
           title="Open Jay-QMS Civil QA/QC AI Copilot"
           aria-label="Open Jay-QMS AI Copilot"
         >
@@ -977,8 +977,8 @@ How can I assist your site operations, quality audit, or database queries today?
         <div
           className={`fixed z-50 flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl transition-all duration-300 overflow-hidden ${
             isExpanded
-              ? "inset-x-0 bottom-0 sm:inset-auto sm:bottom-4 sm:right-4 w-full sm:w-[calc(100vw-2rem)] md:w-[680px] h-[92vh] sm:h-[calc(100vh-2rem)] md:h-[750px] rounded-t-3xl sm:rounded-3xl"
-              : "inset-x-0 bottom-0 sm:inset-auto sm:bottom-4 sm:right-4 w-full sm:w-[440px] h-[85vh] sm:h-[600px] max-h-[100vh] sm:max-h-[calc(100vh-2rem)] rounded-t-3xl sm:rounded-3xl"
+              ? "inset-x-0 bottom-0 sm:inset-auto sm:bottom-6 sm:right-6 w-full sm:w-[calc(100vw-2rem)] md:w-[680px] h-[92vh] sm:h-[calc(100vh-3rem)] md:h-[750px] rounded-t-3xl sm:rounded-3xl"
+              : "inset-x-0 bottom-0 sm:inset-auto sm:bottom-6 sm:right-6 w-full sm:w-[440px] h-[85vh] sm:h-[600px] max-h-[100vh] sm:max-h-[calc(100vh-3rem)] rounded-t-3xl sm:rounded-3xl"
           }`}
         >
           {/* Mobile Drag Indicator */}

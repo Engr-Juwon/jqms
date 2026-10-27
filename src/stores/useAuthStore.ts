@@ -486,6 +486,42 @@ interface AuthState {
   initAuthListener: () => () => void;
 }
 
+function getInitialAuthState(): {
+  currentUser: UserProfile | null;
+  company: Company | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+} {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return {
+      currentUser: null,
+      company: null,
+      isAuthenticated: false,
+      isLoading: true,
+    };
+  }
+  try {
+    const rawUser = localStorage.getItem("jqms_current_user");
+    const rawComp = localStorage.getItem("jqms_current_company");
+    const currentUser = rawUser ? (JSON.parse(rawUser) as UserProfile) : null;
+    const company = rawComp ? (JSON.parse(rawComp) as Company) : null;
+    const isAuthenticated = Boolean(currentUser && currentUser.uid);
+    return {
+      currentUser,
+      company,
+      isAuthenticated,
+      isLoading: !isAuthenticated,
+    };
+  } catch {
+    return {
+      currentUser: null,
+      company: null,
+      isAuthenticated: false,
+      isLoading: true,
+    };
+  }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => {
   const syncLiveCompanySubscription = (companyId?: string) => {
     const cleanId = (companyId || "").trim();
@@ -531,11 +567,18 @@ export const useAuthStore = create<AuthState>((set, get) => {
     );
   };
 
+  const initialAuth = getInitialAuthState();
+  if (initialAuth.company?.settings?.themePalette) {
+    try {
+      applyCompanyTheme(initialAuth.company.settings.themePalette);
+    } catch {}
+  }
+
   return {
-    currentUser: null,
-    company: null,
-    isAuthenticated: false,
-    isLoading: true,
+    currentUser: initialAuth.currentUser,
+    company: initialAuth.company,
+    isAuthenticated: initialAuth.isAuthenticated,
+    isLoading: initialAuth.isLoading,
     error: null,
 
     setUser: (user) => {

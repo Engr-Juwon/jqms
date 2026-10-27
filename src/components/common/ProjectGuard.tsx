@@ -56,7 +56,10 @@ export const ProjectGuard: React.FC<ProjectGuardProps> = ({
   useEffect(() => {
     if (!hasHydrated) {
       const watchdog = setTimeout(() => {
-        useProjectStore.setState({ hasHydrated: true, isLoading: false });
+        const store = useProjectStore.getState();
+        if (!store.hasHydrated) {
+          useProjectStore.setState({ hasHydrated: true, isLoading: false });
+        }
       }, 5000);
       return () => clearTimeout(watchdog);
     }
@@ -81,7 +84,21 @@ export const ProjectGuard: React.FC<ProjectGuardProps> = ({
     loadProjects,
   ]);
 
-  if (isAuthLoading || (!hasHydrated && isProjLoading)) {
+  // Project Resolution
+  const currentTargetProject = projectId
+    ? projects.find((p) => p.id === projectId) || null
+    : activeProject;
+
+  const targetProjId = projectId || currentTargetProject?.id;
+  const isProjectExemptRoute = PROJECT_EXEMPT_SEGMENTS.some((seg) =>
+    location.pathname.includes(seg),
+  );
+
+  // If auth is loading, or if we don't have a resolved project yet while hydration is in flight:
+  if (
+    isAuthLoading ||
+    (!isProjectExemptRoute && !currentTargetProject && (!hasHydrated || isProjLoading))
+  ) {
     return <PageLoadingFallback message="Loading project workspace..." />;
   }
 
@@ -154,18 +171,9 @@ export const ProjectGuard: React.FC<ProjectGuardProps> = ({
   }
 
   // 2. Project Resolution & Assignment Gate
-  const currentTargetProject = projectId
-    ? projects.find((p) => p.id === projectId) || null
-    : activeProject;
-
-  const targetProjId = projectId || currentTargetProject?.id;
-  const isProjectExemptRoute = PROJECT_EXEMPT_SEGMENTS.some((seg) =>
-    location.pathname.includes(seg),
-  );
-
   // Block project-dependent routes when no active project exists or URL :projectId wasn't found
   if (!isProjectExemptRoute && !currentTargetProject) {
-    if (isProjLoading) {
+    if (!hasHydrated || isProjLoading) {
       return <PageLoadingFallback message="Loading project workspace..." />;
     }
     return (

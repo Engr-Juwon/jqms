@@ -136,6 +136,26 @@ export function resolveEffectiveCompanyId(explicitCompanyId?: string): string {
   } catch {
     // Auth store not yet mounted
   }
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      const rawUser = localStorage.getItem("jqms_current_user");
+      if (rawUser) {
+        const u = JSON.parse(rawUser);
+        if (u?.companyId && !GHOST_COMPANY_IDS.has(u.companyId.trim())) {
+          return u.companyId.trim();
+        }
+      }
+      const rawComp = localStorage.getItem("jqms_current_company");
+      if (rawComp) {
+        const c = JSON.parse(rawComp);
+        if (c?.id && !GHOST_COMPANY_IDS.has(c.id.trim())) {
+          return c.id.trim();
+        }
+      }
+    } catch {
+      // Ignore JSON parse errors
+    }
+  }
   return "";
 }
 

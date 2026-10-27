@@ -12,6 +12,7 @@ import { PageLoadingFallback } from "./PageLoadingFallback";
 import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
 import { useOnboardingStore } from "@/stores/useOnboardingStore";
 import { AICopilotDrawer } from "@/components/ai/AICopilotDrawer";
+import { resolveEffectiveCompanyId } from "@/lib/db";
 
 export const ProjectLayout: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -25,9 +26,13 @@ export const ProjectLayout: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     async function syncWorkspace() {
-      if (!currentUser?.companyId) return;
+      const compId =
+        currentUser?.companyId ||
+        useAuthStore.getState().company?.id ||
+        resolveEffectiveCompanyId();
+      if (!compId) return;
       if (!hasHydrated) {
-        await loadProjects(currentUser.companyId, currentUser, projectId);
+        await loadProjects(compId, currentUser, projectId);
       } else if (projectId) {
         selectProjectById(projectId);
       }

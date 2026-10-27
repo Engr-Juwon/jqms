@@ -18,31 +18,56 @@ export const ROLE_BADGE_COLORS: Record<number, string> = {
   1: "bg-slate-800/80 text-slate-300 border-slate-600/60",
 };
 
-export function getRoleLevel(role?: UserRole): number {
+export function normalizeUserRole(rawRole?: any): UserRole {
+  if (!rawRole || typeof rawRole !== "string") return "CLIENT_REPRESENTATIVE";
+  const cleaned = rawRole.trim().toUpperCase().replace(/[\s\/-]+/g, "_");
+  if (cleaned in ROLE_LEVELS) {
+    return cleaned as UserRole;
+  }
+  if (cleaned === "SUPERADMIN" || cleaned === "SUPER_ADMIN" || cleaned === "ADMIN") return "SUPER_ADMIN";
+  if (cleaned.includes("QUALITY_DIRECTOR") || cleaned.includes("DIRECTOR_OF_QUALITY")) return "QUALITY_DIRECTOR";
+  if (cleaned.includes("EXECUTIVE")) return "EXECUTIVE_MANAGEMENT";
+  if (cleaned === "QA_QC_MANAGER" || cleaned === "QAQC_MANAGER" || cleaned === "QUALITY_MANAGER") {
+    return cleaned === "QAQC_MANAGER" || cleaned === "QA_QC_MANAGER" ? "QAQC_MANAGER" : "QUALITY_MANAGER";
+  }
+  if (cleaned === "PROJECT_MANAGER" || cleaned === "PM") return "PROJECT_MANAGER";
+  if (cleaned.includes("OPERATIONS_MANAGER")) return "OPERATIONS_MANAGER";
+  if (cleaned.includes("CONSTRUCTION_MANAGER")) return "CONSTRUCTION_MANAGER";
+  if (cleaned.includes("SENIOR_QAQC") || cleaned.includes("SR_QAQC")) return "SENIOR_QAQC_ENGINEER";
+  if (cleaned.includes("QAQC_ENGINEER") || cleaned.includes("QA_QC_ENGINEER") || cleaned.includes("QUALITY_ENGINEER")) return "QAQC_ENGINEER";
+  if (cleaned.includes("QAQC_INSPECTOR") || cleaned.includes("QA_QC_INSPECTOR") || cleaned.includes("QUALITY_INSPECTOR")) return "QAQC_INSPECTOR";
+  if (cleaned.includes("SITE_ENGINEER")) return "SITE_ENGINEER";
+  if (cleaned.includes("CONSULTANT")) return "CONSULTANT";
+  if (cleaned.includes("CLIENT")) return "CLIENT_REPRESENTATIVE";
+  return (cleaned as UserRole) || "CLIENT_REPRESENTATIVE";
+}
+
+export function getRoleLevel(role?: UserRole | string): number {
   if (!role) return 0;
-  return ROLE_LEVELS[role] || 1;
+  const canonical = normalizeUserRole(role);
+  return ROLE_LEVELS[canonical] || 1;
 }
 
 export function hasMinRole(
-  userRole: UserRole | undefined,
+  userRole: UserRole | string | undefined,
   minLevel: number,
 ): boolean {
   return getRoleLevel(userRole) >= minLevel;
 }
 
-export function canCreateRecords(userRole: UserRole | undefined): boolean {
+export function canCreateRecords(userRole: UserRole | string | undefined): boolean {
   return getRoleLevel(userRole) >= 2;
 }
 
-export function canApproveAndClose(userRole: UserRole | undefined): boolean {
+export function canApproveAndClose(userRole: UserRole | string | undefined): boolean {
   return getRoleLevel(userRole) >= 3;
 }
 
-export function canManageProject(userRole: UserRole | undefined): boolean {
+export function canManageProject(userRole: UserRole | string | undefined): boolean {
   return getRoleLevel(userRole) >= 4;
 }
 
-export function canManageCompany(userRole: UserRole | undefined): boolean {
+export function canManageCompany(userRole: UserRole | string | undefined): boolean {
   return getRoleLevel(userRole) >= 5;
 }
 
@@ -64,8 +89,9 @@ export function isUserSuspended(
  * Roles: Super Admin, Quality Director, Executive Management, Project Manager, Operations Manager.
  * NOTE: QA/QC Managers, QA/QC Engineers, and Inspectors are project-specific and NOT automatically added to all projects.
  */
-export function isGlobalManagerRole(role?: UserRole): boolean {
+export function isGlobalManagerRole(role?: UserRole | string): boolean {
   if (!role) return false;
+  const canonical = normalizeUserRole(role);
   const globalManagerRoles: UserRole[] = [
     "SUPER_ADMIN",
     "QUALITY_DIRECTOR",
@@ -75,20 +101,21 @@ export function isGlobalManagerRole(role?: UserRole): boolean {
     "PROJECT_MANAGER",
     "OPERATIONS_MANAGER",
   ];
-  return globalManagerRoles.includes(role);
+  return globalManagerRoles.includes(canonical);
 }
 
 /**
  * Helper to identify QA/QC engineering roles.
  */
-export function isQAQCEngineerRole(role?: UserRole): boolean {
+export function isQAQCEngineerRole(role?: UserRole | string): boolean {
   if (!role) return false;
+  const canonical = normalizeUserRole(role);
   return (
-    role === "SENIOR_QAQC_ENGINEER" ||
-    role === "QAQC_ENGINEER" ||
-    role === "QUALITY_MANAGER" ||
-    role === "QAQC_MANAGER" ||
-    role === "DEPUTY_QUALITY_MANAGER"
+    canonical === "SENIOR_QAQC_ENGINEER" ||
+    canonical === "QAQC_ENGINEER" ||
+    canonical === "QUALITY_MANAGER" ||
+    canonical === "QAQC_MANAGER" ||
+    canonical === "DEPUTY_QUALITY_MANAGER"
   );
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Layers,
   FlaskConical,
@@ -25,6 +25,7 @@ import {
   Award,
   ArrowRightLeft,
   RotateCcw,
+  Wand2,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -459,6 +460,7 @@ export const MixCalc: React.FC = () => {
   const [sd, setSd] = useState<number>(5.0); // Standard deviation
   const [maxAggSize, setMaxAggSize] = useState<10 | 20 | 40>(20);
   const [slump, setSlump] = useState<number>(110); // mm
+  const [autoDetectSlump, setAutoDetectSlump] = useState<boolean>(true); // Auto-predict slump from w/c & admixtures
   const [waterCementRatio, setWaterCementRatio] = useState<number>(0.42);
   const [airContent, setAirContent] = useState<number>(1.2); // %
 
@@ -512,6 +514,117 @@ export const MixCalc: React.FC = () => {
   const [batchScale, setBatchScale] = useState<"1m3" | "bag" | "custom">("1m3");
   const [customBatchVolume, setCustomBatchVolume] = useState<number>(6.0); // m³
 
+  // Effective W/C Ratio depending on direction
+  const effectiveWc = calcDirection === "forward" ? waterCementRatio : reverseWc;
+
+  // ==========================================
+  // SLUMP AUTO-DETECTION ENGINE (PHYSICAL PREDICTION)
+  // ==========================================
+  const predictedSlump = useMemo(() => {
+    // Base slump at w/b = 0.42 for 20mm aggregate without plasticizer is ~50 mm
+    let base = 50 + ((effectiveWc - 0.42) / 0.01) * 4.5;
+
+    // Superplasticizer (PCE) effect: +75mm per 1.0% dosage
+    if (useSuperplasticizer && superplasticizerDosage > 0) {
+      base += superplasticizerDosage * 75;
+    }
+
+    // Retarder preserves slump flowability: +10mm
+    if (useRetarder) {
+      base += 10;
+    }
+
+    // Fly Ash spherical micro-ball bearings improve slump: +8mm per 10%
+    if (useFlyAsh && flyAshPercent > 0) {
+      base += (flyAshPercent / 10) * 8;
+    }
+
+    // Silica Fume has massive surface area, reducing slump unless SP is high: -15mm per 5%
+    if (useSilicaFume && silicaFumePercent > 0) {
+      base -= (silicaFumePercent / 5) * 15;
+    }
+
+    // GGBS slightly improves fluidity: +5mm per 20%
+    if (useGGBS && ggbsPercent > 0) {
+      base += (ggbsPercent / 20) * 5;
+    }
+
+    // Aggregate size effect
+    if (maxAggSize === 10) base -= 15;
+    else if (maxAggSize === 40) base += 15;
+
+    // Clamp between 25 mm and 220 mm and round to 5mm
+    return Math.min(220, Math.max(25, Math.round(base / 5) * 5));
+  }, [
+    effectiveWc,
+    useSuperplasticizer,
+    superplasticizerDosage,
+    useRetarder,
+    useFlyAsh,
+    flyAshPercent,
+    useSilicaFume,
+    silicaFumePercent,
+    useGGBS,
+    ggbsPercent,
+    maxAggSize,
+  ]);
+
+  // When auto-detect is enabled, keep slump in sync with predicted value
+  useEffect(() => {
+    if (autoDetectSlump) {
+      setSlump(predictedSlump);
+    }
+  }, [autoDetectSlump, predictedSlump]);
+
+  // Slump Deviation Warning/Statement text
+  const slumpDeviation = useMemo(() => {
+    const diff = slump - predictedSlump;
+    const isOverridden = Math.abs(diff) >= 15;
+
+    // Build summary of active additives
+    const activeAdditives: string[] = [];
+    if (useSuperplasticizer) activeAdditives.push(`${superplasticizerDosage}% Superplasticizer`);
+    if (useRetarder) activeAdditives.push("Retarder");
+    if (useAccelerator) activeAdditives.push("Accelerator");
+    if (useWaterproofer) activeAdditives.push("Waterproofing");
+    if (useFlyAsh) activeAdditives.push(`${flyAshPercent}% Fly Ash`);
+    if (useSilicaFume) activeAdditives.push(`${silicaFumePercent}% Silica Fume`);
+    if (useGGBS) activeAdditives.push(`${ggbsPercent}% GGBS`);
+
+    const additiveText =
+      activeAdditives.length > 0 ? activeAdditives.join(", ") : "no chemical admixtures";
+
+    let advice = "";
+    if (diff > 0) {
+      advice = `Your mix is dialed higher than natural (${slump} mm vs ~${predictedSlump} mm). To reach ${slump} mm without segregation on site, consider increasing Superplasticizer dosage.`;
+    } else {
+      advice = `Your mix will naturally pour more fluid than ${slump} mm on site (~${predictedSlump} mm) due to the fluidizing effect of your water ratio & admixtures. Lower your water or reduce Superplasticizer if a stiffer ${slump} mm mix is required.`;
+    }
+
+    return {
+      isOverridden,
+      diff,
+      additiveText,
+      statement: `Based on your current settings (Water ratio ${effectiveWc.toFixed(2)} and ${additiveText}), this mix will naturally yield a ~${predictedSlump} mm slump.`,
+      advice,
+    };
+  }, [
+    slump,
+    predictedSlump,
+    effectiveWc,
+    useSuperplasticizer,
+    superplasticizerDosage,
+    useRetarder,
+    useAccelerator,
+    useWaterproofer,
+    useFlyAsh,
+    flyAshPercent,
+    useSilicaFume,
+    silicaFumePercent,
+    useGGBS,
+    ggbsPercent,
+  ]);
+
   // Quick Preset Loader (Forward)
   const loadPreset = (key: PresetKey) => {
     setSelectedPreset(key);
@@ -520,7 +633,6 @@ export const MixCalc: React.FC = () => {
     const gradeNum = parseInt(p.grade.substring(1));
     setFck(gradeNum);
     setSd(gradeNum <= 25 ? 4.0 : gradeNum <= 50 ? 5.0 : 6.0);
-    setSlump(p.slump);
     setMaxAggSize(p.maxAggSize);
     setWaterCementRatio(p.waterCementRatio);
 
@@ -544,6 +656,10 @@ export const MixCalc: React.FC = () => {
     setWaterprooferDosage(p.waterprooferDosage);
     setUseAirEntrainer(p.useAirEntrainer);
     setAirContent(p.airPercent);
+
+    // Slump
+    setSlump(p.slump);
+    setAutoDetectSlump(true);
 
     toast.success(`Loaded "${p.title}" mix recipe!`);
   };
@@ -574,6 +690,7 @@ export const MixCalc: React.FC = () => {
     setReverseRatioStone(preset.stone);
     setReverseTargetGrade(preset.approxGrade);
     setReverseWc(preset.defaultWc);
+    setAutoDetectSlump(true);
     toast.success(`Loaded "${preset.name}" nominal ratio!`);
   };
 
@@ -758,8 +875,6 @@ export const MixCalc: React.FC = () => {
     // ------------------------------------------
     // CASE B: REVERSE MIX RATIO ("WORK BACK")
     // ------------------------------------------
-    // Input: 1 part cementitious : reverseRatioSand parts sand : reverseRatioStone parts stone
-    // With reverseWc, additives, and target strength
     const ADMIX_DENSITY = 1.10;
     const effectiveAir = useAirEntrainer ? Math.max(3.5, airContent) : airContent;
     const volAir = effectiveAir / 100;
@@ -771,23 +886,19 @@ export const MixCalc: React.FC = () => {
       effectiveWaterReduction = 5;
     }
 
-    // Water cut factor
     const waterMultiplier = reverseWc * (1 - effectiveWaterReduction / 100);
 
-    // SCM Fractions
     const faPct = useFlyAsh ? Math.min(35, flyAshPercent) : 0;
     const sfPct = useSilicaFume ? Math.min(15, silicaFumePercent) : 0;
     const ggbsPct = useGGBS ? Math.min(65, ggbsPercent) : 0;
     const opcPct = Math.max(0, 100 - (faPct + sfPct + ggbsPct));
 
-    // Admixtures dosage per kg binder
     const spDose = useSuperplasticizer ? superplasticizerDosage / 100 : 0;
     const retDose = useRetarder ? retarderDosage / 100 : 0;
     const accDose = useAccelerator ? acceleratorDosage / 100 : 0;
     const wpDose = useWaterproofer ? waterprooferDosage / 100 : 0;
     const totalAdmixFraction = spDose + retDose + accDose + wpDose;
 
-    // Calculate sum of volumetric coefficients k per 1 kg of binder
     const kWater = waterMultiplier / 1000;
     const kCement = (opcPct / 100) / (sgCement * 1000);
     const kFA_SCM = faPct > 0 ? (faPct / 100) / (sgFlyAsh * 1000) : 0;
@@ -799,7 +910,6 @@ export const MixCalc: React.FC = () => {
 
     const kTotal = kWater + kCement + kFA_SCM + kSF_SCM + kGGBS_SCM + kSand + kStone + kAdmix;
 
-    // Total Cementitious Content for 1 m³
     const totalBinderContent = Math.round((1.0 - volAir) / kTotal);
 
     const massCement = Math.round(totalBinderContent * (opcPct / 100));
@@ -829,7 +939,6 @@ export const MixCalc: React.FC = () => {
     const totalMixMass =
       massCement + massFlyAsh + massSilicaFume + massGGBS + netWaterContent + massFA + massCA + Math.round(totalAdmixKg);
 
-    // Moisture Correction
     let extraWaterFromSand = 0;
     let extraWaterFromStone = 0;
     let siteCorrectedWater = netWaterContent;
@@ -854,8 +963,6 @@ export const MixCalc: React.FC = () => {
     const scmWeight = massFlyAsh + massSilicaFume + massGGBS;
     const carbonReductionPct = totalBinderContent > 0 ? Math.round((scmWeight / totalBinderContent) * 90) : 0;
 
-    // Empirical Strength Estimation based on Bolomey & Feret Equations
-    // fc ≈ K * (C/W - 0.5) with K ≈ 18-20 for ordinary aggregate
     const cementWaterRatio = totalBinderContent / Math.max(100, netWaterContent);
     const estimatedFck = Math.min(65, Math.max(10, Math.round(18.5 * (cementWaterRatio - 0.45))));
 
@@ -986,9 +1093,11 @@ export const MixCalc: React.FC = () => {
   const activeGradeKey = calcDirection === "forward" ? grade : reverseTargetGrade;
   const gradeInfo = GRADE_LAYMAN_GUIDE[activeGradeKey];
 
-  // Slump info for Forward mode
+  // Slump info for current active slump
+  const activeSlumpValue = calcDirection === "forward" ? slump : predictedSlump;
   const slumpIndicator = useMemo(() => {
-    if (slump <= 60) {
+    const s = activeSlumpValue;
+    if (s <= 60) {
       return {
         label: "Very Stiff / Low Workability",
         badge: "🪨 Stiff (Pavement)",
@@ -998,7 +1107,7 @@ export const MixCalc: React.FC = () => {
         feel: "Like damp brown sugar. Needs heavy machine vibration.",
         pumpable: "❌ Cannot pump (will clog pump hose)",
       };
-    } else if (slump <= 110) {
+    } else if (s <= 110) {
       return {
         label: "Normal / Shovelable Workability",
         badge: "🧱 Normal (House Slabs)",
@@ -1008,7 +1117,7 @@ export const MixCalc: React.FC = () => {
         feel: "Like thick oatmeal paste. Easy to spread with hand shovels.",
         pumpable: "⚠️ Hard to pump (better for crane bucket or wheelbarrows)",
       };
-    } else if (slump <= 155) {
+    } else if (s <= 155) {
       return {
         label: "Pump-Friendly / High Flow",
         badge: "🚀 Pumpable (Recommended)",
@@ -1029,10 +1138,9 @@ export const MixCalc: React.FC = () => {
         pumpable: "✅ Ultra-easy pumping (Requires Superplasticizer to prevent stone sinking)",
       };
     }
-  }, [slump]);
+  }, [activeSlumpValue]);
 
   // Water-Binder Dial
-  const effectiveWc = calcDirection === "forward" ? waterCementRatio : reverseWc;
   const waterHealthIndicator = useMemo(() => {
     if (effectiveWc <= 0.38) {
       return {
@@ -1072,6 +1180,7 @@ export const MixCalc: React.FC = () => {
 Mode: ${calcDirection === "forward" ? "Forward Engineering (Strength -> Proportions)" : "Reverse Mix Design (Ratio -> Materials)"}
 Grade: ${activeGradeKey} (${gradeInfo.name} - ${gradeInfo.psi} PSI)
 Target Mean Strength f'cr: ${mixResults.targetMeanStrength.toFixed(1)} MPa
+Workability / Slump: ${slump} mm (Natural predicted: ~${predictedSlump} mm)
 Ratio: 1 : ${mixResults.proportions.faRatio} : ${mixResults.proportions.caRatioVal} (w/b: ${mixResults.proportions.waterRatio})
 Batching Basis: ${
       batchScale === "1m3"
@@ -1165,11 +1274,11 @@ Generated via JQMS Engineering Mix Design Engine
                   Concrete Mix Design Assistant
                 </h2>
                 <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
-                  Dual-Direction
+                  Slump Auto-Detection
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Calculate proportions forward from target strength OR work backwards from an input mix ratio.
+                Proportion forward or work backwards from ratio, with automatic slump prediction & override feedback.
               </p>
             </div>
           </div>
@@ -1232,7 +1341,7 @@ Generated via JQMS Engineering Mix Design Engine
           </button>
         </div>
 
-        {/* FORWARD PRESET SELECTOR (Only in forward direction) */}
+        {/* FORWARD PRESET SELECTOR */}
         {calcDirection === "forward" && (
           <div className="mt-6">
             <div className="flex items-center justify-between mb-3">
@@ -1279,7 +1388,7 @@ Generated via JQMS Engineering Mix Design Engine
           </div>
         )}
 
-        {/* REVERSE RATIO SELECTOR (Only in reverse direction) */}
+        {/* REVERSE RATIO SELECTOR */}
         {calcDirection === "reverse" && (
           <div className="mt-6">
             <div className="flex items-center justify-between mb-3">
@@ -1335,7 +1444,7 @@ Generated via JQMS Engineering Mix Design Engine
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-indigo-500" />
-                  Step 2: Concrete Grade & Flowability
+                  Step 2: Concrete Grade & Slump Flow
                 </h3>
                 <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                   fck = {fck} MPa
@@ -1398,61 +1507,8 @@ Generated via JQMS Engineering Mix Design Engine
                 </div>
               </div>
 
-              {/* Slump Flow */}
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300 block">
-                      Workability / Slump (Flow Rate)
-                    </label>
-                    <span className="text-[11px] text-slate-400">
-                      Controls how easily the concrete spreads without getting stuck
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 font-mono">
-                      {slump} mm
-                    </span>
-                    <span className={`block text-[10px] font-bold px-2 py-0.5 rounded-full border mt-0.5 ${slumpIndicator.color}`}>
-                      {slumpIndicator.badge}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <input
-                    type="range"
-                    min="25"
-                    max="200"
-                    step="5"
-                    value={slump}
-                    onChange={(e) => {
-                      setSelectedPreset("custom");
-                      setSlump(Number(e.target.value));
-                    }}
-                    className="w-full accent-indigo-600 cursor-pointer"
-                  />
-                  <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-300 ${slumpIndicator.barColor}`}
-                      style={{ width: `${slumpIndicator.pct}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                  <div>
-                    <span className="text-slate-500 dark:text-slate-400">Texture: </span>
-                    <strong className="text-slate-800 dark:text-slate-200">{slumpIndicator.feel}</strong>
-                  </div>
-                  <div className="text-slate-600 dark:text-slate-300 font-semibold text-[11px] whitespace-nowrap">
-                    {slumpIndicator.pumpable}
-                  </div>
-                </div>
-              </div>
-
               {/* Water-Cement Ratio */}
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-1.5">
@@ -1484,6 +1540,111 @@ Generated via JQMS Engineering Mix Design Engine
                   }}
                   className="w-full accent-blue-600 cursor-pointer"
                 />
+              </div>
+
+              {/* Slump Flow & Auto-Detection Engine */}
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Workability / Slump Flow
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !autoDetectSlump;
+                          setAutoDetectSlump(next);
+                          if (next) setSlump(predictedSlump);
+                        }}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition flex items-center gap-1 ${
+                          autoDetectSlump
+                            ? "bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-300 dark:border-slate-700 hover:text-slate-900"
+                        }`}
+                      >
+                        <Wand2 className="w-3 h-3" />
+                        {autoDetectSlump ? "Auto-Detecting" : "Manual Override"}
+                      </button>
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      {autoDetectSlump
+                        ? `Auto-predicted from w/b (${waterCementRatio}) & active chemical admixtures`
+                        : "Manual custom target dialed"}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 font-mono">
+                      {slump} mm
+                    </span>
+                    <span className={`block text-[10px] font-bold px-2 py-0.5 rounded-full border mt-0.5 ${slumpIndicator.color}`}>
+                      {slumpIndicator.badge}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min="25"
+                    max="200"
+                    step="5"
+                    value={slump}
+                    onChange={(e) => {
+                      setAutoDetectSlump(false);
+                      setSelectedPreset("custom");
+                      setSlump(Number(e.target.value));
+                    }}
+                    className="w-full accent-indigo-600 cursor-pointer"
+                  />
+                  <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 ${slumpIndicator.barColor}`}
+                      style={{ width: `${slumpIndicator.pct}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* SLUMP OVERRIDE STATEMENT / ADVISORY CARD */}
+                {slumpDeviation.isOverridden && (
+                  <div className="p-3.5 bg-amber-50/80 dark:bg-amber-950/30 rounded-xl border border-amber-300 dark:border-amber-800/80 text-xs space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2">
+                        <Info className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold text-amber-900 dark:text-amber-200">
+                            {slumpDeviation.statement}
+                          </p>
+                          <p className="text-amber-800 dark:text-amber-300 mt-0.5 text-[11px] leading-relaxed">
+                            {slumpDeviation.advice}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSlump(predictedSlump);
+                          setAutoDetectSlump(true);
+                          toast.success(`Reset to auto-predicted slump (${predictedSlump} mm)`);
+                        }}
+                        className="px-2 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] whitespace-nowrap shadow-sm"
+                      >
+                        Sync ({predictedSlump} mm)
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-500 dark:text-slate-400">Flow Texture: </span>
+                    <strong className="text-slate-800 dark:text-slate-200">{slumpIndicator.feel}</strong>
+                  </div>
+                  <div className="text-slate-600 dark:text-slate-300 font-semibold text-[11px] whitespace-nowrap">
+                    {slumpIndicator.pumpable}
+                  </div>
+                </div>
               </div>
             </div>
           ) : (
@@ -1604,6 +1765,25 @@ Generated via JQMS Engineering Mix Design Engine
                 />
               </div>
 
+              {/* REVERSE MODE SLUMP AUTO-DETECTION STATEMENT */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="p-3.5 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-xl border border-indigo-200 dark:border-indigo-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                      <Wand2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      Auto-Detected Slump for this Recipe:
+                    </span>
+                    <span className="text-xs font-black font-mono px-2 py-0.5 rounded bg-indigo-600 text-white">
+                      ~{predictedSlump} mm ({slumpIndicator.badge})
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-indigo-800 dark:text-indigo-300 leading-relaxed">
+                    Based on your water ratio ({reverseWc.toFixed(2)}) and active admixtures, this mix will naturally produce a <strong>~{predictedSlump} mm slump</strong> ({slumpIndicator.label}).
+                  </p>
+                </div>
+              </div>
+
               {/* Reverse Strength Feasibility Card */}
               {mixResults.reverseAnalysis && (
                 <div
@@ -1635,7 +1815,7 @@ Generated via JQMS Engineering Mix Design Engine
             </div>
           )}
 
-          {/* SECTION B: CHEMICAL ADMIXTURES (AVAILABLE IN BOTH FORWARD & REVERSE) */}
+          {/* SECTION B: CHEMICAL ADMIXTURES */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
@@ -1650,7 +1830,7 @@ Generated via JQMS Engineering Mix Design Engine
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Toggle additives to customize setting speed, water reduction, and waterproofing:
+              Toggle additives to customize setting speed, water reduction, and waterproofing (auto-updates slump prediction):
             </p>
 
             <div className="space-y-3 pt-1">
@@ -1711,7 +1891,7 @@ Generated via JQMS Engineering Mix Design Engine
                     </div>
                     <div>
                       <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-300">
-                        <span>Water Reduction Credit</span>
+                        <span>Water Cut Credit</span>
                         <span className="font-bold text-blue-600 dark:text-blue-400">
                           -{waterReductionPercent}% water
                         </span>

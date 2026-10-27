@@ -23,6 +23,8 @@ import {
   Box,
   Activity,
   Award,
+  ArrowRightLeft,
+  RotateCcw,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -39,7 +41,7 @@ export type ConcreteGrade =
   | "M55"
   | "M60";
 
-// Preset Mix Types
+// Preset Mix Types for Forward Mode
 export type PresetKey =
   | "residential_footing"
   | "slabs_beams"
@@ -287,7 +289,7 @@ const GRADE_LAYMAN_GUIDE: Record<
     psi: number;
     usage: string;
     color: string;
-    meterLevel: number; // 1 to 5
+    meterLevel: number;
     description: string;
   }
 > = {
@@ -373,7 +375,77 @@ const GRADE_LAYMAN_GUIDE: Record<
   },
 };
 
+// Standard Nominal Ratios for Reverse Mode
+interface NominalRatioPreset {
+  id: string;
+  name: string;
+  cement: number;
+  sand: number;
+  stone: number;
+  approxGrade: ConcreteGrade;
+  defaultWc: number;
+  useCase: string;
+}
+
+const NOMINAL_RATIO_PRESETS: NominalRatioPreset[] = [
+  {
+    id: "1_1_2",
+    name: "1 : 1 : 2",
+    cement: 1,
+    sand: 1,
+    stone: 2,
+    approxGrade: "M25",
+    defaultWc: 0.40,
+    useCase: "Heavy columns, water retaining tanks, high strength RCC",
+  },
+  {
+    id: "1_1.5_3",
+    name: "1 : 1.5 : 3",
+    cement: 1,
+    sand: 1.5,
+    stone: 3,
+    approxGrade: "M20",
+    defaultWc: 0.45,
+    useCase: "Universal structural RCC (slabs, beams, staircases, lintels)",
+  },
+  {
+    id: "1_2_4",
+    name: "1 : 2 : 4",
+    cement: 1,
+    sand: 2,
+    stone: 4,
+    approxGrade: "M15",
+    defaultWc: 0.50,
+    useCase: "General unreinforced works, foundations, ground floors",
+  },
+  {
+    id: "1_3_6",
+    name: "1 : 3 : 6",
+    cement: 1,
+    sand: 3,
+    stone: 6,
+    approxGrade: "M15",
+    defaultWc: 0.55,
+    useCase: "Mass concrete foundations, trench leveling, pipe bedding",
+  },
+  {
+    id: "1_4_8",
+    name: "1 : 4 : 8",
+    cement: 1,
+    sand: 4,
+    stone: 8,
+    approxGrade: "M15",
+    defaultWc: 0.60,
+    useCase: "Lean concrete sub-base, mud slabs under footings",
+  },
+];
+
 export const MixCalc: React.FC = () => {
+  // Calculation Direction:
+  // "forward" = Target Strength -> Auto Mix Proportioning
+  // "reverse" = Input Mix Ratio -> Work Back to Calculate Batch Materials
+  const [calcDirection, setCalcDirection] = useState<"forward" | "reverse">("forward");
+
   // Mode: guided (dummy-proof) vs advanced
   const [calcMode, setCalcMode] = useState<"guided" | "advanced">("guided");
   const [selectedPreset, setSelectedPreset] = useState<PresetKey>("slabs_beams");
@@ -381,7 +453,7 @@ export const MixCalc: React.FC = () => {
   // Site Measure Toggle: Display in kg vs 18L Headpans/Buckets
   const [displaySiteBuckets, setDisplaySiteBuckets] = useState<boolean>(true);
 
-  // Core Parameters
+  // Core Parameters (Forward)
   const [grade, setGrade] = useState<ConcreteGrade>("M30");
   const [fck, setFck] = useState<number>(30); // MPa
   const [sd, setSd] = useState<number>(5.0); // Standard deviation
@@ -389,6 +461,14 @@ export const MixCalc: React.FC = () => {
   const [slump, setSlump] = useState<number>(110); // mm
   const [waterCementRatio, setWaterCementRatio] = useState<number>(0.42);
   const [airContent, setAirContent] = useState<number>(1.2); // %
+
+  // ==========================================
+  // REVERSE MIX DESIGN STATE (WORK BACK)
+  // ==========================================
+  const [reverseRatioSand, setReverseRatioSand] = useState<number>(1.5);
+  const [reverseRatioStone, setReverseRatioStone] = useState<number>(3.0);
+  const [reverseTargetGrade, setReverseTargetGrade] = useState<ConcreteGrade>("M25");
+  const [reverseWc, setReverseWc] = useState<number>(0.45);
 
   // Specific Gravities (Advanced)
   const [sgCement, setSgCement] = useState<number>(3.15);
@@ -430,9 +510,9 @@ export const MixCalc: React.FC = () => {
 
   // Batching Mode
   const [batchScale, setBatchScale] = useState<"1m3" | "bag" | "custom">("1m3");
-  const [customBatchVolume, setCustomBatchVolume] = useState<number>(6.0); // m³ (e.g. 1 truck)
+  const [customBatchVolume, setCustomBatchVolume] = useState<number>(6.0); // m³
 
-  // Quick Preset Loader
+  // Quick Preset Loader (Forward)
   const loadPreset = (key: PresetKey) => {
     setSelectedPreset(key);
     const p = PRESET_LIBRARY[key];
@@ -468,20 +548,18 @@ export const MixCalc: React.FC = () => {
     toast.success(`Loaded "${p.title}" mix recipe!`);
   };
 
-  // Grade Change Handler
+  // Grade Change Handler (Forward)
   const handleGradeChange = (g: ConcreteGrade) => {
     setSelectedPreset("custom");
     setGrade(g);
     const num = parseInt(g.substring(1));
     setFck(num);
 
-    // Standard deviation as per IS 456 / ACI 211
     if (num <= 20) setSd(3.5);
     else if (num <= 25) setSd(4.0);
     else if (num <= 50) setSd(5.0);
     else setSd(6.0);
 
-    // Suggested w/c ratio based on target strength
     if (num <= 20) setWaterCementRatio(0.52);
     else if (num <= 25) setWaterCementRatio(0.48);
     else if (num <= 30) setWaterCementRatio(0.42);
@@ -490,21 +568,202 @@ export const MixCalc: React.FC = () => {
     else setWaterCementRatio(0.30);
   };
 
+  // Quick Nominal Ratio Selector (Reverse Mode)
+  const loadNominalRatio = (preset: NominalRatioPreset) => {
+    setReverseRatioSand(preset.sand);
+    setReverseRatioStone(preset.stone);
+    setReverseTargetGrade(preset.approxGrade);
+    setReverseWc(preset.defaultWc);
+    toast.success(`Loaded "${preset.name}" nominal ratio!`);
+  };
+
   // ==========================================
-  // MATHEMATICAL MIX PROPORTIONING ENGINE
+  // MATHEMATICAL ENGINE (FORWARD & REVERSE)
   // ==========================================
   const mixResults = useMemo(() => {
-    // 1. Target Mean Compressive Strength f'cr = fck + 1.65 * s
-    const targetMeanStrength = fck + 1.65 * sd;
+    // ------------------------------------------
+    // CASE A: FORWARD PROPORTIONING (IS 10262)
+    // ------------------------------------------
+    if (calcDirection === "forward") {
+      const targetMeanStrength = fck + 1.65 * sd;
+      const baseWater = maxAggSize === 10 ? 208 : maxAggSize === 20 ? 186 : 165;
+      const slumpDiff = Math.max(0, slump - 50);
+      const rawWater = baseWater + (slumpDiff / 25) * 0.03 * baseWater;
 
-    // 2. Base Water Estimation (for 50mm slump)
-    const baseWater = maxAggSize === 10 ? 208 : maxAggSize === 20 ? 186 : 165;
+      let effectiveWaterReduction = 0;
+      if (useSuperplasticizer && waterReductionPercent > 0) {
+        effectiveWaterReduction = Math.min(32, waterReductionPercent);
+      } else if (useWaterproofer && !useSuperplasticizer) {
+        effectiveWaterReduction = 5;
+      }
 
-    // Slump correction: +3% water for each 25mm increase above 50mm
-    const slumpDiff = Math.max(0, slump - 50);
-    const rawWater = baseWater + (slumpDiff / 25) * 0.03 * baseWater;
+      const waterReductionKg = rawWater * (effectiveWaterReduction / 100);
+      const netWaterContent = Math.round(rawWater - waterReductionKg);
+      const totalBinderContent = Math.round(netWaterContent / waterCementRatio);
 
-    // Chemical Admixture Water Reduction Credit
+      const faPct = useFlyAsh ? Math.min(35, flyAshPercent) : 0;
+      const sfPct = useSilicaFume ? Math.min(15, silicaFumePercent) : 0;
+      const ggbsPct = useGGBS ? Math.min(65, ggbsPercent) : 0;
+
+      const massFlyAsh = Math.round(totalBinderContent * (faPct / 100));
+      const massSilicaFume = Math.round(totalBinderContent * (sfPct / 100));
+      const massGGBS = Math.round(totalBinderContent * (ggbsPct / 100));
+      const massCement = Math.max(150, totalBinderContent - (massFlyAsh + massSilicaFume + massGGBS));
+
+      const ADMIX_DENSITY = 1.10;
+      const superplasticizerKg = useSuperplasticizer
+        ? +(totalBinderContent * (superplasticizerDosage / 100)).toFixed(2)
+        : 0;
+      const superplasticizerL = +(superplasticizerKg / ADMIX_DENSITY).toFixed(2);
+      const retarderKg = useRetarder
+        ? +(totalBinderContent * (retarderDosage / 100)).toFixed(2)
+        : 0;
+      const retarderL = +(retarderKg / ADMIX_DENSITY).toFixed(2);
+      const acceleratorKg = useAccelerator
+        ? +(totalBinderContent * (acceleratorDosage / 100)).toFixed(2)
+        : 0;
+      const acceleratorL = +(acceleratorKg / ADMIX_DENSITY).toFixed(2);
+      const waterprooferKg = useWaterproofer
+        ? +(totalBinderContent * (waterprooferDosage / 100)).toFixed(2)
+        : 0;
+      const waterprooferL = +(waterprooferKg / ADMIX_DENSITY).toFixed(2);
+
+      const totalAdmixKg = superplasticizerKg + retarderKg + acceleratorKg + waterprooferKg;
+      const totalAdmixL = superplasticizerL + retarderL + acceleratorL + waterprooferL;
+
+      const effectiveAir = useAirEntrainer ? Math.max(3.5, airContent) : airContent;
+      const volAir = effectiveAir / 100;
+      const volWater = netWaterContent / 1000;
+      const volCement = massCement / (sgCement * 1000);
+      const volFlyAsh = massFlyAsh > 0 ? massFlyAsh / (sgFlyAsh * 1000) : 0;
+      const volSilicaFume = massSilicaFume > 0 ? massSilicaFume / (sgSilicaFume * 1000) : 0;
+      const volGGBS = massGGBS > 0 ? massGGBS / (sgGGBS * 1000) : 0;
+      const volAdmix = totalAdmixKg / (ADMIX_DENSITY * 1000);
+
+      const volOccupied = volAir + volWater + volCement + volFlyAsh + volSilicaFume + volGGBS + volAdmix;
+      const volAggregate = Math.max(0.60, 1.0 - volOccupied);
+
+      let caRatio = 0.62;
+      if (maxAggSize === 10) {
+        caRatio = zoneFA === "Zone I" ? 0.48 : zoneFA === "Zone II" ? 0.50 : 0.52;
+      } else if (maxAggSize === 20) {
+        caRatio = zoneFA === "Zone I" ? 0.60 : zoneFA === "Zone II" ? 0.62 : 0.64;
+      } else {
+        caRatio = zoneFA === "Zone I" ? 0.69 : zoneFA === "Zone II" ? 0.71 : 0.73;
+      }
+
+      const wcDiff = 0.50 - waterCementRatio;
+      caRatio = Math.min(0.78, Math.max(0.45, caRatio + (wcDiff / 0.05) * 0.01));
+
+      const volCA = volAggregate * caRatio;
+      const volFA = volAggregate * (1 - caRatio);
+
+      const massCA = Math.round(volCA * sgCA * 1000);
+      const massFA = Math.round(volFA * sgFA * 1000);
+
+      const totalMixMass =
+        massCement + massFlyAsh + massSilicaFume + massGGBS + netWaterContent + massFA + massCA + Math.round(totalAdmixKg);
+
+      const binderRatio = 1;
+      const faRatio = +(massFA / totalBinderContent).toFixed(2);
+      const caRatioVal = +(massCA / totalBinderContent).toFixed(2);
+      const waterRatio = +(netWaterContent / totalBinderContent).toFixed(2);
+
+      let extraWaterFromSand = 0;
+      let extraWaterFromStone = 0;
+      let siteCorrectedWater = netWaterContent;
+      let siteCorrectedFA = massFA;
+      let siteCorrectedCA = massCA;
+
+      if (enableMoistureCorr) {
+        extraWaterFromSand = Math.round(massFA * (sandMoisture / 100));
+        extraWaterFromStone = Math.round(massCA * (stoneMoisture / 100));
+        siteCorrectedWater = Math.max(0, netWaterContent - (extraWaterFromSand + extraWaterFromStone));
+        siteCorrectedFA = massFA + extraWaterFromSand;
+        siteCorrectedCA = massCA + extraWaterFromStone;
+      }
+
+      let scaleMultiplier = 1.0;
+      if (batchScale === "bag") {
+        scaleMultiplier = 50 / massCement;
+      } else if (batchScale === "custom") {
+        scaleMultiplier = Math.max(0.01, customBatchVolume);
+      }
+
+      const scmWeight = massFlyAsh + massSilicaFume + massGGBS;
+      const carbonReductionPct = totalBinderContent > 0 ? Math.round((scmWeight / totalBinderContent) * 90) : 0;
+
+      const pctStone = Math.round((massCA / totalMixMass) * 100);
+      const pctSand = Math.round((massFA / totalMixMass) * 100);
+      const pctCement = Math.round((massCement / totalMixMass) * 100);
+      const pctSCM = Math.round((scmWeight / totalMixMass) * 100);
+      const pctWater = Math.round((netWaterContent / totalMixMass) * 100);
+      const pctAdmix = Math.max(0.5, +(totalAdmixKg / totalMixMass * 100).toFixed(1));
+
+      const bagMultiplier = 50 / massCement;
+      const bagSandKg = (enableMoistureCorr ? siteCorrectedFA : massFA) * bagMultiplier;
+      const bagStoneKg = (enableMoistureCorr ? siteCorrectedCA : massCA) * bagMultiplier;
+      const bagWaterL = (enableMoistureCorr ? siteCorrectedWater : netWaterContent) * bagMultiplier;
+      const bagAdmixMl = totalAdmixL * 1000 * bagMultiplier;
+
+      return {
+        targetMeanStrength,
+        rawWater: Math.round(rawWater),
+        waterReductionKg: Math.round(waterReductionKg),
+        effectiveWaterReduction,
+        netWaterContent,
+        totalBinderContent,
+        massCement,
+        massFlyAsh,
+        massSilicaFume,
+        massGGBS,
+        massFA,
+        massCA,
+        totalMixMass,
+        proportions: { binderRatio, faRatio, caRatioVal, waterRatio },
+        admixtures: {
+          superplasticizerKg,
+          superplasticizerL,
+          retarderKg,
+          retarderL,
+          acceleratorKg,
+          acceleratorL,
+          waterprooferKg,
+          waterprooferL,
+          totalAdmixKg: +totalAdmixKg.toFixed(2),
+          totalAdmixL: +totalAdmixL.toFixed(2),
+        },
+        moistureCorrection: {
+          applied: enableMoistureCorr,
+          extraWaterFromSand,
+          extraWaterFromStone,
+          siteCorrectedWater,
+          siteCorrectedFA,
+          siteCorrectedCA,
+        },
+        scaleMultiplier,
+        carbonReductionPct,
+        breakdownPct: { pctStone, pctSand, pctCement, pctSCM, pctWater, pctAdmix },
+        siteBuckets: {
+          sand: +(bagSandKg / 27).toFixed(1),
+          stone: +(bagStoneKg / 26).toFixed(1),
+          water: +(bagWaterL / 18).toFixed(1),
+          waterLiters: Math.round(bagWaterL),
+          admixMl: Math.round(bagAdmixMl),
+        },
+        reverseAnalysis: null,
+      };
+    }
+
+    // ------------------------------------------
+    // CASE B: REVERSE MIX RATIO ("WORK BACK")
+    // ------------------------------------------
+    // Input: 1 part cementitious : reverseRatioSand parts sand : reverseRatioStone parts stone
+    // With reverseWc, additives, and target strength
+    const ADMIX_DENSITY = 1.10;
+    const effectiveAir = useAirEntrainer ? Math.max(3.5, airContent) : airContent;
+    const volAir = effectiveAir / 100;
+
     let effectiveWaterReduction = 0;
     if (useSuperplasticizer && waterReductionPercent > 0) {
       effectiveWaterReduction = Math.min(32, waterReductionPercent);
@@ -512,102 +771,63 @@ export const MixCalc: React.FC = () => {
       effectiveWaterReduction = 5;
     }
 
-    const waterReductionKg = rawWater * (effectiveWaterReduction / 100);
-    const netWaterContent = Math.round(rawWater - waterReductionKg);
+    // Water cut factor
+    const waterMultiplier = reverseWc * (1 - effectiveWaterReduction / 100);
 
-    // 3. Total Binder / Cementitious Material Content
-    const totalBinderContent = Math.round(netWaterContent / waterCementRatio);
-
-    // 4. SCM Apportioning (% by weight of total binder)
+    // SCM Fractions
     const faPct = useFlyAsh ? Math.min(35, flyAshPercent) : 0;
     const sfPct = useSilicaFume ? Math.min(15, silicaFumePercent) : 0;
     const ggbsPct = useGGBS ? Math.min(65, ggbsPercent) : 0;
+    const opcPct = Math.max(0, 100 - (faPct + sfPct + ggbsPct));
 
+    // Admixtures dosage per kg binder
+    const spDose = useSuperplasticizer ? superplasticizerDosage / 100 : 0;
+    const retDose = useRetarder ? retarderDosage / 100 : 0;
+    const accDose = useAccelerator ? acceleratorDosage / 100 : 0;
+    const wpDose = useWaterproofer ? waterprooferDosage / 100 : 0;
+    const totalAdmixFraction = spDose + retDose + accDose + wpDose;
+
+    // Calculate sum of volumetric coefficients k per 1 kg of binder
+    const kWater = waterMultiplier / 1000;
+    const kCement = (opcPct / 100) / (sgCement * 1000);
+    const kFA_SCM = faPct > 0 ? (faPct / 100) / (sgFlyAsh * 1000) : 0;
+    const kSF_SCM = sfPct > 0 ? (sfPct / 100) / (sgSilicaFume * 1000) : 0;
+    const kGGBS_SCM = ggbsPct > 0 ? (ggbsPct / 100) / (sgGGBS * 1000) : 0;
+    const kSand = reverseRatioSand / (sgFA * 1000);
+    const kStone = reverseRatioStone / (sgCA * 1000);
+    const kAdmix = totalAdmixFraction / (ADMIX_DENSITY * 1000);
+
+    const kTotal = kWater + kCement + kFA_SCM + kSF_SCM + kGGBS_SCM + kSand + kStone + kAdmix;
+
+    // Total Cementitious Content for 1 m³
+    const totalBinderContent = Math.round((1.0 - volAir) / kTotal);
+
+    const massCement = Math.round(totalBinderContent * (opcPct / 100));
     const massFlyAsh = Math.round(totalBinderContent * (faPct / 100));
     const massSilicaFume = Math.round(totalBinderContent * (sfPct / 100));
     const massGGBS = Math.round(totalBinderContent * (ggbsPct / 100));
 
-    const massCement = Math.max(
-      150,
-      totalBinderContent - (massFlyAsh + massSilicaFume + massGGBS)
-    );
+    const netWaterContent = Math.round(totalBinderContent * waterMultiplier);
+    const rawWater = Math.round(netWaterContent / (1 - effectiveWaterReduction / 100));
+    const waterReductionKg = rawWater - netWaterContent;
 
-    // 5. Chemical Admixtures Quantities (kg and Liters)
-    const ADMIX_DENSITY = 1.10; // kg/L
+    const massFA = Math.round(totalBinderContent * reverseRatioSand);
+    const massCA = Math.round(totalBinderContent * reverseRatioStone);
 
-    const superplasticizerKg = useSuperplasticizer
-      ? +(totalBinderContent * (superplasticizerDosage / 100)).toFixed(2)
-      : 0;
+    const superplasticizerKg = +(totalBinderContent * spDose).toFixed(2);
     const superplasticizerL = +(superplasticizerKg / ADMIX_DENSITY).toFixed(2);
-
-    const retarderKg = useRetarder
-      ? +(totalBinderContent * (retarderDosage / 100)).toFixed(2)
-      : 0;
+    const retarderKg = +(totalBinderContent * retDose).toFixed(2);
     const retarderL = +(retarderKg / ADMIX_DENSITY).toFixed(2);
-
-    const acceleratorKg = useAccelerator
-      ? +(totalBinderContent * (acceleratorDosage / 100)).toFixed(2)
-      : 0;
+    const acceleratorKg = +(totalBinderContent * accDose).toFixed(2);
     const acceleratorL = +(acceleratorKg / ADMIX_DENSITY).toFixed(2);
-
-    const waterprooferKg = useWaterproofer
-      ? +(totalBinderContent * (waterprooferDosage / 100)).toFixed(2)
-      : 0;
+    const waterprooferKg = +(totalBinderContent * wpDose).toFixed(2);
     const waterprooferL = +(waterprooferKg / ADMIX_DENSITY).toFixed(2);
 
-    const totalAdmixKg =
-      superplasticizerKg + retarderKg + acceleratorKg + waterprooferKg;
-    const totalAdmixL =
-      superplasticizerL + retarderL + acceleratorL + waterprooferL;
-
-    // 6. Absolute Volume Method (m³) for 1.0 m³ Concrete
-    const effectiveAir = useAirEntrainer ? Math.max(3.5, airContent) : airContent;
-    const volAir = effectiveAir / 100;
-    const volWater = netWaterContent / 1000;
-    const volCement = massCement / (sgCement * 1000);
-    const volFlyAsh = massFlyAsh > 0 ? massFlyAsh / (sgFlyAsh * 1000) : 0;
-    const volSilicaFume = massSilicaFume > 0 ? massSilicaFume / (sgSilicaFume * 1000) : 0;
-    const volGGBS = massGGBS > 0 ? massGGBS / (sgGGBS * 1000) : 0;
-    const volAdmix = totalAdmixKg / (ADMIX_DENSITY * 1000);
-
-    const volOccupied =
-      volAir + volWater + volCement + volFlyAsh + volSilicaFume + volGGBS + volAdmix;
-    const volAggregate = Math.max(0.60, 1.0 - volOccupied);
-
-    // Coarse Aggregate Volume Fraction
-    let caRatio = 0.62;
-    if (maxAggSize === 10) {
-      caRatio = zoneFA === "Zone I" ? 0.48 : zoneFA === "Zone II" ? 0.50 : 0.52;
-    } else if (maxAggSize === 20) {
-      caRatio = zoneFA === "Zone I" ? 0.60 : zoneFA === "Zone II" ? 0.62 : 0.64;
-    } else {
-      caRatio = zoneFA === "Zone I" ? 0.69 : zoneFA === "Zone II" ? 0.71 : 0.73;
-    }
-
-    const wcDiff = 0.50 - waterCementRatio;
-    caRatio = Math.min(0.78, Math.max(0.45, caRatio + (wcDiff / 0.05) * 0.01));
-
-    const volCA = volAggregate * caRatio;
-    const volFA = volAggregate * (1 - caRatio);
-
-    const massCA = Math.round(volCA * sgCA * 1000);
-    const massFA = Math.round(volFA * sgFA * 1000);
+    const totalAdmixKg = superplasticizerKg + retarderKg + acceleratorKg + waterprooferKg;
+    const totalAdmixL = superplasticizerL + retarderL + acceleratorL + waterprooferL;
 
     const totalMixMass =
-      massCement +
-      massFlyAsh +
-      massSilicaFume +
-      massGGBS +
-      netWaterContent +
-      massFA +
-      massCA +
-      Math.round(totalAdmixKg);
-
-    // Proportions
-    const binderRatio = 1;
-    const faRatio = +(massFA / totalBinderContent).toFixed(2);
-    const caRatioVal = +(massCA / totalBinderContent).toFixed(2);
-    const waterRatio = +(netWaterContent / totalBinderContent).toFixed(2);
+      massCement + massFlyAsh + massSilicaFume + massGGBS + netWaterContent + massFA + massCA + Math.round(totalAdmixKg);
 
     // Moisture Correction
     let extraWaterFromSand = 0;
@@ -624,7 +844,6 @@ export const MixCalc: React.FC = () => {
       siteCorrectedCA = massCA + extraWaterFromStone;
     }
 
-    // Scale Multiplier
     let scaleMultiplier = 1.0;
     if (batchScale === "bag") {
       scaleMultiplier = 50 / massCement;
@@ -632,13 +851,19 @@ export const MixCalc: React.FC = () => {
       scaleMultiplier = Math.max(0.01, customBatchVolume);
     }
 
-    // Green Carbon Savings
     const scmWeight = massFlyAsh + massSilicaFume + massGGBS;
-    const carbonReductionPct = totalBinderContent > 0
-      ? Math.round((scmWeight / totalBinderContent) * 90)
-      : 0;
+    const carbonReductionPct = totalBinderContent > 0 ? Math.round((scmWeight / totalBinderContent) * 90) : 0;
 
-    // Component Percentage breakdown for visual stacked bar
+    // Empirical Strength Estimation based on Bolomey & Feret Equations
+    // fc ≈ K * (C/W - 0.5) with K ≈ 18-20 for ordinary aggregate
+    const cementWaterRatio = totalBinderContent / Math.max(100, netWaterContent);
+    const estimatedFck = Math.min(65, Math.max(10, Math.round(18.5 * (cementWaterRatio - 0.45))));
+
+    const targetFckNum = parseInt(reverseTargetGrade.substring(1));
+    const targetMeanStrength = targetFckNum + 1.65 * (targetFckNum <= 25 ? 4.0 : 5.0);
+
+    const strengthAdequate = estimatedFck >= targetFckNum;
+
     const pctStone = Math.round((massCA / totalMixMass) * 100);
     const pctSand = Math.round((massFA / totalMixMass) * 100);
     const pctCement = Math.round((massCement / totalMixMass) * 100);
@@ -646,20 +871,11 @@ export const MixCalc: React.FC = () => {
     const pctWater = Math.round((netWaterContent / totalMixMass) * 100);
     const pctAdmix = Math.max(0.5, +(totalAdmixKg / totalMixMass * 100).toFixed(1));
 
-    // Layman Buckets Calculation for 50kg bag of cement
-    // 1 standard masonry headpan or 18L bucket:
-    // Sand ~ 27 kg per 18L bucket
-    // Gravel ~ 26 kg per 18L bucket
-    // Water 1 L = 1 kg (18L bucket = 18 kg)
     const bagMultiplier = 50 / massCement;
     const bagSandKg = (enableMoistureCorr ? siteCorrectedFA : massFA) * bagMultiplier;
     const bagStoneKg = (enableMoistureCorr ? siteCorrectedCA : massCA) * bagMultiplier;
     const bagWaterL = (enableMoistureCorr ? siteCorrectedWater : netWaterContent) * bagMultiplier;
-    const bagAdmixMl = (totalAdmixL * 1000) * bagMultiplier;
-
-    const bucketsSand = +(bagSandKg / 27).toFixed(1);
-    const bucketsStone = +(bagStoneKg / 26).toFixed(1);
-    const bucketsWater = +(bagWaterL / 18).toFixed(1);
+    const bagAdmixMl = totalAdmixL * 1000 * bagMultiplier;
 
     return {
       targetMeanStrength,
@@ -676,10 +892,10 @@ export const MixCalc: React.FC = () => {
       massCA,
       totalMixMass,
       proportions: {
-        binderRatio,
-        faRatio,
-        caRatioVal,
-        waterRatio,
+        binderRatio: 1,
+        faRatio: reverseRatioSand,
+        caRatioVal: reverseRatioStone,
+        waterRatio: +reverseWc.toFixed(2),
       },
       admixtures: {
         superplasticizerKg,
@@ -703,29 +919,32 @@ export const MixCalc: React.FC = () => {
       },
       scaleMultiplier,
       carbonReductionPct,
-      breakdownPct: {
-        pctStone,
-        pctSand,
-        pctCement,
-        pctSCM,
-        pctWater,
-        pctAdmix,
-      },
+      breakdownPct: { pctStone, pctSand, pctCement, pctSCM, pctWater, pctAdmix },
       siteBuckets: {
-        sand: bucketsSand,
-        stone: bucketsStone,
-        water: bucketsWater,
+        sand: +(bagSandKg / 27).toFixed(1),
+        stone: +(bagStoneKg / 26).toFixed(1),
+        water: +(bagWaterL / 18).toFixed(1),
         waterLiters: Math.round(bagWaterL),
         admixMl: Math.round(bagAdmixMl),
       },
+      reverseAnalysis: {
+        estimatedFck,
+        targetFck: targetFckNum,
+        adequate: strengthAdequate,
+      },
     };
   }, [
+    calcDirection,
     fck,
     sd,
     maxAggSize,
     slump,
     waterCementRatio,
     airContent,
+    reverseRatioSand,
+    reverseRatioStone,
+    reverseTargetGrade,
+    reverseWc,
     sgCement,
     sgFlyAsh,
     sgSilicaFume,
@@ -756,14 +975,18 @@ export const MixCalc: React.FC = () => {
     customBatchVolume,
   ]);
 
-  // Helper for scaled numbers
+  // Scaled numbers helper
   const q = (baseQty: number) => {
     return +(baseQty * mixResults.scaleMultiplier).toFixed(
       batchScale === "bag" ? 1 : baseQty < 10 ? 2 : 0
     );
   };
 
-  // Layman Slump Flow Indicator Info
+  // Active Grade info (Forward or Reverse)
+  const activeGradeKey = calcDirection === "forward" ? grade : reverseTargetGrade;
+  const gradeInfo = GRADE_LAYMAN_GUIDE[activeGradeKey];
+
+  // Slump info for Forward mode
   const slumpIndicator = useMemo(() => {
     if (slump <= 60) {
       return {
@@ -808,23 +1031,24 @@ export const MixCalc: React.FC = () => {
     }
   }, [slump]);
 
-  // Layman Water-to-Binder Health Dial
+  // Water-Binder Dial
+  const effectiveWc = calcDirection === "forward" ? waterCementRatio : reverseWc;
   const waterHealthIndicator = useMemo(() => {
-    if (waterCementRatio <= 0.38) {
+    if (effectiveWc <= 0.38) {
       return {
         label: "Ultra-Strong & Waterproof",
         badge: "🟢 Premium Durability",
         color: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
         advice: "Extremely dense, crack-resistant and impermeable to water leaks.",
       };
-    } else if (waterCementRatio <= 0.45) {
+    } else if (effectiveWc <= 0.45) {
       return {
         label: "Good Balance",
         badge: "🟢 Safe Structural",
         color: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
         advice: "Standard quality for reinforced concrete beams, columns and slabs.",
       };
-    } else if (waterCementRatio <= 0.50) {
+    } else if (effectiveWc <= 0.50) {
       return {
         label: "Moderate (Watch Shrinkage)",
         badge: "🟡 Moderate Strength",
@@ -839,16 +1063,16 @@ export const MixCalc: React.FC = () => {
         advice: "Excess water creates hollow microscopic pores, causing weak powdery concrete!",
       };
     }
-  }, [waterCementRatio]);
+  }, [effectiveWc]);
 
   // Copy Recipe Text
   const copyRecipeToClipboard = () => {
     const text = `
 === JQMS CONCRETE MIX DESIGN SUBMITTAL ===
-Grade: ${grade} (${GRADE_LAYMAN_GUIDE[grade].name} - ${GRADE_LAYMAN_GUIDE[grade].psi} PSI)
+Mode: ${calcDirection === "forward" ? "Forward Engineering (Strength -> Proportions)" : "Reverse Mix Design (Ratio -> Materials)"}
+Grade: ${activeGradeKey} (${gradeInfo.name} - ${gradeInfo.psi} PSI)
 Target Mean Strength f'cr: ${mixResults.targetMeanStrength.toFixed(1)} MPa
-Workability: ${slump} mm (${slumpIndicator.label})
-w/b Ratio: ${waterCementRatio.toFixed(2)} (${waterHealthIndicator.label})
+Ratio: 1 : ${mixResults.proportions.faRatio} : ${mixResults.proportions.caRatioVal} (w/b: ${mixResults.proportions.waterRatio})
 Batching Basis: ${
       batchScale === "1m3"
         ? "1.0 m³ Standard Mix"
@@ -915,10 +1139,6 @@ ${
       mixResults.siteBuckets.admixMl > 0 ? `+ ${mixResults.siteBuckets.admixMl} ml Admixture` : "no admix"
     })
 
---- PROPORTIONS RATIO ---
-1 : ${mixResults.proportions.faRatio} : ${mixResults.proportions.caRatioVal} (w/b: ${
-      mixResults.proportions.waterRatio
-    })
 Generated via JQMS Engineering Mix Design Engine
     `.trim();
 
@@ -930,11 +1150,9 @@ Generated via JQMS Engineering Mix Design Engine
     window.print();
   };
 
-  const gradeInfo = GRADE_LAYMAN_GUIDE[grade];
-
   return (
     <div className="space-y-6">
-      {/* Top Banner & Mode Toggle */}
+      {/* Top Banner & Direction / Mode Switcher */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-3">
@@ -947,11 +1165,11 @@ Generated via JQMS Engineering Mix Design Engine
                   Concrete Mix Design Assistant
                 </h2>
                 <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
-                  Dummy-Proof Edition
+                  Dual-Direction
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Proportioning tool with visual flow indicators, layman strength gauges & bucket estimators.
+                Calculate proportions forward from target strength OR work backwards from an input mix ratio.
               </p>
             </div>
           </div>
@@ -985,284 +1203,454 @@ Generated via JQMS Engineering Mix Design Engine
           </div>
         </div>
 
-        {/* 1-Click Guided Presets (Dummy-Proof Selection) */}
-        <div className="mt-6">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-              <Building className="w-3.5 h-3.5 text-indigo-500" />
-              Step 1: Pick What You Are Casting (Pre-Optimized Recipes)
-            </span>
-            <span className="text-[11px] text-slate-400 hidden sm:inline">
-              Click any card to auto-configure additives & proportions
-            </span>
-          </div>
+        {/* PRIMARY CALCULATION DIRECTION TABS */}
+        <div className="mt-5 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setCalcDirection("forward")}
+            className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-bold transition ${
+              calcDirection === "forward"
+                ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-750"
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            1. Target Strength &rarr; Auto Mix Ratio (Forward Design)
+          </button>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            {(Object.keys(PRESET_LIBRARY) as PresetKey[]).map((key) => {
-              const preset = PRESET_LIBRARY[key];
-              const isSelected = selectedPreset === key;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => loadPreset(key)}
-                  className={`p-3 text-left rounded-xl border transition flex flex-col justify-between relative group ${
-                    isSelected
-                      ? "bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-500 dark:border-indigo-500/80 ring-2 ring-indigo-500/20 shadow-sm"
-                      : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-100/60 dark:hover:bg-slate-800/80"
-                  }`}
-                >
-                  {isSelected && (
-                    <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
-                  )}
-                  <div>
-                    <div className="text-xl mb-1">{preset.icon}</div>
-                    <div className="text-xs font-bold text-slate-900 dark:text-white leading-tight">
-                      {preset.title}
-                    </div>
-                  </div>
-                  <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium mt-2 leading-tight">
-                    {preset.laymanTag}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            onClick={() => setCalcDirection("reverse")}
+            className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-bold transition ${
+              calcDirection === "reverse"
+                ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-750"
+            }`}
+          >
+            <RotateCcw className="w-4 h-4" />
+            2. Input Mix Ratio &rarr; Calculate Materials ("Work Back")
+          </button>
         </div>
+
+        {/* FORWARD PRESET SELECTOR (Only in forward direction) */}
+        {calcDirection === "forward" && (
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <Building className="w-3.5 h-3.5 text-indigo-500" />
+                Pick What You Are Casting (Pre-Optimized Recipes)
+              </span>
+              <span className="text-[11px] text-slate-400 hidden sm:inline">
+                Click any card to auto-configure additives & proportions
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              {(Object.keys(PRESET_LIBRARY) as PresetKey[]).map((key) => {
+                const preset = PRESET_LIBRARY[key];
+                const isSelected = selectedPreset === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => loadPreset(key)}
+                    className={`p-3 text-left rounded-xl border transition flex flex-col justify-between relative group ${
+                      isSelected
+                        ? "bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-500 dark:border-indigo-500/80 ring-2 ring-indigo-500/20 shadow-sm"
+                        : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-100/60 dark:hover:bg-slate-800/80"
+                    }`}
+                  >
+                    {isSelected && (
+                      <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
+                    )}
+                    <div>
+                      <div className="text-xl mb-1">{preset.icon}</div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white leading-tight">
+                        {preset.title}
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium mt-2 leading-tight">
+                      {preset.laymanTag}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* REVERSE RATIO SELECTOR (Only in reverse direction) */}
+        {calcDirection === "reverse" && (
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <RotateCcw className="w-3.5 h-3.5 text-indigo-500" />
+                Pick a Standard Site Ratio OR Enter Custom Proportions
+              </span>
+              <span className="text-[11px] text-slate-400 hidden sm:inline">
+                Common nominal volumetric site ratios
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+              {NOMINAL_RATIO_PRESETS.map((preset) => {
+                const isSelected =
+                  reverseRatioSand === preset.sand && reverseRatioStone === preset.stone;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => loadNominalRatio(preset)}
+                    className={`p-3 rounded-xl border text-left transition ${
+                      isSelected
+                        ? "bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 shadow-sm"
+                        : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="text-sm font-black text-slate-900 dark:text-white">
+                      {preset.name}
+                    </div>
+                    <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">
+                      Approx {preset.approxGrade}
+                    </div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-1 leading-tight">
+                      {preset.useCase}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main Parameters & Additives Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left 7 Columns: Interactive Parameters & Additives */}
+        {/* Left 7 Columns: Interactive Parameters */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Section A: Strength & Slump with Visual Indicators */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-indigo-500" />
-                Step 2: Concrete Grade & Flowability
-              </h3>
-              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                fck = {fck} MPa
-              </span>
-            </div>
-
-            {/* Visual Strength Meter & Layman Guide Banner */}
-            <div className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${gradeInfo.color}`}>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-black tracking-tight">{grade}: {gradeInfo.name}</span>
-                  <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-white/60 dark:bg-black/30 font-bold">
-                    ≈ {gradeInfo.psi} PSI
-                  </span>
-                </div>
-                <p className="text-xs mt-1 opacity-90">
-                  👉 <strong>Best For:</strong> {gradeInfo.usage}
-                </p>
-              </div>
-
-              {/* Strength Level Meter Bars (1 to 5) */}
-              <div className="flex items-center gap-1 self-end sm:self-center">
-                <span className="text-[10px] uppercase font-bold tracking-wider mr-1 opacity-70">
-                  Strength:
-                </span>
-                {[1, 2, 3, 4, 5].map((lvl) => (
-                  <div
-                    key={lvl}
-                    className={`w-3.5 h-6 rounded-sm transition-all ${
-                      lvl <= gradeInfo.meterLevel
-                        ? "bg-indigo-600 dark:bg-indigo-400 opacity-100 scale-105"
-                        : "bg-slate-300 dark:bg-slate-700 opacity-40"
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Grade Selector */}
-            <div>
-              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
-                Select Concrete Grade (Characteristic 28-day Compressive Strength):
-              </label>
-              <div className="grid grid-cols-5 gap-2">
-                {(
-                  [
-                    "M15",
-                    "M20",
-                    "M25",
-                    "M30",
-                    "M35",
-                    "M40",
-                    "M45",
-                    "M50",
-                    "M55",
-                    "M60",
-                  ] as ConcreteGrade[]
-                ).map((g) => (
-                  <button
-                    key={g}
-                    type="button"
-                    onClick={() => handleGradeChange(g)}
-                    className={`py-2 text-xs font-bold rounded-lg border transition ${
-                      grade === g
-                        ? "bg-indigo-600 text-white border-indigo-500 shadow-sm ring-2 ring-indigo-500/30"
-                        : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750"
-                    }`}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Workability / Slump with Visual Flow Indicator */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
+          {/* SECTION A: INPUTS BASED ON DIRECTION */}
+          {calcDirection === "forward" ? (
+            /* FORWARD SECTION A: Strength & Slump */
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-5">
               <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-indigo-500" />
+                  Step 2: Concrete Grade & Flowability
+                </h3>
+                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  fck = {fck} MPa
+                </span>
+              </div>
+
+              {/* Strength Meter */}
+              <div className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${gradeInfo.color}`}>
                 <div>
-                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300 block">
-                    Workability / Slump (Flow Rate)
-                  </label>
-                  <span className="text-[11px] text-slate-400">
-                    Controls how easily the concrete spreads without getting stuck
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-black tracking-tight">{grade}: {gradeInfo.name}</span>
+                    <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-white/60 dark:bg-black/30 font-bold">
+                      ≈ {gradeInfo.psi} PSI
+                    </span>
+                  </div>
+                  <p className="text-xs mt-1 opacity-90">
+                    👉 <strong>Best For:</strong> {gradeInfo.usage}
+                  </p>
                 </div>
-                <div className="text-right">
-                  <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 font-mono">
-                    {slump} mm
+
+                <div className="flex items-center gap-1 self-end sm:self-center">
+                  <span className="text-[10px] uppercase font-bold tracking-wider mr-1 opacity-70">
+                    Strength:
                   </span>
-                  <span className={`block text-[10px] font-bold px-2 py-0.5 rounded-full border mt-0.5 ${slumpIndicator.color}`}>
-                    {slumpIndicator.badge}
-                  </span>
+                  {[1, 2, 3, 4, 5].map((lvl) => (
+                    <div
+                      key={lvl}
+                      className={`w-3.5 h-6 rounded-sm transition-all ${
+                        lvl <= gradeInfo.meterLevel
+                          ? "bg-indigo-600 dark:bg-indigo-400 opacity-100 scale-105"
+                          : "bg-slate-300 dark:bg-slate-700 opacity-40"
+                      }`}
+                    />
+                  ))}
                 </div>
               </div>
 
-              {/* Slump Visual Bar Meter */}
-              <div className="space-y-1">
-                <input
-                  type="range"
-                  min="25"
-                  max="200"
-                  step="5"
-                  value={slump}
-                  onChange={(e) => {
-                    setSelectedPreset("custom");
-                    setSlump(Number(e.target.value));
-                  }}
-                  className="w-full accent-indigo-600 cursor-pointer"
-                />
-                {/* Visual Flow Track */}
-                <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all duration-300 ${slumpIndicator.barColor}`}
-                    style={{ width: `${slumpIndicator.pct}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Layman Flow Description Pill */}
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                <div>
-                  <span className="text-slate-500 dark:text-slate-400">Texture: </span>
-                  <strong className="text-slate-800 dark:text-slate-200">{slumpIndicator.feel}</strong>
-                </div>
-                <div className="text-slate-600 dark:text-slate-300 font-semibold text-[11px] whitespace-nowrap">
-                  {slumpIndicator.pumpable}
-                </div>
-              </div>
-
-              {/* Aggregate Size */}
-              <div className="pt-2">
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                  Max Stone Size in Aggregate Pile (NMAS)
+              {/* Grade Selector */}
+              <div>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Select Concrete Grade:
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {([10, 20, 40] as const).map((sz) => (
+                <div className="grid grid-cols-5 gap-2">
+                  {(
+                    ["M15", "M20", "M25", "M30", "M35", "M40", "M45", "M50", "M55", "M60"] as ConcreteGrade[]
+                  ).map((g) => (
                     <button
-                      key={sz}
+                      key={g}
                       type="button"
-                      onClick={() => {
-                        setSelectedPreset("custom");
-                        setMaxAggSize(sz);
-                      }}
+                      onClick={() => handleGradeChange(g)}
                       className={`py-2 text-xs font-bold rounded-lg border transition ${
-                        maxAggSize === sz
-                          ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-transparent shadow-sm"
-                          : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                        grade === g
+                          ? "bg-indigo-600 text-white border-indigo-500 shadow-sm ring-2 ring-indigo-500/30"
+                          : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750"
                       }`}
                     >
-                      {sz} mm {sz === 20 ? "(Standard)" : ""}
+                      {g}
                     </button>
                   ))}
                 </div>
-                <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                  {maxAggSize === 10
-                    ? "👉 10mm (Small stones): For congested steel bars, thin slabs, hollow blocks."
-                    : maxAggSize === 20
-                    ? "👉 20mm (Standard): Universal stone size for 90% of slabs, columns, and beams."
-                    : "👉 40mm (Big stones): For massive ground footings and unreinforced mass concrete."}
-                </span>
               </div>
-            </div>
 
-            {/* Water-Cement Ratio with Quality Dial */}
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                      Water-to-Binder Ratio (w/b)
+              {/* Slump Flow */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300 block">
+                      Workability / Slump (Flow Rate)
                     </label>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${waterHealthIndicator.color}`}>
-                      {waterHealthIndicator.badge}
+                    <span className="text-[11px] text-slate-400">
+                      Controls how easily the concrete spreads without getting stuck
                     </span>
                   </div>
-                  <span className="text-[11px] text-slate-400">
-                    {waterHealthIndicator.advice}
+                  <div className="text-right">
+                    <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 font-mono">
+                      {slump} mm
+                    </span>
+                    <span className={`block text-[10px] font-bold px-2 py-0.5 rounded-full border mt-0.5 ${slumpIndicator.color}`}>
+                      {slumpIndicator.badge}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min="25"
+                    max="200"
+                    step="5"
+                    value={slump}
+                    onChange={(e) => {
+                      setSelectedPreset("custom");
+                      setSlump(Number(e.target.value));
+                    }}
+                    className="w-full accent-indigo-600 cursor-pointer"
+                  />
+                  <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 ${slumpIndicator.barColor}`}
+                      style={{ width: `${slumpIndicator.pct}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-500 dark:text-slate-400">Texture: </span>
+                    <strong className="text-slate-800 dark:text-slate-200">{slumpIndicator.feel}</strong>
+                  </div>
+                  <div className="text-slate-600 dark:text-slate-300 font-semibold text-[11px] whitespace-nowrap">
+                    {slumpIndicator.pumpable}
+                  </div>
+                </div>
+              </div>
+
+              {/* Water-Cement Ratio */}
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Water-to-Binder Ratio (w/b)
+                      </label>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${waterHealthIndicator.color}`}>
+                        {waterHealthIndicator.badge}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      {waterHealthIndicator.advice}
+                    </span>
+                  </div>
+                  <span className="text-sm font-mono font-black text-blue-600 dark:text-blue-400">
+                    {waterCementRatio.toFixed(2)}
                   </span>
                 </div>
-                <span className="text-sm font-mono font-black text-blue-600 dark:text-blue-400">
-                  {waterCementRatio.toFixed(2)}
+
+                <input
+                  type="range"
+                  min="0.28"
+                  max="0.55"
+                  step="0.01"
+                  value={waterCementRatio}
+                  onChange={(e) => {
+                    setSelectedPreset("custom");
+                    setWaterCementRatio(Number(e.target.value));
+                  }}
+                  className="w-full accent-blue-600 cursor-pointer"
+                />
+              </div>
+            </div>
+          ) : (
+            /* REVERSE SECTION A: INPUT YOUR MIX RATIO & TARGET STRENGTH */
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-indigo-500" />
+                  Step 2: Enter Your Mix Ratio & Target Strength
+                </h3>
+                <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                  1 : {reverseRatioSand} : {reverseRatioStone}
                 </span>
               </div>
 
-              <input
-                type="range"
-                min="0.28"
-                max="0.55"
-                step="0.01"
-                value={waterCementRatio}
-                onChange={(e) => {
-                  setSelectedPreset("custom");
-                  setWaterCementRatio(Number(e.target.value));
-                }}
-                className="w-full accent-blue-600 cursor-pointer"
-              />
+              {/* Ratio Input Cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                    Part 1: Cement
+                  </span>
+                  <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">1</div>
+                  <span className="text-[10px] text-slate-500">Fixed Basis</span>
+                </div>
 
-              <div className="p-2.5 rounded-lg bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 text-[11px] text-blue-800 dark:text-blue-300 flex items-start gap-2">
-                <Info className="w-4 h-4 flex-shrink-0 text-blue-600 mt-0.5" />
-                <div>
-                  <strong>Layman Rule of Thumb:</strong> More water does NOT mean better concrete! Excess water evaporates and leaves microscopic hollow holes, weakening the concrete and causing cracks. To make concrete flow easily, use a <strong>Superplasticizer</strong> instead of pouring more water.
+                <div className="p-3 bg-yellow-50/60 dark:bg-yellow-950/20 rounded-xl border border-yellow-200 dark:border-yellow-800/60 text-center">
+                  <span className="text-[10px] font-bold uppercase text-yellow-700 dark:text-yellow-400 block">
+                    Part 2: Fine Sand
+                  </span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.5"
+                    max="6.0"
+                    value={reverseRatioSand}
+                    onChange={(e) => setReverseRatioSand(Math.max(0.1, Number(e.target.value)))}
+                    className="w-20 text-center font-black text-xl bg-white dark:bg-slate-900 border border-yellow-300 dark:border-yellow-700 rounded-lg py-1 mt-1 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[10px] text-slate-500 block mt-1">Parts Sand</span>
+                </div>
+
+                <div className="p-3 bg-amber-50/60 dark:bg-amber-950/20 rounded-xl border border-amber-200 dark:border-amber-800/60 text-center">
+                  <span className="text-[10px] font-bold uppercase text-amber-700 dark:text-amber-400 block">
+                    Part 3: Coarse Stone
+                  </span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.5"
+                    max="10.0"
+                    value={reverseRatioStone}
+                    onChange={(e) => setReverseRatioStone(Math.max(0.1, Number(e.target.value)))}
+                    className="w-20 text-center font-black text-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-lg py-1 mt-1 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[10px] text-slate-500 block mt-1">Parts Gravel</span>
                 </div>
               </div>
-            </div>
-          </div>
 
-          {/* Section B: Chemical Additives & Admixtures with Layman Tags */}
+              {/* Target Concrete Grade */}
+              <div className="pt-2">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                    What Grade/Strength are you aiming to achieve?
+                  </label>
+                  <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                    {reverseTargetGrade} (≈ {GRADE_LAYMAN_GUIDE[reverseTargetGrade].psi} PSI)
+                  </span>
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  {(
+                    ["M15", "M20", "M25", "M30", "M35", "M40", "M45", "M50", "M55", "M60"] as ConcreteGrade[]
+                  ).map((g) => (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => setReverseTargetGrade(g)}
+                      className={`py-1.5 text-xs font-bold rounded-lg border transition ${
+                        reverseTargetGrade === g
+                          ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                          : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                      }`}
+                    >
+                      {g}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Water-to-Cement Ratio in Reverse Mode */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Prescribed Water-Cement Ratio (w/c)
+                      </label>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${waterHealthIndicator.color}`}>
+                        {waterHealthIndicator.badge}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      Amount of mixing water per 1 kg of cement
+                    </span>
+                  </div>
+                  <span className="text-sm font-mono font-black text-blue-600 dark:text-blue-400">
+                    {reverseWc.toFixed(2)}
+                  </span>
+                </div>
+
+                <input
+                  type="range"
+                  min="0.30"
+                  max="0.65"
+                  step="0.01"
+                  value={reverseWc}
+                  onChange={(e) => setReverseWc(Number(e.target.value))}
+                  className="w-full accent-blue-600 cursor-pointer"
+                />
+              </div>
+
+              {/* Reverse Strength Feasibility Card */}
+              {mixResults.reverseAnalysis && (
+                <div
+                  className={`p-4 rounded-xl border flex items-start gap-3 ${
+                    mixResults.reverseAnalysis.adequate
+                      ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200"
+                      : "bg-amber-50/70 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200"
+                  }`}
+                >
+                  {mixResults.reverseAnalysis.adequate ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                  )}
+                  <div className="text-xs space-y-1">
+                    <div className="font-bold text-sm">
+                      {mixResults.reverseAnalysis.adequate
+                        ? `Strength Verified: Estimated ~${mixResults.reverseAnalysis.estimatedFck} MPa (Exceeds ${reverseTargetGrade})`
+                        : `Strength Warning: Estimated ~${mixResults.reverseAnalysis.estimatedFck} MPa (Short of ${reverseTargetGrade})`}
+                    </div>
+                    <p className="opacity-90 leading-relaxed">
+                      {mixResults.reverseAnalysis.adequate
+                        ? `A 1 : ${reverseRatioSand} : ${reverseRatioStone} mix with w/c ${reverseWc} provides ample cement density to reach your target ${reverseTargetGrade} compressive strength safely.`
+                        : `A 1 : ${reverseRatioSand} : ${reverseRatioStone} mix with w/c ${reverseWc} is somewhat lean for ${reverseTargetGrade} (${mixResults.reverseAnalysis.targetFck} MPa). Consider turning on Superplasticizer to lower w/c, or use a richer ratio such as 1 : 1.5 : 3.`}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SECTION B: CHEMICAL ADMIXTURES (AVAILABLE IN BOTH FORWARD & REVERSE) */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
                 <FlaskConical className="w-4 h-4 text-emerald-500" />
-                Step 3: Chemical Additives (Make Concrete Smarter)
+                Step 3: Chemical Additives & Admixtures
               </h3>
               <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 font-medium">
                 {useSuperplasticizer || useRetarder || useAccelerator || useWaterproofer
-                  ? "Chemicals Dosed"
-                  : "No Chemicals"}
+                  ? "Admixtures Active"
+                  : "No Admixtures"}
               </span>
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Toggle any additive on/off. They act like special spices to improve how concrete performs:
+              Toggle additives to customize setting speed, water reduction, and waterproofing:
             </p>
 
             <div className="space-y-3 pt-1">
@@ -1291,11 +1679,11 @@ Generated via JQMS Engineering Mix Design Engine
                           Superplasticizer / HRWR (Polycarboxylate Ether - PCE)
                         </span>
                         <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold">
-                          ★ Most Important
+                          ★ Flow & Water Cut
                         </span>
                       </div>
                       <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                        💡 <strong>What it does:</strong> Makes concrete flow like smooth liquid without adding water, saving {waterReductionPercent}% mixing water while preserving rock-hard strength!
+                        💡 <strong>What it does:</strong> Cuts water demand by {waterReductionPercent}% while making concrete glide smoothly without losing strength.
                       </span>
                     </div>
                   </label>
@@ -1323,7 +1711,7 @@ Generated via JQMS Engineering Mix Design Engine
                     </div>
                     <div>
                       <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-300">
-                        <span>Water Cut Credit</span>
+                        <span>Water Reduction Credit</span>
                         <span className="font-bold text-blue-600 dark:text-blue-400">
                           -{waterReductionPercent}% water
                         </span>
@@ -1363,10 +1751,10 @@ Generated via JQMS Engineering Mix Design Engine
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                        Retarding Admixture (Hot Weather Shield)
+                        Retarding Admixture (Hot Weather Concreting)
                       </span>
                       <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                        💡 <strong>What it does:</strong> Delays setting time by 2 to 4 hours so concrete doesn't freeze or harden prematurely in hot tropical sun or during traffic delivery delays.
+                        💡 <strong>What it does:</strong> Delays setting by 2 to 4 hours to prevent cold joints during transport delays or under hot sun.
                       </span>
                     </div>
                   </label>
@@ -1378,8 +1766,8 @@ Generated via JQMS Engineering Mix Design Engine
                 {useRetarder && (
                   <div className="mt-3 pt-3 border-t border-amber-100 dark:border-amber-900/40">
                     <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-300">
-                      <span>Dosage by weight of cement</span>
-                      <span className="font-bold">{retarderDosage}% (approx 200-500 ml per 100kg)</span>
+                      <span>Dosage (% of cement)</span>
+                      <span className="font-bold">{retarderDosage}% (approx 200-500 ml/100kg)</span>
                     </div>
                     <input
                       type="range"
@@ -1415,10 +1803,10 @@ Generated via JQMS Engineering Mix Design Engine
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                        Accelerating Admixture (Fast Early Strength)
+                        Accelerating Admixture (Cold Weather / Early Stripping)
                       </span>
                       <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                        💡 <strong>What it does:</strong> Speeds up early hardening in 24–48 hours, letting carpenters strip timber formwork and props in half the time.
+                        💡 <strong>What it does:</strong> Accelerates early 1-3 day strength so formwork can be stripped faster.
                       </span>
                     </div>
                   </label>
@@ -1467,10 +1855,10 @@ Generated via JQMS Engineering Mix Design Engine
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                        Integral Waterproofing Admixture (Crystalline Leak Stopper)
+                        Integral Waterproofing (Crystalline Leak Blocker)
                       </span>
                       <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                        💡 <strong>What it does:</strong> Grows microscopic crystals inside concrete pores to permanently block water leakage in underground basements, water storage tanks, and swimming pools.
+                        💡 <strong>What it does:</strong> Seals microscopic pores in basements, retaining walls, and water tanks.
                       </span>
                     </div>
                   </label>
@@ -1500,12 +1888,12 @@ Generated via JQMS Engineering Mix Design Engine
             </div>
           </div>
 
-          {/* Section C: SCMs / Mineral Additives with Layman Benefits */}
+          {/* SECTION C: MINERAL POWDERS (SCMs) */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
                 <Leaf className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                Step 4: Mineral Powders (Eco & Cost Savers)
+                Step 4: Mineral Powders (Fly Ash, Slag, Micro-Silica)
               </h3>
               {mixResults.carbonReductionPct > 0 && (
                 <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1 border border-emerald-300 dark:border-emerald-800">
@@ -1516,7 +1904,7 @@ Generated via JQMS Engineering Mix Design Engine
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Replacing 15%–40% of standard cement with mineral powders reduces heat cracking, cuts material costs, and creates ultra-durable concrete:
+              Substitute cement with mineral pozzolans to improve long-term durability and lower costs:
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
@@ -1544,13 +1932,13 @@ Generated via JQMS Engineering Mix Design Engine
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                    🍃 <strong>Why use it:</strong> Acts like tiny ball bearings, making concrete pump effortlessly without cracking.
+                    🍃 Smooths pumping, prevents thermal cracks.
                   </p>
                 </div>
                 {useFlyAsh && (
                   <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-700">
                     <div className="flex justify-between text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 mb-1">
-                      <span>Cement Replaced:</span>
+                      <span>Replaced:</span>
                       <span>{flyAshPercent}%</span>
                     </div>
                     <input
@@ -1590,7 +1978,7 @@ Generated via JQMS Engineering Mix Design Engine
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                    💎 <strong>Why use it:</strong> Gives diamond-hard compressive strength and protects against sea salt corrosion.
+                    💎 Extreme 28d strength & sea-salt resistance.
                   </p>
                 </div>
                 {useSilicaFume && (
@@ -1636,13 +2024,13 @@ Generated via JQMS Engineering Mix Design Engine
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                    🛡️ <strong>Why use it:</strong> Best defense against aggressive soil salts, acid rain, and marine groundwater.
+                    🛡️ High sulfate & marine acid defense.
                   </p>
                 </div>
                 {useGGBS && (
                   <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-700">
                     <div className="flex justify-between text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 mb-1">
-                      <span>Cement Replaced:</span>
+                      <span>Replaced:</span>
                       <span>{ggbsPercent}%</span>
                     </div>
                     <input
@@ -1660,7 +2048,7 @@ Generated via JQMS Engineering Mix Design Engine
             </div>
           </div>
 
-          {/* Section D: Moisture Correction (Site Reality Tool) */}
+          {/* SECTION D: MOISTURE CORRECTION */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -1669,7 +2057,7 @@ Generated via JQMS Engineering Mix Design Engine
                   Step 5: Rain & Damp Sand Moisture Fix
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Did it rain on the site aggregate pile? Subtract water automatically so concrete doesn't get ruined.
+                  Subtract moisture water automatically so concrete doesn't get ruined.
                 </p>
               </div>
 
@@ -1730,82 +2118,19 @@ Generated via JQMS Engineering Mix Design Engine
               </div>
             )}
           </div>
-
-          {/* Section E: Advanced Engineering Settings */}
-          {calcMode === "advanced" && (
-            <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-indigo-500" />
-                Advanced Engineering Parameters (IS 10262 Fine-Tuning)
-              </h3>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                <div>
-                  <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-                    Standard Dev s (MPa)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    value={sd}
-                    onChange={(e) => setSd(Number(e.target.value))}
-                    className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-                    Air Content (%)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={airContent}
-                    onChange={(e) => setAirContent(Number(e.target.value))}
-                    className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-                    Cement SG
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={sgCement}
-                    onChange={(e) => setSgCement(Number(e.target.value))}
-                    className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-                    Sand Zone
-                  </label>
-                  <select
-                    value={zoneFA}
-                    onChange={(e) => setZoneFA(e.target.value as any)}
-                    className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5"
-                  >
-                    <option value="Zone I">Zone I (Coarse)</option>
-                    <option value="Zone II">Zone II (Medium)</option>
-                    <option value="Zone III">Zone III (Fine)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Right 5 Columns: Calculated Recipe & Batch Quantities Card */}
+        {/* Right 5 Columns: Calculated Materials & Batch Quantities */}
         <div className="lg:col-span-5 space-y-6">
           {/* Layman One-Minute Summary Card */}
           <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 text-white p-5 rounded-2xl shadow-md space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs uppercase font-bold tracking-wider opacity-90 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5" />
-                Layman Mix Prescription
+                {calcDirection === "forward" ? "Forward Mix Recipe" : "Reverse Mix Material Plan"}
               </span>
               <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-white/20">
-                {grade} Concrete
+                1 : {mixResults.proportions.faRatio} : {mixResults.proportions.caRatioVal}
               </span>
             </div>
 
@@ -1815,12 +2140,12 @@ Generated via JQMS Engineering Mix Design Engine
 
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/20 text-xs">
               <div>
-                <span className="text-indigo-200 text-[10px] block">Flow / Workability</span>
-                <span className="font-bold">{slumpIndicator.badge}</span>
+                <span className="text-indigo-200 text-[10px] block">Effective w/b Ratio</span>
+                <span className="font-bold">{effectiveWc.toFixed(2)} ({waterHealthIndicator.badge})</span>
               </div>
               <div>
-                <span className="text-indigo-200 text-[10px] block">Strength Potential</span>
-                <span className="font-bold">{GRADE_LAYMAN_GUIDE[grade].psi} PSI (Heavy Duty)</span>
+                <span className="text-indigo-200 text-[10px] block">Target Strength</span>
+                <span className="font-bold">{activeGradeKey} ({gradeInfo.psi} PSI)</span>
               </div>
             </div>
           </div>
@@ -1830,14 +2155,13 @@ Generated via JQMS Engineering Mix Design Engine
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Activity className="w-4 h-4 text-indigo-500" />
-                Concrete Anatomy (What is in 1 m³?)
+                Concrete Anatomy (1.0 m³ Ingredients)
               </span>
               <span className="text-[11px] font-mono text-slate-400">
                 Total ≈ {mixResults.totalMixMass} kg
               </span>
             </div>
 
-            {/* Stacked Percentage Bar */}
             <div className="h-5 w-full bg-slate-100 dark:bg-slate-800 rounded-xl overflow-hidden flex shadow-inner">
               <div
                 style={{ width: `${mixResults.breakdownPct.pctStone}%` }}
@@ -1889,7 +2213,7 @@ Generated via JQMS Engineering Mix Design Engine
             </div>
           </div>
 
-          {/* Key Metric Cards */}
+          {/* Metric Cards */}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/60 dark:from-indigo-950/40 dark:to-indigo-900/20 border border-indigo-200 dark:border-indigo-800/60 p-4 rounded-2xl">
               <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-400">
@@ -1900,19 +2224,19 @@ Generated via JQMS Engineering Mix Design Engine
                 <span className="text-xs font-normal text-slate-500">MPa</span>
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                Target f'cr = {fck} + 1.65 × {sd}
+                f'cr = {activeGradeKey.substring(1)} + 1.65 × s
               </p>
             </div>
 
             <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/60 dark:from-emerald-950/40 dark:to-emerald-900/20 border border-emerald-200 dark:border-emerald-800/60 p-4 rounded-2xl">
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                Nominal Ratio
+                Mix Proportion
               </span>
               <div className="text-xl font-black text-emerald-700 dark:text-emerald-400 mt-1 truncate">
                 1 : {mixResults.proportions.faRatio} : {mixResults.proportions.caRatioVal}
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                w/b ratio: {waterCementRatio.toFixed(2)}
+                w/b ratio: {effectiveWc.toFixed(2)}
               </p>
             </div>
           </div>
@@ -2165,7 +2489,7 @@ Generated via JQMS Engineering Mix Design Engine
                           mixResults.moistureCorrection.extraWaterFromSand +
                           mixResults.moistureCorrection.extraWaterFromStone
                         } L)`
-                      : `Net W/B: ${waterCementRatio.toFixed(2)}`}
+                      : `Net W/B: ${effectiveWc.toFixed(2)}`}
                   </span>
                 </div>
                 <div className="text-right">
@@ -2291,7 +2615,7 @@ Generated via JQMS Engineering Mix Design Engine
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                   Water-Binder Ratio:{" "}
                   <strong className="text-slate-700 dark:text-slate-300">
-                    {waterCementRatio.toFixed(2)}
+                    {effectiveWc.toFixed(2)}
                   </strong>{" "}
                   ({waterHealthIndicator.label})
                 </li>

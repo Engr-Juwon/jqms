@@ -18,6 +18,11 @@ import {
   Waves,
   ShieldCheck,
   Zap,
+  HelpCircle,
+  Gauge,
+  Box,
+  Activity,
+  Award,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -49,6 +54,7 @@ interface PresetConfig {
   title: string;
   subtitle: string;
   icon: string;
+  laymanTag: string;
   grade: ConcreteGrade;
   slump: number;
   maxAggSize: 10 | 20 | 40;
@@ -80,6 +86,7 @@ const PRESET_LIBRARY: Record<PresetKey, PresetConfig> = {
     title: "Footings & Ground Slabs",
     subtitle: "M25 • Standard residential foundation, strip footings, unpumped pour",
     icon: "🏠",
+    laymanTag: "Best for houses, ground slabs & driveways",
     grade: "M25",
     slump: 80,
     maxAggSize: 20,
@@ -107,6 +114,7 @@ const PRESET_LIBRARY: Record<PresetKey, PresetConfig> = {
     title: "Suspended Slabs & Beams",
     subtitle: "M30 • General structural frame, moderate workability, crack controlled",
     icon: "🏢",
+    laymanTag: "Best for upper floors, roof slabs & beams",
     grade: "M30",
     slump: 110,
     maxAggSize: 20,
@@ -134,6 +142,7 @@ const PRESET_LIBRARY: Record<PresetKey, PresetConfig> = {
     title: "High-Rise Columns (Pumped)",
     subtitle: "M35 • High workability, long pump lines, self-compacting flow",
     icon: "🏬",
+    laymanTag: "Best for tall pillars & pumping through long hoses",
     grade: "M35",
     slump: 140,
     maxAggSize: 20,
@@ -161,6 +170,7 @@ const PRESET_LIBRARY: Record<PresetKey, PresetConfig> = {
     title: "Water Tank & Basement Wall",
     subtitle: "M35 • Low permeability, crystalline pore blocking, leak-proof",
     icon: "🌊",
+    laymanTag: "Best for water storage tanks, basements & pools",
     grade: "M35",
     slump: 120,
     maxAggSize: 20,
@@ -188,6 +198,7 @@ const PRESET_LIBRARY: Record<PresetKey, PresetConfig> = {
     title: "Rapid Demould / Precast",
     subtitle: "M40 • Fast early 1-3 day strength, accelerated curing cycle",
     icon: "⚡",
+    laymanTag: "Dries fast so you can remove wooden forms quickly",
     grade: "M40",
     slump: 100,
     maxAggSize: 20,
@@ -215,6 +226,7 @@ const PRESET_LIBRARY: Record<PresetKey, PresetConfig> = {
     title: "Marine & Bridge Piles",
     subtitle: "M50 • Ultra-dense micro-silica, extreme chloride & sulfate resistance",
     icon: "🌉",
+    laymanTag: "Super-duty concrete for bridges & coastal salty waters",
     grade: "M50",
     slump: 150,
     maxAggSize: 20,
@@ -242,6 +254,7 @@ const PRESET_LIBRARY: Record<PresetKey, PresetConfig> = {
     title: "Custom Engineered Mix",
     subtitle: "Fully tailored parameters, custom additives and batch targets",
     icon: "🎛️",
+    laymanTag: "Custom adjusted mix",
     grade: "M30",
     slump: 100,
     maxAggSize: 20,
@@ -266,10 +279,107 @@ const PRESET_LIBRARY: Record<PresetKey, PresetConfig> = {
   },
 };
 
+// Layman Grade Guide
+const GRADE_LAYMAN_GUIDE: Record<
+  ConcreteGrade,
+  {
+    name: string;
+    psi: number;
+    usage: string;
+    color: string;
+    meterLevel: number; // 1 to 5
+    description: string;
+  }
+> = {
+  M15: {
+    name: "Lean Concrete / Blinding",
+    psi: 2175,
+    usage: "Mud slabs, trench bottom leveling, garden curbs",
+    color: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800",
+    meterLevel: 1,
+    description: "Lightweight non-structural base layer.",
+  },
+  M20: {
+    name: "Light Reinforced Concrete",
+    psi: 2900,
+    usage: "Driveways, single-storey house footings, walkways",
+    color: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800",
+    meterLevel: 2,
+    description: "Good for basic residential ground floors and patios.",
+  },
+  M25: {
+    name: "Standard Residential Structural",
+    psi: 3625,
+    usage: "Strip foundations, reinforced floor slabs, house columns",
+    color: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
+    meterLevel: 3,
+    description: "The universal choice for modern residential buildings.",
+  },
+  M30: {
+    name: "Heavy Structural Concrete",
+    psi: 4350,
+    usage: "Suspended 1st & 2nd floor slabs, long beams, lintels",
+    color: "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800",
+    meterLevel: 3,
+    description: "Ideal for upper floor suspended slabs and structural frames.",
+  },
+  M35: {
+    name: "High-Strength Structural",
+    psi: 5075,
+    usage: "Multi-storey columns, shear walls, water tanks & basements",
+    color: "text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/40 border-indigo-300 dark:border-indigo-700",
+    meterLevel: 4,
+    description: "High durability and heavy load bearing capacity.",
+  },
+  M40: {
+    name: "Commercial High-Strength",
+    psi: 5800,
+    usage: "High-rise towers, precast beams, heavily loaded piers",
+    color: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-800",
+    meterLevel: 4,
+    description: "Industrial strength for tall buildings and precast yards.",
+  },
+  M45: {
+    name: "Special High-Strength",
+    psi: 6525,
+    usage: "Heavy infrastructure foundations, transfer slabs",
+    color: "text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40 border-purple-300 dark:border-purple-700",
+    meterLevel: 5,
+    description: "Extra dense matrix with very low water permeability.",
+  },
+  M50: {
+    name: "Heavy Infrastructure Grade",
+    psi: 7250,
+    usage: "Highway bridges, deep foundation piles, coastal docks",
+    color: "text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800",
+    meterLevel: 5,
+    description: "Designed for bridges, marine piers, and chemical defense.",
+  },
+  M55: {
+    name: "Ultra-High Durability",
+    psi: 7975,
+    usage: "Pre-stressed bridge girders, offshore marine oil platforms",
+    color: "text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/40 border-rose-300 dark:border-rose-700",
+    meterLevel: 5,
+    description: "Requires advanced superplasticizer and micro-silica.",
+  },
+  M60: {
+    name: "Ultra High-Performance (UHPC)",
+    psi: 8700,
+    usage: "Skyscraper mega-columns, extreme seismic zones",
+    color: "text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-700",
+    meterLevel: 5,
+    description: "Extreme compressive capacity and maximum durability.",
+  },
+};
+
 export const MixCalc: React.FC = () => {
   // Mode: guided (dummy-proof) vs advanced
   const [calcMode, setCalcMode] = useState<"guided" | "advanced">("guided");
   const [selectedPreset, setSelectedPreset] = useState<PresetKey>("slabs_beams");
+
+  // Site Measure Toggle: Display in kg vs 18L Headpans/Buckets
+  const [displaySiteBuckets, setDisplaySiteBuckets] = useState<boolean>(true);
 
   // Core Parameters
   const [grade, setGrade] = useState<ConcreteGrade>("M30");
@@ -399,7 +509,6 @@ export const MixCalc: React.FC = () => {
     if (useSuperplasticizer && waterReductionPercent > 0) {
       effectiveWaterReduction = Math.min(32, waterReductionPercent);
     } else if (useWaterproofer && !useSuperplasticizer) {
-      // Hydrophobic admixtures also offer mild 5% water reduction
       effectiveWaterReduction = 5;
     }
 
@@ -407,7 +516,6 @@ export const MixCalc: React.FC = () => {
     const netWaterContent = Math.round(rawWater - waterReductionKg);
 
     // 3. Total Binder / Cementitious Material Content
-    // Total Binder = netWater / (w/b ratio)
     const totalBinderContent = Math.round(netWaterContent / waterCementRatio);
 
     // 4. SCM Apportioning (% by weight of total binder)
@@ -425,8 +533,7 @@ export const MixCalc: React.FC = () => {
     );
 
     // 5. Chemical Admixtures Quantities (kg and Liters)
-    // Density approx 1.10 kg/L for liquid admixtures
-    const ADMIX_DENSITY = 1.10;
+    const ADMIX_DENSITY = 1.10; // kg/L
 
     const superplasticizerKg = useSuperplasticizer
       ? +(totalBinderContent * (superplasticizerDosage / 100)).toFixed(2)
@@ -467,7 +574,7 @@ export const MixCalc: React.FC = () => {
       volAir + volWater + volCement + volFlyAsh + volSilicaFume + volGGBS + volAdmix;
     const volAggregate = Math.max(0.60, 1.0 - volOccupied);
 
-    // Coarse Aggregate Volume Fraction (based on agg size and sand zone)
+    // Coarse Aggregate Volume Fraction
     let caRatio = 0.62;
     if (maxAggSize === 10) {
       caRatio = zoneFA === "Zone I" ? 0.48 : zoneFA === "Zone II" ? 0.50 : 0.52;
@@ -477,7 +584,6 @@ export const MixCalc: React.FC = () => {
       caRatio = zoneFA === "Zone I" ? 0.69 : zoneFA === "Zone II" ? 0.71 : 0.73;
     }
 
-    // Adjustment for w/c ratio (IS 10262: +0.01 to CA for every -0.05 reduction from 0.50)
     const wcDiff = 0.50 - waterCementRatio;
     caRatio = Math.min(0.78, Math.max(0.45, caRatio + (wcDiff / 0.05) * 0.01));
 
@@ -487,7 +593,6 @@ export const MixCalc: React.FC = () => {
     const massCA = Math.round(volCA * sgCA * 1000);
     const massFA = Math.round(volFA * sgFA * 1000);
 
-    // Total Mix Mass
     const totalMixMass =
       massCement +
       massFlyAsh +
@@ -498,13 +603,13 @@ export const MixCalc: React.FC = () => {
       massCA +
       Math.round(totalAdmixKg);
 
-    // 7. Proportions Normalized to 1 Part Total Binder
+    // Proportions
     const binderRatio = 1;
     const faRatio = +(massFA / totalBinderContent).toFixed(2);
     const caRatioVal = +(massCA / totalBinderContent).toFixed(2);
     const waterRatio = +(netWaterContent / totalBinderContent).toFixed(2);
 
-    // 8. Moisture Correction (Site Adjustment for Wet Aggregates)
+    // Moisture Correction
     let extraWaterFromSand = 0;
     let extraWaterFromStone = 0;
     let siteCorrectedWater = netWaterContent;
@@ -519,21 +624,42 @@ export const MixCalc: React.FC = () => {
       siteCorrectedCA = massCA + extraWaterFromStone;
     }
 
-    // 9. Multiplier for Batch Scale
+    // Scale Multiplier
     let scaleMultiplier = 1.0;
     if (batchScale === "bag") {
-      // 1 bag = 50 kg cement
       scaleMultiplier = 50 / massCement;
     } else if (batchScale === "custom") {
       scaleMultiplier = Math.max(0.01, customBatchVolume);
     }
 
-    // Green Carbon Savings Estimate
-    // 1 ton OPC = ~0.85 t CO2; Fly Ash/GGBS = ~0.05 t CO2
+    // Green Carbon Savings
     const scmWeight = massFlyAsh + massSilicaFume + massGGBS;
     const carbonReductionPct = totalBinderContent > 0
       ? Math.round((scmWeight / totalBinderContent) * 90)
       : 0;
+
+    // Component Percentage breakdown for visual stacked bar
+    const pctStone = Math.round((massCA / totalMixMass) * 100);
+    const pctSand = Math.round((massFA / totalMixMass) * 100);
+    const pctCement = Math.round((massCement / totalMixMass) * 100);
+    const pctSCM = Math.round((scmWeight / totalMixMass) * 100);
+    const pctWater = Math.round((netWaterContent / totalMixMass) * 100);
+    const pctAdmix = Math.max(0.5, +(totalAdmixKg / totalMixMass * 100).toFixed(1));
+
+    // Layman Buckets Calculation for 50kg bag of cement
+    // 1 standard masonry headpan or 18L bucket:
+    // Sand ~ 27 kg per 18L bucket
+    // Gravel ~ 26 kg per 18L bucket
+    // Water 1 L = 1 kg (18L bucket = 18 kg)
+    const bagMultiplier = 50 / massCement;
+    const bagSandKg = (enableMoistureCorr ? siteCorrectedFA : massFA) * bagMultiplier;
+    const bagStoneKg = (enableMoistureCorr ? siteCorrectedCA : massCA) * bagMultiplier;
+    const bagWaterL = (enableMoistureCorr ? siteCorrectedWater : netWaterContent) * bagMultiplier;
+    const bagAdmixMl = (totalAdmixL * 1000) * bagMultiplier;
+
+    const bucketsSand = +(bagSandKg / 27).toFixed(1);
+    const bucketsStone = +(bagStoneKg / 26).toFixed(1);
+    const bucketsWater = +(bagWaterL / 18).toFixed(1);
 
     return {
       targetMeanStrength,
@@ -577,6 +703,21 @@ export const MixCalc: React.FC = () => {
       },
       scaleMultiplier,
       carbonReductionPct,
+      breakdownPct: {
+        pctStone,
+        pctSand,
+        pctCement,
+        pctSCM,
+        pctWater,
+        pctAdmix,
+      },
+      siteBuckets: {
+        sand: bucketsSand,
+        stone: bucketsStone,
+        water: bucketsWater,
+        waterLiters: Math.round(bagWaterL),
+        admixMl: Math.round(bagAdmixMl),
+      },
     };
   }, [
     fck,
@@ -615,19 +756,99 @@ export const MixCalc: React.FC = () => {
     customBatchVolume,
   ]);
 
-  // Scaled Quantities Helper
+  // Helper for scaled numbers
   const q = (baseQty: number) => {
     return +(baseQty * mixResults.scaleMultiplier).toFixed(
       batchScale === "bag" ? 1 : baseQty < 10 ? 2 : 0
     );
   };
 
+  // Layman Slump Flow Indicator Info
+  const slumpIndicator = useMemo(() => {
+    if (slump <= 60) {
+      return {
+        label: "Very Stiff / Low Workability",
+        badge: "🪨 Stiff (Pavement)",
+        color: "text-amber-700 bg-amber-100 dark:bg-amber-950/60 border-amber-300 dark:border-amber-800",
+        barColor: "bg-amber-500",
+        pct: 25,
+        feel: "Like damp brown sugar. Needs heavy machine vibration.",
+        pumpable: "❌ Cannot pump (will clog pump hose)",
+      };
+    } else if (slump <= 110) {
+      return {
+        label: "Normal / Shovelable Workability",
+        badge: "🧱 Normal (House Slabs)",
+        color: "text-blue-700 bg-blue-100 dark:bg-blue-950/60 border-blue-300 dark:border-blue-800",
+        barColor: "bg-blue-500",
+        pct: 50,
+        feel: "Like thick oatmeal paste. Easy to spread with hand shovels.",
+        pumpable: "⚠️ Hard to pump (better for crane bucket or wheelbarrows)",
+      };
+    } else if (slump <= 155) {
+      return {
+        label: "Pump-Friendly / High Flow",
+        badge: "🚀 Pumpable (Recommended)",
+        color: "text-emerald-700 bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800",
+        barColor: "bg-emerald-500",
+        pct: 80,
+        feel: "Like a smooth milkshake. Flows effortlessly around rebar cages.",
+        pumpable: "✅ Ideal for concrete boom pumps & long hoses",
+      };
+    } else {
+      return {
+        label: "Flowing / Self-Compacting",
+        badge: "🌊 Self-Leveling",
+        color: "text-indigo-700 bg-indigo-100 dark:bg-indigo-950/60 border-indigo-300 dark:border-indigo-800",
+        barColor: "bg-indigo-500",
+        pct: 100,
+        feel: "Near liquid soup. Self-levels into congested formwork with zero vibration.",
+        pumpable: "✅ Ultra-easy pumping (Requires Superplasticizer to prevent stone sinking)",
+      };
+    }
+  }, [slump]);
+
+  // Layman Water-to-Binder Health Dial
+  const waterHealthIndicator = useMemo(() => {
+    if (waterCementRatio <= 0.38) {
+      return {
+        label: "Ultra-Strong & Waterproof",
+        badge: "🟢 Premium Durability",
+        color: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
+        advice: "Extremely dense, crack-resistant and impermeable to water leaks.",
+      };
+    } else if (waterCementRatio <= 0.45) {
+      return {
+        label: "Good Balance",
+        badge: "🟢 Safe Structural",
+        color: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
+        advice: "Standard quality for reinforced concrete beams, columns and slabs.",
+      };
+    } else if (waterCementRatio <= 0.50) {
+      return {
+        label: "Moderate (Watch Shrinkage)",
+        badge: "🟡 Moderate Strength",
+        color: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800",
+        advice: "Acceptable for plain ground footings, but higher chance of hairline cracks.",
+      };
+    } else {
+      return {
+        label: "Too Much Water (Caution!)",
+        badge: "🔴 Weak / High Crack Risk",
+        color: "text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800",
+        advice: "Excess water creates hollow microscopic pores, causing weak powdery concrete!",
+      };
+    }
+  }, [waterCementRatio]);
+
   // Copy Recipe Text
   const copyRecipeToClipboard = () => {
     const text = `
 === JQMS CONCRETE MIX DESIGN SUBMITTAL ===
-Grade: ${grade} (${fck} MPa) | Target Strength f'cr: ${mixResults.targetMeanStrength.toFixed(1)} MPa
-Slump: ${slump} mm | Max Aggregate: ${maxAggSize} mm | w/b Ratio: ${waterCementRatio}
+Grade: ${grade} (${GRADE_LAYMAN_GUIDE[grade].name} - ${GRADE_LAYMAN_GUIDE[grade].psi} PSI)
+Target Mean Strength f'cr: ${mixResults.targetMeanStrength.toFixed(1)} MPa
+Workability: ${slump} mm (${slumpIndicator.label})
+w/b Ratio: ${waterCementRatio.toFixed(2)} (${waterHealthIndicator.label})
 Batching Basis: ${
       batchScale === "1m3"
         ? "1.0 m³ Standard Mix"
@@ -636,9 +857,9 @@ Batching Basis: ${
         : `${customBatchVolume} m³ Batch Volume`
     }
 
---- BINDER & MATERIALS ---
+--- BATCH QUANTITIES ---
 • OPC Cement: ${q(mixResults.massCement)} kg
-${mixResults.massFlyAsh > 0 ? `• Fly Ash (PFA): ${q(mixResults.massFlyAsh)} kg (${flyAshPercent}%)\n` : ""}${
+${mixResults.massFlyAsh > 0 ? `• Fly Ash: ${q(mixResults.massFlyAsh)} kg (${flyAshPercent}%)\n` : ""}${
       mixResults.massSilicaFume > 0
         ? `• Silica Fume: ${q(mixResults.massSilicaFume)} kg (${silicaFumePercent}%)\n`
         : ""
@@ -650,12 +871,12 @@ ${mixResults.massFlyAsh > 0 ? `• Fly Ash (PFA): ${q(mixResults.massFlyAsh)} kg
         ? `${q(mixResults.moistureCorrection.siteCorrectedWater)} L (Moisture Corrected)`
         : `${q(mixResults.netWaterContent)} L`
     }
-• Fine Aggregate (Sand): ${
+• Fine Sand: ${
       enableMoistureCorr
         ? `${q(mixResults.moistureCorrection.siteCorrectedFA)} kg (Wet)`
         : `${q(mixResults.massFA)} kg (SSD)`
     }
-• Coarse Aggregate: ${
+• Coarse Stone: ${
       enableMoistureCorr
         ? `${q(mixResults.moistureCorrection.siteCorrectedCA)} kg (Wet)`
         : `${q(mixResults.massCA)} kg (SSD)`
@@ -687,11 +908,17 @@ ${
           )} L) [${waterprooferDosage}%]\n`
         : ""
     }
+--- SITE BUCKET ESTIMATE (PER 50KG BAG) ---
+1 Bag Cement + ~${mixResults.siteBuckets.sand} Buckets Sand + ~${
+      mixResults.siteBuckets.stone
+    } Buckets Stone + ${mixResults.siteBuckets.waterLiters} Liters Water (${
+      mixResults.siteBuckets.admixMl > 0 ? `+ ${mixResults.siteBuckets.admixMl} ml Admixture` : "no admix"
+    })
+
 --- PROPORTIONS RATIO ---
-Cementitious : Sand : Stone = 1 : ${mixResults.proportions.faRatio} : ${
-      mixResults.proportions.caRatioVal
-    } (w/b: ${mixResults.proportions.waterRatio})
-Density: ~${mixResults.totalMixMass} kg/m³
+1 : ${mixResults.proportions.faRatio} : ${mixResults.proportions.caRatioVal} (w/b: ${
+      mixResults.proportions.waterRatio
+    })
 Generated via JQMS Engineering Mix Design Engine
     `.trim();
 
@@ -702,6 +929,8 @@ Generated via JQMS Engineering Mix Design Engine
   const handlePrint = () => {
     window.print();
   };
+
+  const gradeInfo = GRADE_LAYMAN_GUIDE[grade];
 
   return (
     <div className="space-y-6">
@@ -718,11 +947,11 @@ Generated via JQMS Engineering Mix Design Engine
                   Concrete Mix Design Assistant
                 </h2>
                 <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
-                  IS 10262 / ACI 211
+                  Dummy-Proof Edition
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Proportioning tool with mineral SCMs, chemical admixtures & site batching converter.
+                Proportioning tool with visual flow indicators, layman strength gauges & bucket estimators.
               </p>
             </div>
           </div>
@@ -739,7 +968,7 @@ Generated via JQMS Engineering Mix Design Engine
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              Guided (Dummy-Proof)
+              Easy Mode (Layman)
             </button>
             <button
               type="button"
@@ -763,8 +992,8 @@ Generated via JQMS Engineering Mix Design Engine
               <Building className="w-3.5 h-3.5 text-indigo-500" />
               Step 1: Pick What You Are Casting (Pre-Optimized Recipes)
             </span>
-            <span className="text-[11px] text-slate-400">
-              Click any card to auto-fill proven chemical & mix parameters
+            <span className="text-[11px] text-slate-400 hidden sm:inline">
+              Click any card to auto-configure additives & proportions
             </span>
           </div>
 
@@ -792,8 +1021,8 @@ Generated via JQMS Engineering Mix Design Engine
                       {preset.title}
                     </div>
                   </div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-2 leading-relaxed">
-                    {preset.subtitle}
+                  <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium mt-2 leading-tight">
+                    {preset.laymanTag}
                   </div>
                 </button>
               );
@@ -806,23 +1035,55 @@ Generated via JQMS Engineering Mix Design Engine
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left 7 Columns: Interactive Parameters & Additives */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Section A: Strength & Slump */}
+          {/* Section A: Strength & Slump with Visual Indicators */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-5">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-indigo-500" />
-              Step 2: Concrete Grade & Slump (Flowability)
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-indigo-500" />
+                Step 2: Concrete Grade & Flowability
+              </h3>
+              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                fck = {fck} MPa
+              </span>
+            </div>
+
+            {/* Visual Strength Meter & Layman Guide Banner */}
+            <div className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${gradeInfo.color}`}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-black tracking-tight">{grade}: {gradeInfo.name}</span>
+                  <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-white/60 dark:bg-black/30 font-bold">
+                    ≈ {gradeInfo.psi} PSI
+                  </span>
+                </div>
+                <p className="text-xs mt-1 opacity-90">
+                  👉 <strong>Best For:</strong> {gradeInfo.usage}
+                </p>
+              </div>
+
+              {/* Strength Level Meter Bars (1 to 5) */}
+              <div className="flex items-center gap-1 self-end sm:self-center">
+                <span className="text-[10px] uppercase font-bold tracking-wider mr-1 opacity-70">
+                  Strength:
+                </span>
+                {[1, 2, 3, 4, 5].map((lvl) => (
+                  <div
+                    key={lvl}
+                    className={`w-3.5 h-6 rounded-sm transition-all ${
+                      lvl <= gradeInfo.meterLevel
+                        ? "bg-indigo-600 dark:bg-indigo-400 opacity-100 scale-105"
+                        : "bg-slate-300 dark:bg-slate-700 opacity-40"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
 
             {/* Grade Selector */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Target Strength Grade
-                </label>
-                <span className="text-[11px] font-mono text-indigo-600 dark:text-indigo-400">
-                  fck = {fck} N/mm² (Target f'cr = {mixResults.targetMeanStrength.toFixed(1)} MPa)
-                </span>
-              </div>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
+                Select Concrete Grade (Characteristic 28-day Compressive Strength):
+              </label>
               <div className="grid grid-cols-5 gap-2">
                 {(
                   [
@@ -844,7 +1105,7 @@ Generated via JQMS Engineering Mix Design Engine
                     onClick={() => handleGradeChange(g)}
                     className={`py-2 text-xs font-bold rounded-lg border transition ${
                       grade === g
-                        ? "bg-indigo-600 text-white border-indigo-500 shadow-sm"
+                        ? "bg-indigo-600 text-white border-indigo-500 shadow-sm ring-2 ring-indigo-500/30"
                         : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750"
                     }`}
                   >
@@ -854,17 +1115,29 @@ Generated via JQMS Engineering Mix Design Engine
               </div>
             </div>
 
-            {/* Slump & Aggregate Size */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                    Workability / Slump
+            {/* Workability / Slump with Visual Flow Indicator */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300 block">
+                    Workability / Slump (Flow Rate)
                   </label>
-                  <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                    {slump} mm
+                  <span className="text-[11px] text-slate-400">
+                    Controls how easily the concrete spreads without getting stuck
                   </span>
                 </div>
+                <div className="text-right">
+                  <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 font-mono">
+                    {slump} mm
+                  </span>
+                  <span className={`block text-[10px] font-bold px-2 py-0.5 rounded-full border mt-0.5 ${slumpIndicator.color}`}>
+                    {slumpIndicator.badge}
+                  </span>
+                </div>
+              </div>
+
+              {/* Slump Visual Bar Meter */}
+              <div className="space-y-1">
                 <input
                   type="range"
                   min="25"
@@ -877,17 +1150,30 @@ Generated via JQMS Engineering Mix Design Engine
                   }}
                   className="w-full accent-indigo-600 cursor-pointer"
                 />
-                <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-                  <span>25mm (Stiff)</span>
-                  <span>100mm (Normal)</span>
-                  <span>150mm (Pump)</span>
-                  <span>200mm (Flow)</span>
+                {/* Visual Flow Track */}
+                <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-300 ${slumpIndicator.barColor}`}
+                    style={{ width: `${slumpIndicator.pct}%` }}
+                  />
                 </div>
               </div>
 
-              <div>
+              {/* Layman Flow Description Pill */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div>
+                  <span className="text-slate-500 dark:text-slate-400">Texture: </span>
+                  <strong className="text-slate-800 dark:text-slate-200">{slumpIndicator.feel}</strong>
+                </div>
+                <div className="text-slate-600 dark:text-slate-300 font-semibold text-[11px] whitespace-nowrap">
+                  {slumpIndicator.pumpable}
+                </div>
+              </div>
+
+              {/* Aggregate Size */}
+              <div className="pt-2">
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                  Max Stone Size (NMAS)
+                  Max Stone Size in Aggregate Pile (NMAS)
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {([10, 20, 40] as const).map((sz) => (
@@ -898,41 +1184,47 @@ Generated via JQMS Engineering Mix Design Engine
                         setSelectedPreset("custom");
                         setMaxAggSize(sz);
                       }}
-                      className={`py-1.5 text-xs font-semibold rounded-lg border transition ${
+                      className={`py-2 text-xs font-bold rounded-lg border transition ${
                         maxAggSize === sz
                           ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-transparent shadow-sm"
                           : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
                       }`}
                     >
-                      {sz} mm
+                      {sz} mm {sz === 20 ? "(Standard)" : ""}
                     </button>
                   ))}
                 </div>
-                <span className="block text-[10px] text-slate-400 mt-1">
+                <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                   {maxAggSize === 10
-                    ? "Thin slabs / dense rebar"
+                    ? "👉 10mm (Small stones): For congested steel bars, thin slabs, hollow blocks."
                     : maxAggSize === 20
-                    ? "Standard building structural work"
-                    : "Mass concrete / thick footings"}
+                    ? "👉 20mm (Standard): Universal stone size for 90% of slabs, columns, and beams."
+                    : "👉 40mm (Big stones): For massive ground footings and unreinforced mass concrete."}
                 </span>
               </div>
             </div>
 
-            {/* Water-Cement Ratio */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-1.5">
-                  <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                    Water-to-Binder Ratio (w/b)
-                  </label>
-                  <span className="text-[10px] text-slate-400">
-                    (Lower = Stronger & More Durable)
+            {/* Water-Cement Ratio with Quality Dial */}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Water-to-Binder Ratio (w/b)
+                    </label>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${waterHealthIndicator.color}`}>
+                      {waterHealthIndicator.badge}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400">
+                    {waterHealthIndicator.advice}
                   </span>
                 </div>
-                <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400">
+                <span className="text-sm font-mono font-black text-blue-600 dark:text-blue-400">
                   {waterCementRatio.toFixed(2)}
                 </span>
               </div>
+
               <input
                 type="range"
                 min="0.28"
@@ -945,32 +1237,32 @@ Generated via JQMS Engineering Mix Design Engine
                 }}
                 className="w-full accent-blue-600 cursor-pointer"
               />
-              <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-                <span>0.28 (Ultra-High)</span>
-                <span>0.38 (Severe / Marine)</span>
-                <span>0.45 (Standard)</span>
-                <span>0.55 (Moderate)</span>
+
+              <div className="p-2.5 rounded-lg bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 text-[11px] text-blue-800 dark:text-blue-300 flex items-start gap-2">
+                <Info className="w-4 h-4 flex-shrink-0 text-blue-600 mt-0.5" />
+                <div>
+                  <strong>Layman Rule of Thumb:</strong> More water does NOT mean better concrete! Excess water evaporates and leaves microscopic hollow holes, weakening the concrete and causing cracks. To make concrete flow easily, use a <strong>Superplasticizer</strong> instead of pouring more water.
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Section B: Chemical Additives & Admixtures */}
+          {/* Section B: Chemical Additives & Admixtures with Layman Tags */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
                 <FlaskConical className="w-4 h-4 text-emerald-500" />
-                Step 3: Chemical Additives & Admixtures
+                Step 3: Chemical Additives (Make Concrete Smarter)
               </h3>
               <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 font-medium">
                 {useSuperplasticizer || useRetarder || useAccelerator || useWaterproofer
-                  ? "Admixtures Active"
-                  : "No Admixtures"}
+                  ? "Chemicals Dosed"
+                  : "No Chemicals"}
               </span>
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Modern concrete relies on chemical additives to enhance workability, reduce water,
-              and prevent cracking. Select the additives you want to dose:
+              Toggle any additive on/off. They act like special spices to improve how concrete performs:
             </p>
 
             <div className="space-y-3 pt-1">
@@ -994,12 +1286,16 @@ Generated via JQMS Engineering Mix Design Engine
                       className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
                     />
                     <div>
-                      <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                        Superplasticizer / HRWR (Polycarboxylate Ether - PCE)
-                      </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Cuts water demand by {waterReductionPercent}% while enabling high slump
-                        without segregation.
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-900 dark:text-white">
+                          Superplasticizer / HRWR (Polycarboxylate Ether - PCE)
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold">
+                          ★ Most Important
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                        💡 <strong>What it does:</strong> Makes concrete flow like smooth liquid without adding water, saving {waterReductionPercent}% mixing water while preserving rock-hard strength!
                       </span>
                     </div>
                   </label>
@@ -1012,7 +1308,7 @@ Generated via JQMS Engineering Mix Design Engine
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-emerald-100 dark:border-emerald-900/40">
                     <div>
                       <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-300">
-                        <span>Dosage (% of binder)</span>
+                        <span>Dosage (% of cement weight)</span>
                         <span className="font-bold">{superplasticizerDosage}%</span>
                       </div>
                       <input
@@ -1027,7 +1323,7 @@ Generated via JQMS Engineering Mix Design Engine
                     </div>
                     <div>
                       <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-300">
-                        <span>Water Reduction Credit</span>
+                        <span>Water Cut Credit</span>
                         <span className="font-bold text-blue-600 dark:text-blue-400">
                           -{waterReductionPercent}% water
                         </span>
@@ -1067,11 +1363,10 @@ Generated via JQMS Engineering Mix Design Engine
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                        Retarding Admixture (Hot Weather Concreting)
+                        Retarding Admixture (Hot Weather Shield)
                       </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Delays initial setting time by 2 to 4 hours. Prevents cold joints during
-                        traffic delays or high sun.
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                        💡 <strong>What it does:</strong> Delays setting time by 2 to 4 hours so concrete doesn't freeze or harden prematurely in hot tropical sun or during traffic delivery delays.
                       </span>
                     </div>
                   </label>
@@ -1083,8 +1378,8 @@ Generated via JQMS Engineering Mix Design Engine
                 {useRetarder && (
                   <div className="mt-3 pt-3 border-t border-amber-100 dark:border-amber-900/40">
                     <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-300">
-                      <span>Dosage by weight of binder</span>
-                      <span className="font-bold">{retarderDosage}% (approx 200-500 ml/100kg)</span>
+                      <span>Dosage by weight of cement</span>
+                      <span className="font-bold">{retarderDosage}% (approx 200-500 ml per 100kg)</span>
                     </div>
                     <input
                       type="range"
@@ -1120,11 +1415,10 @@ Generated via JQMS Engineering Mix Design Engine
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                        Accelerating Admixture (Cold Weather / Fast Stripping)
+                        Accelerating Admixture (Fast Early Strength)
                       </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Accelerates early hydration for rapid formwork stripping and precast casting
-                        cycles.
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                        💡 <strong>What it does:</strong> Speeds up early hardening in 24–48 hours, letting carpenters strip timber formwork and props in half the time.
                       </span>
                     </div>
                   </label>
@@ -1136,7 +1430,7 @@ Generated via JQMS Engineering Mix Design Engine
                 {useAccelerator && (
                   <div className="mt-3 pt-3 border-t border-purple-100 dark:border-purple-900/40">
                     <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-300">
-                      <span>Dosage (% of binder)</span>
+                      <span>Dosage (% of cement)</span>
                       <span className="font-bold">{acceleratorDosage}%</span>
                     </div>
                     <input
@@ -1173,11 +1467,10 @@ Generated via JQMS Engineering Mix Design Engine
                     />
                     <div>
                       <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                        Integral Waterproofing Admixture (Crystalline / Hydrophobic)
+                        Integral Waterproofing Admixture (Crystalline Leak Stopper)
                       </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Blocks microscopic pores and heals micro-cracks in water tanks, pools, and
-                        basements.
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                        💡 <strong>What it does:</strong> Grows microscopic crystals inside concrete pores to permanently block water leakage in underground basements, water storage tanks, and swimming pools.
                       </span>
                     </div>
                   </label>
@@ -1189,7 +1482,7 @@ Generated via JQMS Engineering Mix Design Engine
                 {useWaterproofer && (
                   <div className="mt-3 pt-3 border-t border-cyan-100 dark:border-cyan-900/40">
                     <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-300">
-                      <span>Dosage by weight of binder</span>
+                      <span>Dosage (% of cement)</span>
                       <span className="font-bold">{waterprooferDosage}%</span>
                     </div>
                     <input
@@ -1207,24 +1500,23 @@ Generated via JQMS Engineering Mix Design Engine
             </div>
           </div>
 
-          {/* Section C: Supplementary Cementitious Materials (SCMs / Mineral Additives) */}
+          {/* Section C: SCMs / Mineral Additives with Layman Benefits */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
                 <Leaf className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                Step 4: Mineral Additives & Cement Substitution (SCMs)
+                Step 4: Mineral Powders (Eco & Cost Savers)
               </h3>
               {mixResults.carbonReductionPct > 0 && (
                 <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1 border border-emerald-300 dark:border-emerald-800">
                   <Leaf className="w-3 h-3" />
-                  -{mixResults.carbonReductionPct}% CO₂ Footprint
+                  -{mixResults.carbonReductionPct}% CO₂ Green Score
                 </span>
               )}
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Replacing ordinary cement with mineral pozzolans reduces heat of hydration, improves
-              workability, prevents long-term cracking, and cuts carbon footprint.
+              Replacing 15%–40% of standard cement with mineral powders reduces heat cracking, cuts material costs, and creates ultra-durable concrete:
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
@@ -1248,17 +1540,17 @@ Generated via JQMS Engineering Mix Design Engine
                       className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
                     />
                     <span className="text-xs font-bold text-slate-900 dark:text-white">
-                      Fly Ash (Class F / PFA)
+                      Fly Ash (PFA)
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                    Smooths pumping, reduces thermal heat in thick pours.
+                    🍃 <strong>Why use it:</strong> Acts like tiny ball bearings, making concrete pump effortlessly without cracking.
                   </p>
                 </div>
                 {useFlyAsh && (
                   <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-700">
                     <div className="flex justify-between text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 mb-1">
-                      <span>Replacement:</span>
+                      <span>Cement Replaced:</span>
                       <span>{flyAshPercent}%</span>
                     </div>
                     <input
@@ -1294,17 +1586,17 @@ Generated via JQMS Engineering Mix Design Engine
                       className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
                     />
                     <span className="text-xs font-bold text-slate-900 dark:text-white">
-                      Silica Fume (Micro-silica)
+                      Silica Fume
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                    Extreme early & 28d strength, ultra-dense chloride shield.
+                    💎 <strong>Why use it:</strong> Gives diamond-hard compressive strength and protects against sea salt corrosion.
                   </p>
                 </div>
                 {useSilicaFume && (
                   <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-700">
                     <div className="flex justify-between text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 mb-1">
-                      <span>Addition:</span>
+                      <span>Dose Addition:</span>
                       <span>{silicaFumePercent}%</span>
                     </div>
                     <input
@@ -1344,13 +1636,13 @@ Generated via JQMS Engineering Mix Design Engine
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                    High sulfate resistance, ideal for foundations & sea works.
+                    🛡️ <strong>Why use it:</strong> Best defense against aggressive soil salts, acid rain, and marine groundwater.
                   </p>
                 </div>
                 {useGGBS && (
                   <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-700">
                     <div className="flex justify-between text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 mb-1">
-                      <span>Replacement:</span>
+                      <span>Cement Replaced:</span>
                       <span>{ggbsPercent}%</span>
                     </div>
                     <input
@@ -1368,16 +1660,16 @@ Generated via JQMS Engineering Mix Design Engine
             </div>
           </div>
 
-          {/* Section D: Moisture Correction (Site Reality Dummy-Proof Tool) */}
+          {/* Section D: Moisture Correction (Site Reality Tool) */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
                   <Droplets className="w-4 h-4 text-blue-500" />
-                  Step 5: Wet Aggregate Moisture Correction
+                  Step 5: Rain & Damp Sand Moisture Fix
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Did it rain on the aggregate stockpile? Correct mixing water automatically.
+                  Did it rain on the site aggregate pile? Subtract water automatically so concrete doesn't get ruined.
                 </p>
               </div>
 
@@ -1396,7 +1688,7 @@ Generated via JQMS Engineering Mix Design Engine
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="bg-blue-50/60 dark:bg-blue-950/20 p-3.5 rounded-xl border border-blue-200 dark:border-blue-800/40">
                   <div className="flex justify-between items-center text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    <span>Sand Surface Moisture:</span>
+                    <span>Sand Dampness (Wetness):</span>
                     <span className="font-mono text-blue-600 dark:text-blue-400">
                       {sandMoisture}%
                     </span>
@@ -1411,14 +1703,13 @@ Generated via JQMS Engineering Mix Design Engine
                     className="w-full accent-blue-600 cursor-pointer"
                   />
                   <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                    Contributes +{mixResults.moistureCorrection.extraWaterFromSand} Liters of free
-                    water per m³
+                    Adds +{mixResults.moistureCorrection.extraWaterFromSand} Liters free water from damp sand
                   </div>
                 </div>
 
                 <div className="bg-blue-50/60 dark:bg-blue-950/20 p-3.5 rounded-xl border border-blue-200 dark:border-blue-800/40">
                   <div className="flex justify-between items-center text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    <span>Coarse Stone Moisture:</span>
+                    <span>Stone Pile Dampness:</span>
                     <span className="font-mono text-blue-600 dark:text-blue-400">
                       {stoneMoisture}%
                     </span>
@@ -1433,15 +1724,14 @@ Generated via JQMS Engineering Mix Design Engine
                     className="w-full accent-blue-600 cursor-pointer"
                   />
                   <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                    Contributes +{mixResults.moistureCorrection.extraWaterFromStone} Liters of free
-                    water per m³
+                    Adds +{mixResults.moistureCorrection.extraWaterFromStone} Liters free water from stones
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Section E: Advanced Engineering Settings (Collapsible / Visible in Advanced Mode) */}
+          {/* Section E: Advanced Engineering Settings */}
           {calcMode === "advanced" && (
             <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
               <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
@@ -1507,24 +1797,116 @@ Generated via JQMS Engineering Mix Design Engine
 
         {/* Right 5 Columns: Calculated Recipe & Batch Quantities Card */}
         <div className="lg:col-span-5 space-y-6">
+          {/* Layman One-Minute Summary Card */}
+          <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 text-white p-5 rounded-2xl shadow-md space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs uppercase font-bold tracking-wider opacity-90 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                Layman Mix Prescription
+              </span>
+              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-white/20">
+                {grade} Concrete
+              </span>
+            </div>
+
+            <div className="text-sm font-bold leading-snug">
+              "For every 1 bag of cement, add ~{mixResults.siteBuckets.sand} buckets of sand, ~{mixResults.siteBuckets.stone} buckets of gravel, and {mixResults.siteBuckets.waterLiters} Liters of water."
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/20 text-xs">
+              <div>
+                <span className="text-indigo-200 text-[10px] block">Flow / Workability</span>
+                <span className="font-bold">{slumpIndicator.badge}</span>
+              </div>
+              <div>
+                <span className="text-indigo-200 text-[10px] block">Strength Potential</span>
+                <span className="font-bold">{GRADE_LAYMAN_GUIDE[grade].psi} PSI (Heavy Duty)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Visual Concrete Anatomy Bar */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Activity className="w-4 h-4 text-indigo-500" />
+                Concrete Anatomy (What is in 1 m³?)
+              </span>
+              <span className="text-[11px] font-mono text-slate-400">
+                Total ≈ {mixResults.totalMixMass} kg
+              </span>
+            </div>
+
+            {/* Stacked Percentage Bar */}
+            <div className="h-5 w-full bg-slate-100 dark:bg-slate-800 rounded-xl overflow-hidden flex shadow-inner">
+              <div
+                style={{ width: `${mixResults.breakdownPct.pctStone}%` }}
+                className="bg-amber-600 hover:opacity-90 transition-all flex items-center justify-center text-[10px] font-bold text-white truncate px-1"
+                title={`Coarse Stone: ${mixResults.breakdownPct.pctStone}%`}
+              >
+                {mixResults.breakdownPct.pctStone}% Stone
+              </div>
+              <div
+                style={{ width: `${mixResults.breakdownPct.pctSand}%` }}
+                className="bg-yellow-500 hover:opacity-90 transition-all flex items-center justify-center text-[10px] font-bold text-slate-950 truncate px-1"
+                title={`Sand: ${mixResults.breakdownPct.pctSand}%`}
+              >
+                {mixResults.breakdownPct.pctSand}% Sand
+              </div>
+              <div
+                style={{ width: `${mixResults.breakdownPct.pctCement}%` }}
+                className="bg-slate-500 hover:opacity-90 transition-all flex items-center justify-center text-[10px] font-bold text-white truncate px-1"
+                title={`Cement: ${mixResults.breakdownPct.pctCement}%`}
+              >
+                {mixResults.breakdownPct.pctCement}% Cement
+              </div>
+              {mixResults.breakdownPct.pctSCM > 0 && (
+                <div
+                  style={{ width: `${mixResults.breakdownPct.pctSCM}%` }}
+                  className="bg-emerald-500 hover:opacity-90 transition-all flex items-center justify-center text-[10px] font-bold text-white truncate px-1"
+                  title={`SCM Powders: ${mixResults.breakdownPct.pctSCM}%`}
+                >
+                  {mixResults.breakdownPct.pctSCM}% SCM
+                </div>
+              )}
+              <div
+                style={{ width: `${mixResults.breakdownPct.pctWater}%` }}
+                className="bg-blue-500 hover:opacity-90 transition-all flex items-center justify-center text-[10px] font-bold text-white truncate px-1"
+                title={`Water: ${mixResults.breakdownPct.pctWater}%`}
+              >
+                {mixResults.breakdownPct.pctWater}%
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-600 inline-block"/> Stone</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block"/> Sand</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block"/> Cement</span>
+              {mixResults.breakdownPct.pctSCM > 0 && (
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"/> Mineral SCM</span>
+              )}
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"/> Water</span>
+            </div>
+          </div>
+
           {/* Key Metric Cards */}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/60 dark:from-indigo-950/40 dark:to-indigo-900/20 border border-indigo-200 dark:border-indigo-800/60 p-4 rounded-2xl">
               <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-400">
-                Target Mean Strength
+                Target Lab Strength
               </span>
               <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
                 {mixResults.targetMeanStrength.toFixed(1)}{" "}
-                <span className="text-xs font-normal text-slate-500">N/mm²</span>
+                <span className="text-xs font-normal text-slate-500">MPa</span>
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                f'cr = {fck} + 1.65 × {sd}
+                Target f'cr = {fck} + 1.65 × {sd}
               </p>
             </div>
 
             <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/60 dark:from-emerald-950/40 dark:to-emerald-900/20 border border-emerald-200 dark:border-emerald-800/60 p-4 rounded-2xl">
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                Proportion Ratio
+                Nominal Ratio
               </span>
               <div className="text-xl font-black text-emerald-700 dark:text-emerald-400 mt-1 truncate">
                 1 : {mixResults.proportions.faRatio} : {mixResults.proportions.caRatioVal}
@@ -1541,7 +1923,7 @@ Generated via JQMS Engineering Mix Design Engine
               <div className="flex items-center gap-2">
                 <Scale className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                 <h4 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                  Batch Quantities
+                  Site Batching Quantities
                 </h4>
               </div>
 
@@ -1568,9 +1950,23 @@ Generated via JQMS Engineering Mix Design Engine
 
             {/* Batch Scale Switcher */}
             <div>
-              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
-                Select Batch Scale / Mixer Capacity:
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Batching Scale:
+                </label>
+
+                {batchScale === "bag" && (
+                  <button
+                    type="button"
+                    onClick={() => setDisplaySiteBuckets(!displaySiteBuckets)}
+                    className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                  >
+                    <Box className="w-3.5 h-3.5" />
+                    {displaySiteBuckets ? "Show Exact Kg" : "Show Headpans / Buckets"}
+                  </button>
+                )}
+              </div>
+
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
@@ -1603,7 +1999,7 @@ Generated via JQMS Engineering Mix Design Engine
                       : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
                   }`}
                 >
-                  Custom Vol
+                  Custom Volume
                 </button>
               </div>
 
@@ -1642,6 +2038,41 @@ Generated via JQMS Engineering Mix Design Engine
               )}
             </div>
 
+            {/* Special Site Headpans / Buckets Mode Banner */}
+            {batchScale === "bag" && displaySiteBuckets && (
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800/60 text-xs space-y-1.5">
+                <div className="flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-300">
+                  <Box className="w-4 h-4 text-amber-600" />
+                  Site Foreman Measurement (18L Standard Headpan / Bucket):
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center pt-1">
+                  <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-amber-200 dark:border-amber-800">
+                    <span className="text-[10px] text-slate-500 block">Fine Sand</span>
+                    <strong className="text-base font-black text-amber-700 dark:text-amber-400">
+                      ~{mixResults.siteBuckets.sand}
+                    </strong>
+                    <span className="text-[10px] text-slate-400 block">Buckets</span>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-amber-200 dark:border-amber-800">
+                    <span className="text-[10px] text-slate-500 block">Coarse Stone</span>
+                    <strong className="text-base font-black text-amber-700 dark:text-amber-400">
+                      ~{mixResults.siteBuckets.stone}
+                    </strong>
+                    <span className="text-[10px] text-slate-400 block">Buckets</span>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-amber-200 dark:border-amber-800">
+                    <span className="text-[10px] text-slate-500 block">Clean Water</span>
+                    <strong className="text-base font-black text-blue-600 dark:text-blue-400">
+                      {mixResults.siteBuckets.waterLiters}L
+                    </strong>
+                    <span className="text-[10px] text-slate-400 block">
+                      (≈{mixResults.siteBuckets.water} Buckets)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Batch Table */}
             <div className="space-y-2.5">
               {/* Cement */}
@@ -1653,7 +2084,7 @@ Generated via JQMS Engineering Mix Design Engine
                   <span className="text-[10px] text-slate-400 font-mono">
                     {batchScale === "1m3"
                       ? `${(mixResults.massCement / 50).toFixed(1)} Bags (50kg)`
-                      : "Primary Binder"}
+                      : "1 Full Standard 50kg Bag"}
                   </span>
                 </div>
                 <div className="text-right">
@@ -1730,7 +2161,7 @@ Generated via JQMS Engineering Mix Design Engine
                   </span>
                   <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono">
                     {enableMoistureCorr
-                      ? `Corrected for stockpile moisture (-${
+                      ? `Stockpile moisture adjusted (-${
                           mixResults.moistureCorrection.extraWaterFromSand +
                           mixResults.moistureCorrection.extraWaterFromStone
                         } L)`
@@ -1805,7 +2236,10 @@ Generated via JQMS Engineering Mix Design Engine
                         <span>• Superplasticizer (PCE):</span>
                         <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
                           {q(mixResults.admixtures.superplasticizerKg)} kg (≈{" "}
-                          {q(mixResults.admixtures.superplasticizerL)} L)
+                          {batchScale === "bag"
+                            ? `${mixResults.siteBuckets.admixMl} ml`
+                            : `${q(mixResults.admixtures.superplasticizerL)} L`}
+                          )
                         </span>
                       </div>
                     )}
@@ -1813,8 +2247,7 @@ Generated via JQMS Engineering Mix Design Engine
                       <div className="flex justify-between text-slate-700 dark:text-slate-300">
                         <span>• Retarder:</span>
                         <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
-                          {q(mixResults.admixtures.retarderKg)} kg (≈{" "}
-                          {q(mixResults.admixtures.retarderL)} L)
+                          {q(mixResults.admixtures.retarderKg)} kg
                         </span>
                       </div>
                     )}
@@ -1822,8 +2255,7 @@ Generated via JQMS Engineering Mix Design Engine
                       <div className="flex justify-between text-slate-700 dark:text-slate-300">
                         <span>• Accelerator:</span>
                         <span className="font-mono font-bold text-purple-600 dark:text-purple-400">
-                          {q(mixResults.admixtures.acceleratorKg)} kg (≈{" "}
-                          {q(mixResults.admixtures.acceleratorL)} L)
+                          {q(mixResults.admixtures.acceleratorKg)} kg
                         </span>
                       </div>
                     )}
@@ -1831,8 +2263,7 @@ Generated via JQMS Engineering Mix Design Engine
                       <div className="flex justify-between text-slate-700 dark:text-slate-300">
                         <span>• Waterproofing Agent:</span>
                         <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
-                          {q(mixResults.admixtures.waterprooferKg)} kg (≈{" "}
-                          {q(mixResults.admixtures.waterprooferL)} L)
+                          {q(mixResults.admixtures.waterprooferKg)} kg
                         </span>
                       </div>
                     )}
@@ -1845,7 +2276,7 @@ Generated via JQMS Engineering Mix Design Engine
             <div className="p-4 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2 text-xs">
               <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                QA/QC Compliance Check (ACI 318 / BS 8500)
+                QA/QC Durability Check (ACI 318 / BS 8500)
               </div>
               <ul className="space-y-1 text-slate-500 dark:text-slate-400 text-[11px]">
                 <li className="flex items-center gap-1.5">
@@ -1862,7 +2293,7 @@ Generated via JQMS Engineering Mix Design Engine
                   <strong className="text-slate-700 dark:text-slate-300">
                     {waterCementRatio.toFixed(2)}
                   </strong>{" "}
-                  (Meets maximum 0.45 durability criteria)
+                  ({waterHealthIndicator.label})
                 </li>
                 {useSuperplasticizer && (
                   <li className="flex items-center gap-1.5">
@@ -1871,7 +2302,7 @@ Generated via JQMS Engineering Mix Design Engine
                     <strong className="text-emerald-600 dark:text-emerald-400">
                       {mixResults.waterReductionKg} L
                     </strong>{" "}
-                    of water per m³, maintaining slump while locking in high strength.
+                    of water per m³, locking in compressive strength without honeycombs.
                   </li>
                 )}
               </ul>

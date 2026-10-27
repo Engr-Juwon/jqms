@@ -47,9 +47,10 @@ import {
   saveAICopilotSession,
   getAICopilotSessions,
   deleteAICopilotSession,
+  subscribeAICopilotSessions,
   AICopilotSession,
 } from "@/lib/aiSessionService";
-import { dbService } from "@/lib/db";
+import { dbService, resolveEffectiveCompanyId } from "@/lib/db";
 import { toast } from "react-hot-toast";
 import { useNavigate, useLocation } from "react-router-dom";
 import { CopilotMarkdown } from "./CopilotMarkdown";
@@ -243,12 +244,12 @@ How can I assist your site operations, quality audit, or database queries today?
   const [showPastSessions, setShowPastSessions] = useState(false);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
 
-  // Load cloud sessions when drawer opens or user/project changes
+  // Load cloud sessions (all sessions belonging to this user)
   const loadSessions = async () => {
     if (!currentUser?.uid) return;
     setIsLoadingSessions(true);
     try {
-      const sess = await getAICopilotSessions(currentUser.uid, activeProject?.id);
+      const sess = await getAICopilotSessions(currentUser.uid);
       setPastSessions(sess);
     } catch (e) {
       console.warn("Failed loading sessions:", e);
@@ -257,11 +258,23 @@ How can I assist your site operations, quality audit, or database queries today?
     }
   };
 
+  // Real-time live cloud sync across all devices
   useEffect(() => {
-    if (isOpen && currentUser?.uid) {
-      loadSessions();
-    }
-  }, [isOpen, currentUser?.uid, activeProject?.id]);
+    if (!currentUser?.uid) return;
+    setIsLoadingSessions(true);
+    const unsubscribe = subscribeAICopilotSessions(
+      currentUser.uid,
+      (sess) => {
+        setPastSessions(sess);
+        setIsLoadingSessions(false);
+      },
+      (err) => {
+        console.warn("AI Copilot session live sync error:", err);
+        setIsLoadingSessions(false);
+      },
+    );
+    return () => unsubscribe();
+  }, [currentUser?.uid]);
 
   // Sync active session to cloud whenever messages update
   useEffect(() => {
@@ -282,12 +295,18 @@ How can I assist your site operations, quality audit, or database queries today?
           : firstUserPrompt
         : "QA/QC Inspection Session";
 
+      const effectiveCompanyId =
+        currentUser.companyId ||
+        activeProject?.companyId ||
+        resolveEffectiveCompanyId() ||
+        "-Oubn5JnM98I3QvSzHCB";
+
       const sessionObj: AICopilotSession = {
         id: currentSessionId,
         userId: currentUser.uid,
-        companyId: currentUser.companyId || activeProject?.companyId || "global",
+        companyId: effectiveCompanyId,
         projectId: activeProject?.id || "global",
-        projectName: activeProject?.name || "Civil Works",
+        projectName: activeProject?.name || "General Workspace",
         title,
         messages,
         createdAt: messages[0]?.timestamp || Date.now(),
@@ -297,7 +316,7 @@ How can I assist your site operations, quality audit, or database queries today?
       saveAICopilotSession(sessionObj);
       localStorage.setItem(`jqms_active_session_${currentUser.uid}`, currentSessionId);
     }
-  }, [messages, storageKey, currentSessionId, currentUser?.uid, activeProject?.id]);
+  }, [messages, storageKey, currentSessionId, currentUser?.uid, currentUser?.companyId, activeProject?.id, activeProject?.name, activeProject?.companyId]);
 
   // Handler to start a brand new conversation
   const handleStartNewChat = () => {
@@ -1166,6 +1185,49 @@ How can I assist your site operations, quality audit, or database queries today?
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Resume Recent Conversations from any device */}
+          {messages.length === 1 && !showPastSessions && pastSessions.length > 0 && (
+            <div className="p-3 bg-brand-50/70 dark:bg-brand-950/40 border-b border-brand-200 dark:border-brand-900/60 space-y-2 shrink-0">
+              <div className="flex items-center justify-between px-0.5">
+                <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                  <span>Resume Past Session ({pastSessions.length})</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowPastSessions(true)}
+                  className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer"
+                >
+                  View all ({pastSessions.length})
+                </button>
+              </div>
+              <div className="space-y-1.5 max-h-36 overflow-y-auto scrollbar-thin">
+                {pastSessions.slice(0, 2).map((sess) => (
+                  <button
+                    key={sess.id}
+                    type="button"
+                    onClick={() => handleSelectSession(sess)}
+                    className="w-full p-2 rounded-xl text-left border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-900 hover:border-brand-500 hover:shadow-xs transition flex items-center justify-between group cursor-pointer"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <div className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                        {sess.title}
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-1.5 pt-0.5">
+                        <span>{sess.projectName || "General"}</span>
+                        <span>•</span>
+                        <span>{new Date(sess.updatedAt).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                        <span>•</span>
+                        <span>{sess.messages?.length || 0} msgs</span>
+                      </div>
+                    </div>
+                    <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-brand-500 group-hover:translate-x-0.5 transition shrink-0" />
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

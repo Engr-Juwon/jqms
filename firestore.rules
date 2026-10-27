@@ -1439,16 +1439,16 @@ service cloud.firestore {
     // ===============================================================
 
     match /ai_copilot_sessions/{sessionId} {
-      allow read, delete: if isActiveUser()
-        && resource.data.userId == request.auth.uid
-        && (!('companyId' in resource.data) || belongsToTenant(resource.data.companyId));
+      allow read, delete: if isAuthenticated()
+        && resource.data.userId == request.auth.uid;
 
-      allow create: if belongsToTenant(request.resource.data.companyId)
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid
         && isValidAICopilotSession(request.resource.data, sessionId);
 
-      allow update: if belongsToTenant(request.resource.data.companyId)
+      allow update: if isAuthenticated()
         && resource.data.userId == request.auth.uid
-        && (!('companyId' in resource.data) || resource.data.companyId == request.resource.data.companyId)
+        && request.resource.data.userId == request.auth.uid
         && isValidAICopilotSession(request.resource.data, sessionId)
         && areImmutableFieldsUnchanged(['id', 'userId', 'createdAt']);
     }

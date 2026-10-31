@@ -3241,7 +3241,26 @@ export const dbService = {
     try {
       const snap = await getDoc(doc(firestore, "weeklyReports", id));
       if (snap.exists()) {
-        const report = { ...snap.data(), id: snap.id } as WeeklyReport;
+        let report = { ...snap.data(), id: snap.id } as WeeklyReport;
+        if ((report as any).hasOverflow) {
+          try {
+            const overflowSnap = await getDoc(
+              doc(firestore, "weeklyReports", id, "overflow", "details"),
+            );
+            if (overflowSnap.exists()) {
+              const overflowData = overflowSnap.data();
+              report = {
+                ...report,
+                ...overflowData,
+              };
+            }
+          } catch (overflowErr) {
+            console.warn(
+              "Failed reading weekly report overflow subcollection:",
+              overflowErr,
+            );
+          }
+        }
         if (!effectiveCompId || report.companyId === effectiveCompId) {
           inMemoryWeeklyReports.set(report.id, report);
           return report;
@@ -3274,6 +3293,11 @@ export const dbService = {
         list.filter((w) => w.id !== id),
       );
     }
+    try {
+      await deleteDoc(
+        doc(firestore, "weeklyReports", id, "overflow", "details"),
+      );
+    } catch (_) {}
     await deleteDoc(doc(firestore, "weeklyReports", id));
   },
 
@@ -3284,39 +3308,9 @@ export const dbService = {
         "Weekly report must be associated with an active company workspace.",
       );
     }
+    // 1. Maintain in-memory and full local IDB copy with zero loss of original data
     inMemoryWeeklyReports.set(report.id, report);
-    const cleaned = cleanForFirestore({
-      ...report,
-      companyId: effectiveCompId,
-      updatedAt: new Date().toISOString(),
-    });
-
-    const sanitizeSafeUrl = (url: any): string => {
-      if (!url || typeof url !== "string") return "";
-      const trimmed = url.trim();
-      if (trimmed.startsWith("data:") && trimmed.length > 4096) return "";
-      return trimmed;
-    };
-
-    const payload: any = {
-      ...cleaned,
-      coverImageUrl: sanitizeSafeUrl((cleaned as any).coverImageUrl),
-      logoUrl: sanitizeSafeUrl((cleaned as any).logoUrl),
-      projectImage: sanitizeSafeUrl((cleaned as any).projectImage),
-      beamLayoutImg: sanitizeSafeUrl((cleaned as any).beamLayoutImg),
-      columnLayoutImg: sanitizeSafeUrl((cleaned as any).columnLayoutImg),
-      slabImg: sanitizeSafeUrl((cleaned as any).slabImg),
-      coverImageBase64: "",
-      logoBase64: "",
-      filteredNcrs: undefined,
-      filteredInspections: undefined,
-      filteredFindings: undefined,
-      filteredMaterialDeliveries: undefined,
-      filteredCubeTests: undefined,
-      filteredSiteComments: undefined,
-      filteredSiteInstructions: undefined,
-      filteredStructuralElements: undefined,
-    };
+    setCache(`jqms_weekly_report_full_${report.id}`, report);
 
     const calcBytes = (obj: any): number => {
       try {
@@ -3326,11 +3320,149 @@ export const dbService = {
       }
     };
 
-    const payloadSize = calcBytes(payload);
-    if (payloadSize > 950_000) {
-      throw new Error(
-        `Weekly report payload is ${Math.round(payloadSize / 1024)} KB, exceeding Firestore's 1 MB document limit. Please reduce the number of embedded photos or shorten the date range.`,
+    const sanitizeSafeUrl = (url: any): string => {
+      if (!url || typeof url !== "string") return "";
+      const trimmed = url.trim();
+      if (trimmed.startsWith("data:") && trimmed.length > 4096) return "";
+      return trimmed;
+    };
+
+    // Helper to sanitize photo arrays by stripping heavy base64 strings
+    const sanitizePhotoArray = (photos: any): string[] => {
+      if (!Array.isArray(photos)) return [];
+      return photos
+        .map((p) => {
+          if (typeof p === "string") {
+            if (p.startsWith("data:") && p.length > 2048) {
+              return "field_photo_recorded";
+            }
+            return p;
+          }
+          if (p && typeof p === "object" && typeof p.url === "string") {
+            if (p.url.startsWith("data:") && p.url.length > 2048) {
+              return "field_photo_recorded";
+            }
+            return p.url;
+          }
+          return "";
+        })
+        .filter(Boolean);
+    };
+
+    // Sanitize site comments
+    const sanitizeSiteComments = (comments: any[]): any[] => {
+      if (!Array.isArray(comments)) return [];
+      return comments.map((c) => {
+        const cleanedPhotos = sanitizePhotoArray(c.photos || c.images);
+        const { images, ...rest } = c;
+        return {
+          ...rest,
+          photos: cleanedPhotos,
+        };
+      });
+    };
+
+    // Sanitize NCRs
+    const sanitizeNcrLog = (ncrs: any[]): any[] => {
+      if (!Array.isArray(ncrs)) return [];
+      return ncrs.map((n) => ({
+        ...n,
+        photos: sanitizePhotoArray(n.photos),
+        beforePhotos: sanitizePhotoArray(n.beforePhotos),
+        afterPhotos: sanitizePhotoArray(n.afterPhotos),
+        evidencePhotos: sanitizePhotoArray(n.evidencePhotos),
+      }));
+    };
+
+    const cleaned = cleanForFirestore({
+      ...report,
+      companyId: effectiveCompId,
+      updatedAt: new Date().toISOString(),
+    });
+
+    let payload: any = {
+      ...cleaned,
+      coverImageUrl: sanitizeSafeUrl((cleaned as any).coverImageUrl),
+      logoUrl: sanitizeSafeUrl((cleaned as any).logoUrl),
+      projectImage: sanitizeSafeUrl((cleaned as any).projectImage),
+      beamLayoutImg: sanitizeSafeUrl((cleaned as any).beamLayoutImg),
+      columnLayoutImg: sanitizeSafeUrl((cleaned as any).columnLayoutImg),
+      slabImg: sanitizeSafeUrl((cleaned as any).slabImg),
+      coverImageBase64: "",
+      logoBase64: "",
+      siteComments: sanitizeSiteComments((cleaned as any).siteComments),
+      ncrRemediationLog: sanitizeNcrLog((cleaned as any).ncrRemediationLog),
+    };
+
+    // Remove redundant arrays that duplicate the primary collections
+    delete payload.filteredNcrs;
+    delete payload.filteredInspections;
+    delete payload.filteredFindings;
+    delete payload.filteredMaterialDeliveries;
+    delete payload.filteredCubeTests;
+    delete payload.filteredSiteComments;
+    delete payload.filteredSiteInstructions;
+    delete payload.filteredStructuralElements;
+
+    let payloadSize = calcBytes(payload);
+
+    // If still large (> 850 KB), offload verbose details to subcollection doc
+    if (payloadSize > 850_000) {
+      console.info(
+        `[WeeklyReport] Auto-optimizing large report payload (${Math.round(payloadSize / 1024)} KB) for Firestore...`,
       );
+      try {
+        const overflowDoc: any = {
+          siteComments: payload.siteComments,
+          structuralElements: payload.structuralElements,
+          materialDeliveries: payload.materialDeliveries,
+          cubeTests: payload.cubeTests,
+          siteInstructions: payload.siteInstructions,
+          updatedAt: new Date().toISOString(),
+        };
+
+        await setDoc(
+          doc(firestore, "weeklyReports", report.id, "overflow", "details"),
+          cleanForFirestore(overflowDoc),
+          { merge: true },
+        );
+
+        payload.hasOverflow = true;
+        // Keep top records in parent document so listing and metrics remain instantaneous
+        if (Array.isArray(payload.siteComments))
+          payload.siteComments = payload.siteComments.slice(0, 30);
+        if (Array.isArray(payload.structuralElements))
+          payload.structuralElements = payload.structuralElements.slice(0, 30);
+        if (Array.isArray(payload.materialDeliveries))
+          payload.materialDeliveries = payload.materialDeliveries.slice(0, 30);
+        if (Array.isArray(payload.cubeTests))
+          payload.cubeTests = payload.cubeTests.slice(0, 30);
+        if (Array.isArray(payload.siteInstructions))
+          payload.siteInstructions = payload.siteInstructions.slice(0, 30);
+      } catch (subErr) {
+        console.warn(
+          "Failed saving overflow subcollection, applying inline prune:",
+          subErr,
+        );
+        // Fallback: prune non-essential verbose fields
+        if (Array.isArray(payload.siteComments)) {
+          payload.siteComments = payload.siteComments.map((c: any) => ({
+            id: c.id,
+            reportNumber: c.reportNumber,
+            date: c.date,
+            inspector: c.inspector,
+            location: c.location,
+            element: c.element,
+            trade: c.trade,
+            status: c.status,
+            comments:
+              typeof c.comments === "string" ? c.comments.slice(0, 200) : "",
+          }));
+        }
+        if (Array.isArray(payload.structuralElements)) {
+          payload.structuralElements = payload.structuralElements.slice(0, 50);
+        }
+      }
     }
 
     const cacheKey = scopedCacheKey(

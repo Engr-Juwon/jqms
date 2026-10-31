@@ -1226,6 +1226,9 @@ export const WeeklyReportDetail: React.FC = () => {
               ? rawPhotos
                   .map((p: any) => {
                     if (typeof p === "string") {
+                      if (p.startsWith("data:") && p.length > 2048) {
+                        return "photo_recorded";
+                      }
                       return p.length > 200000 ? "" : p;
                     }
                     if (
@@ -1233,6 +1236,9 @@ export const WeeklyReportDetail: React.FC = () => {
                       typeof p === "object" &&
                       typeof p.url === "string"
                     ) {
+                      if (p.url.startsWith("data:") && p.url.length > 2048) {
+                        return { ...p, url: "photo_recorded" };
+                      }
                       return p.url.length > 200000 ? { ...p, url: "" } : p;
                     }
                     return p;
@@ -1265,7 +1271,6 @@ export const WeeklyReportDetail: React.FC = () => {
               projectName: rep.projectName || "",
               reportNumber: rep.reportNumber || "",
               photos: sanitizedPhotos,
-              images: sanitizedPhotos,
               vendorCheck: obs.vendorCheck || obs.assignedTo || "",
               trade: obs.tradeName || obs.trade || "",
             };

@@ -794,6 +794,9 @@ export const WeeklyReportCreate: React.FC = () => {
               ? rawPhotos
                   .map((p: any) => {
                     if (typeof p === "string") {
+                      if (p.startsWith("data:") && p.length > 2048) {
+                        return "photo_recorded";
+                      }
                       return p.length > 200000 ? "" : p;
                     }
                     if (
@@ -801,6 +804,9 @@ export const WeeklyReportCreate: React.FC = () => {
                       typeof p === "object" &&
                       typeof p.url === "string"
                     ) {
+                      if (p.url.startsWith("data:") && p.url.length > 2048) {
+                        return { ...p, url: "photo_recorded" };
+                      }
                       return p.url.length > 200000 ? { ...p, url: "" } : p;
                     }
                     return p;
@@ -834,7 +840,6 @@ export const WeeklyReportCreate: React.FC = () => {
               projectName: report.projectName || "",
               reportNumber: report.reportNumber || "",
               photos: sanitizedPhotos,
-              images: sanitizedPhotos,
               vendorCheck:
                 (obs as any).vendorCheck || (obs as any).assignedTo || "",
               trade: (obs as any).tradeName || (obs as any).trade || "",
@@ -1427,13 +1432,13 @@ export const WeeklyReportCreate: React.FC = () => {
           };
         }) as any,
 
-        filteredNcrs: compileReportData.ncrRemediationLog,
-        filteredInspections: compileReportData.inspectionsList,
-        filteredFindings: compileReportData.findingsList,
-        filteredMaterialDeliveries: compileReportData.materialDeliveriesList,
-        filteredCubeTests: compileReportData.cubeTestsList,
-        filteredSiteComments: compileReportData.siteCommentsList,
-        filteredSiteInstructions: compileReportData.siteInstructionsList,
+        filteredNcrs: undefined,
+        filteredInspections: undefined,
+        filteredFindings: undefined,
+        filteredMaterialDeliveries: undefined,
+        filteredCubeTests: undefined,
+        filteredSiteComments: undefined,
+        filteredSiteInstructions: undefined,
       };
 
       try {

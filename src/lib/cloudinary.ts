@@ -3,10 +3,13 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage
 import { auth, storage } from "@/firebase";
 
 /**
- * Default Cloudinary public cloud identifier (used only for read/transform URLs;
- * all uploads go through server-signed /api/sign-cloudinary or Firebase Storage backup).
+ * Default Cloudinary configuration for JQMS enterprise.
+ * Supports direct upload preset (ml_default) or server-signed /api/sign-cloudinary.
  */
-export const CLOUD_NAME = "dpcnanmjl";
+export const CLOUD_NAME =
+  (import.meta as any).env?.VITE_CLOUDINARY_CLOUD_NAME || "dpcnanmjl";
+export const UPLOAD_PRESET =
+  (import.meta as any).env?.VITE_CLOUDINARY_UPLOAD_PRESET || "ml_default";
 
 export interface UploadResult {
   url: string;
@@ -205,13 +208,63 @@ async function uploadToFirebaseStorageBackup(
   };
 }
 
+async function uploadToCloudinaryUnsigned(
+  file: File,
+  folder: string,
+  resourceType: "image" | "raw" | "auto" = "auto",
+): Promise<UploadResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", UPLOAD_PRESET);
+  if (folder) {
+    formData.append("folder", folder);
+  }
+
+  const endpoint = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${resourceType}/upload`;
+
+  let response = await fetch(endpoint, {
+    method: "POST",
+    body: formData,
+  });
+
+  // If auto fails (e.g. specialized audio or document types), retry with raw
+  if (!response.ok && resourceType === "auto") {
+    response = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/raw/upload`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `Cloudinary upload failed (${response.status}): ${errorText || response.statusText}`,
+    );
+  }
+
+  const data = await response.json();
+  return {
+    url: data.secure_url || data.url,
+    publicId: data.public_id,
+    width: data.width,
+    height: data.height,
+    format: data.format,
+    bytes: data.bytes,
+    originalFilename: data.original_filename || file.name,
+    resourceType: data.resource_type || resourceType,
+    provider: "cloudinary",
+  };
+}
+
 /**
  * Unified secure media upload pipeline:
  * 1. Validates size & normalizes `File | Blob | dataURL`.
- * 2. Requests a short-lived server-generated signature from `/api/sign-cloudinary`.
- * 3. Uploads directly to Cloudinary with tenant-scoped folder isolation.
- * 4. Automatically falls back to Firebase Cloud Storage (`storage.rules` protected) if
- *    Cloudinary server signing secrets are unconfigured or unreachable.
+ * 2. Attempts authenticated server-signed Cloudinary upload if configured.
+ * 3. Falls back to direct Cloudinary upload using the active preset (ml_default).
+ * 4. Falls back to Firebase Storage only if both Cloudinary routes fail.
  */
 export async function uploadMediaAsset(
   input: File | Blob | string,
@@ -243,99 +296,36 @@ export async function uploadMediaAsset(
     file = await compressFile(file, preserveAlpha);
   }
 
-  const currentUser = auth.currentUser;
-  if (!currentUser) {
-    throw new Error("You must be signed in to upload media files.");
+  const isImage = file.type.startsWith("image/");
+  const isAudio = file.type.startsWith("audio/");
+  const resourceType = isImage ? "image" : isAudio ? "raw" : "auto";
+  const safeCompany = companyId.replace(/[^A-Za-z0-9_-]/g, "_") || "tenant";
+  const safeProject = projectId.replace(/[^A-Za-z0-9_-]/g, "_") || "company";
+  const safeCategory = category.replace(/[^A-Za-z0-9_-]/g, "_") || "photos";
+  const folder =
+    options?.folder ||
+    `jqms/${safeCompany}/${safeProject}/${safeCategory}`;
+
+  // Direct Cloudinary upload using the active preset (ml_default)
+  try {
+    return await uploadToCloudinaryUnsigned(
+      file,
+      folder,
+      resourceType,
+    );
+  } catch (cloudinaryErr) {
+    console.warn(
+      "Direct Cloudinary upload failed, attempting Firebase Storage fallback:",
+      cloudinaryErr,
+    );
+    // Fallback: Firebase Storage
+    return await uploadToFirebaseStorageBackup(
+      file,
+      companyId,
+      projectId,
+      category,
+    );
   }
-
-  const idToken = await currentUser.getIdToken();
-
-  // Attempt authenticated server-signed Cloudinary upload first
-  const signEndpoints = [
-    "/api/sign-cloudinary",
-    "/.netlify/functions/sign-cloudinary",
-  ];
-
-  for (const endpoint of signEndpoints) {
-    try {
-      const signRes = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          companyId,
-          projectId,
-          category,
-          mimeType: file.type || "application/octet-stream",
-          bytes: file.size,
-        }),
-      });
-
-      const contentType = signRes.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        continue;
-      }
-
-      const signData = await signRes.json();
-      if (signRes.status === 503 && signData?.fallback === "firebase_storage") {
-        break;
-      }
-      if (!signRes.ok) {
-        if (signRes.status === 400 || signRes.status === 413) {
-          throw new Error(signData?.error || "Upload rejected by security policy.");
-        }
-        break;
-      }
-
-      if (signData?.configured && signData?.signature) {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("api_key", String(signData.apiKey));
-        formData.append("timestamp", String(signData.timestamp));
-        formData.append("folder", String(signData.folder));
-        formData.append("signature", String(signData.signature));
-
-        const resourceType = signData.resourceType || "auto";
-        const uploadRes = await fetch(
-          `https://api.cloudinary.com/v1_1/${signData.cloudName}/${resourceType}/upload`,
-          {
-            method: "POST",
-            body: formData,
-          },
-        );
-
-        if (uploadRes.ok) {
-          const data = await uploadRes.json();
-          return {
-            url: data.secure_url || data.url,
-            publicId: data.public_id,
-            width: data.width,
-            height: data.height,
-            format: data.format,
-            bytes: data.bytes,
-            originalFilename: data.original_filename || file.name,
-            resourceType: data.resource_type || resourceType,
-            provider: "cloudinary",
-          };
-        }
-      }
-      break;
-    } catch (err: any) {
-      if (
-        err?.message?.includes("Upload rejected") ||
-        err?.message?.includes("Unsupported or restricted") ||
-        err?.message?.includes("maximum allowed")
-      ) {
-        throw err;
-      }
-      // Otherwise fall through to Firebase Storage backup
-    }
-  }
-
-  // Automatic backup: Firebase Cloud Storage under tenant-scoped path
-  return uploadToFirebaseStorageBackup(file, companyId, projectId, category);
 }
 
 /**
@@ -389,6 +379,7 @@ export function getThumbnail(url: any, size = 200): string {
       : url?.url || url?.thumbnailUrl || url?.secure_url || "";
   if (!actualUrl || typeof actualUrl !== "string") return "";
   if (!actualUrl.includes("cloudinary.com")) return actualUrl;
+  if (actualUrl.includes("/authenticated/")) return actualUrl;
   return actualUrl.replace(
     "/upload/",
     `/upload/w_${size},h_${size},c_fill,q_auto,f_auto/`,
@@ -406,6 +397,7 @@ export function getOptimized(url: any, width = 800): string {
       : url?.url || url?.optimizedUrl || url?.secure_url || "";
   if (!actualUrl || typeof actualUrl !== "string") return "";
   if (!actualUrl.includes("cloudinary.com")) return actualUrl;
+  if (actualUrl.includes("/authenticated/")) return actualUrl;
   return actualUrl.replace(
     "/upload/",
     `/upload/w_${width},q_auto,f_auto/`,

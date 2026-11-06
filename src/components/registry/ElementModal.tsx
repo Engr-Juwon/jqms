@@ -682,14 +682,14 @@ export const ElementModal: React.FC<ElementModalProps> = ({
           curvedGeom = geom;
           const arcLen = geom.arcLength;
           elementArea = arcLen * W;
-          volume = arcLen * W * D;
+          volume = arcLen * W * netDepth;
           formworkArea = (2 * netDepth + W) * arcLen;
           formulaDesc = `Curved Beam (R=${radius}m, Arc Len=${arcLen.toFixed(2)}m) × ${W}m × ${D}m | Formwork: (2 × (${D}m - ${slabT}m) + ${W}m) × ${arcLen.toFixed(2)}m`;
         } else {
           elementArea = L * W;
-          volume = L * W * D;
+          volume = L * W * netDepth;
           formworkArea = (2 * netDepth + W) * L;
-          formulaDesc = `${L}m × ${W}m × ${D}m | Formwork: (2 × (${D}m - ${slabT}m) + ${W}m) × ${L}m`;
+          formulaDesc = `${L}m × ${W}m × (${D}m - ${slabT}m) | Formwork: (2 × (${D}m - ${slabT}m) + ${W}m) × ${L}m`;
         }
         break;
       }

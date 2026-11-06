@@ -29,6 +29,9 @@ import {
   ChevronRight,
   ShieldCheck,
   RotateCcw,
+  Truck,
+  Scale,
+  Settings2,
 } from "lucide-react";
 
 /* ─── Mix Presets ─── */
@@ -42,7 +45,7 @@ const MIX_PRESETS = [
 
 /* ─── Admixture Presets ─── */
 const ADMIXTURE_PRESETS = [
-  { name: "Polycarboxylate Superplasticizer (PCE)", value: "Polycarboxylate Superplasticizer (PCE)" },
+  { name: "Superplasticizer (SNF)", value: "Superplasticizer (SNF)" },
   { name: "Lignosulfonate Water Reducer", value: "Lignosulfonate Water Reducer" },
   { name: "Set Retarding Admixture (Plastiment)", value: "Set Retarding Admixture (Plastiment)" },
   { name: "Accelerating Admixture (Non-Chloride)", value: "Accelerating Admixture (Non-Chloride)" },
@@ -51,13 +54,48 @@ const ADMIXTURE_PRESETS = [
   { name: "None / Plain Mix", value: "None / Plain Mix" },
 ];
 
-/* ─── Material Calculation Helper ─── */
+/* ─── Aggregate Tipper Fleet Presets (Trips apply specifically to Sand & Stone) ─── */
+const FLEET_PRESETS = [
+  {
+    name: "20T Standard Tippers",
+    sandCap: 20,
+    stoneCap: 20,
+  },
+  {
+    name: "30T Heavy Tippers",
+    sandCap: 30,
+    stoneCap: 30,
+  },
+  {
+    name: "10T Medium Urban Tippers",
+    sandCap: 10,
+    stoneCap: 10,
+  },
+  {
+    name: "15T Intermediate Tippers",
+    sandCap: 15,
+    stoneCap: 15,
+  },
+];
+
+/* ─── Material Calculation Helper (Includes Tonnes & Aggregate Trips) ─── */
 const calculateMaterials = (
   wetVolume: number,
   ratio: string,
   dryFactor: number,
   admixtureDosageMlPerBag: number = 300,
+  logistics?: {
+    sandDensity: number;
+    stoneDensity: number;
+    sandTruckCapacity: number;
+    stoneTruckCapacity: number;
+  },
 ) => {
+  const sandDensity = logistics?.sandDensity ?? 1.6;
+  const stoneDensity = logistics?.stoneDensity ?? 2.6;
+  const sandTruckCapacity = logistics?.sandTruckCapacity ?? 30;
+  const stoneTruckCapacity = logistics?.stoneTruckCapacity ?? 30;
+
   if (wetVolume <= 0) {
     return {
       bagsCement: 0,
@@ -68,6 +106,14 @@ const calculateMaterials = (
       cementWeightKg: 0,
       admixtureMl: 0,
       admixtureLiters: 0,
+      cementTonnes: 0,
+      sandTonnes: 0,
+      stoneTonnes: 0,
+      waterTonnes: 0,
+      sandTrips: 0,
+      stoneTrips: 0,
+      totalMaterialTonnes: 0,
+      totalTrips: 0,
     };
   }
 
@@ -82,6 +128,14 @@ const calculateMaterials = (
       cementWeightKg: 0,
       admixtureMl: 0,
       admixtureLiters: 0,
+      cementTonnes: 0,
+      sandTonnes: 0,
+      stoneTonnes: 0,
+      waterTonnes: 0,
+      sandTrips: 0,
+      stoneTrips: 0,
+      totalMaterialTonnes: 0,
+      totalTrips: 0,
     };
   }
 
@@ -100,15 +154,48 @@ const calculateMaterials = (
   const admixtureMl = Math.round(bagsCement * admixtureDosageMlPerBag);
   const admixtureLiters = parseFloat((admixtureMl / 1000).toFixed(2));
 
+  const sandM3 = parseFloat(sandVol.toFixed(2));
+  const stoneM3 = parseFloat(stoneVol.toFixed(2));
+
+  // Weights in Metric Tonnes (All materials have weights)
+  const cementTonnes = parseFloat((cementWeightKg / 1000).toFixed(2));
+  const sandTonnes = parseFloat((sandM3 * sandDensity).toFixed(2));
+  const stoneTonnes = parseFloat((stoneM3 * stoneDensity).toFixed(2));
+  const waterTonnes = parseFloat((waterLiters / 1000).toFixed(2));
+
+  // Trips strictly apply to Sand and Stone aggregate tippers only
+  const sandTrips =
+    sandTonnes > 0 && sandTruckCapacity > 0
+      ? Math.ceil(sandTonnes / sandTruckCapacity)
+      : 0;
+  const stoneTrips =
+    stoneTonnes > 0 && stoneTruckCapacity > 0
+      ? Math.ceil(stoneTonnes / stoneTruckCapacity)
+      : 0;
+
+  const totalMaterialTonnes = parseFloat(
+    (cementTonnes + sandTonnes + stoneTonnes + waterTonnes).toFixed(2),
+  );
+  // Total trips count strictly aggregate tippers
+  const totalTrips = sandTrips + stoneTrips;
+
   return {
     bagsCement,
-    sandM3: parseFloat(sandVol.toFixed(2)),
-    stoneM3: parseFloat(stoneVol.toFixed(2)),
+    sandM3,
+    stoneM3,
     waterLiters,
     dryVolume: parseFloat(dryVolume.toFixed(3)),
     cementWeightKg: parseFloat(cementWeightKg.toFixed(2)),
     admixtureMl,
     admixtureLiters,
+    cementTonnes,
+    sandTonnes,
+    stoneTonnes,
+    waterTonnes,
+    sandTrips,
+    stoneTrips,
+    totalMaterialTonnes,
+    totalTrips,
   };
 };
 
@@ -138,15 +225,29 @@ export const MaterialTakeoff: React.FC = () => {
       setSelectedLevelId(activeProject?.currentLevelId || "ALL");
     }
   }, [activeProject?.currentLevelId]);
+
   const [mixRatio, setMixRatio] = useState<string>("1:1.5:2.5");
   const [admixtureType, setAdmixtureType] = useState<string>(
-    "Polycarboxylate Superplasticizer (PCE)",
+    "Superplasticizer (SNF)",
   );
-  const [admixtureDosageMl, setAdmixtureDosageMl] = useState<number>(300);
+  const [admixtureDosageMl, setAdmixtureDosageMl] = useState<number>(750);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [includeWastage, setIncludeWastage] = useState<boolean>(true);
   const [wastagePercent, setWastagePercent] = useState<number>(10);
   const [dryVolumeFactor, setDryVolumeFactor] = useState<number>(1.54);
+
+  // ─── Flexible Haulage & Logistics Parameters (Trips strictly apply to Sand & Stone) ───
+  const [sandDensity, setSandDensity] = useState<number>(1.6); // tonnes/m3
+  const [stoneDensity, setStoneDensity] = useState<number>(2.6); // tonnes/m3
+  const [concreteDensity, setConcreteDensity] = useState<number>(2.4); // tonnes/m3
+  const [sandTruckCapacity, setSandTruckCapacity] = useState<number>(30); // tonnes/trip
+  const [stoneTruckCapacity, setStoneTruckCapacity] = useState<number>(30); // tonnes/trip
+
+  // ─── Report Content Options (By default, formwork & rebars are NOT shown in reports) ───
+  const [showFormworkInReport, setShowFormworkInReport] = useState<boolean>(false);
+  const [showRebarsInReport, setShowRebarsInReport] = useState<boolean>(false);
+  const [showLogisticsInReport, setShowLogisticsInReport] = useState<boolean>(true);
+
   const [selectedCategories, setSelectedCategories] = useState<
     Record<string, boolean>
   >({
@@ -183,6 +284,19 @@ export const MaterialTakeoff: React.FC = () => {
       ...prev,
       [catKey]: !prev[catKey],
     }));
+  };
+
+  const resetLogisticsParams = () => {
+    setSandDensity(1.6);
+    setStoneDensity(1.6);
+    setConcreteDensity(2.4);
+    setSandTruckCapacity(20);
+    setStoneTruckCapacity(20);
+  };
+
+  const applyFleetPreset = (preset: (typeof FLEET_PRESETS)[0]) => {
+    setSandTruckCapacity(preset.sandCap);
+    setStoneTruckCapacity(preset.stoneCap);
   };
 
   /* ─── Active Level Filtered Elements ─── */
@@ -249,6 +363,12 @@ export const MaterialTakeoff: React.FC = () => {
         mixRatio,
         dryVolumeFactor,
         admixtureDosageMl,
+        {
+          sandDensity,
+          stoneDensity,
+          sandTruckCapacity,
+          stoneTruckCapacity,
+        },
       );
       return {
         type,
@@ -292,6 +412,10 @@ export const MaterialTakeoff: React.FC = () => {
     dryVolumeFactor,
     selectedCategories,
     admixtureDosageMl,
+    sandDensity,
+    stoneDensity,
+    sandTruckCapacity,
+    stoneTruckCapacity,
   ]);
 
   const materialQuantities = useMemo(() => {
@@ -301,8 +425,23 @@ export const MaterialTakeoff: React.FC = () => {
       mixRatio,
       dryVolumeFactor,
       admixtureDosageMl,
+      {
+        sandDensity,
+        stoneDensity,
+        sandTruckCapacity,
+        stoneTruckCapacity,
+      },
     );
-  }, [calculatedData.totalWithWasteVolume, mixRatio, dryVolumeFactor, admixtureDosageMl]);
+  }, [
+    calculatedData.totalWithWasteVolume,
+    mixRatio,
+    dryVolumeFactor,
+    admixtureDosageMl,
+    sandDensity,
+    stoneDensity,
+    sandTruckCapacity,
+    stoneTruckCapacity,
+  ]);
 
   /* ─── Metrics strictly scoped to active floor selection ─── */
   const scopeTotalVolumeM3 = useMemo(() => {
@@ -423,6 +562,17 @@ export const MaterialTakeoff: React.FC = () => {
       admixtureType,
       admixtureDosageMl,
       selectedCategories,
+      showFormworkInReport,
+      showRebarsInReport,
+      showLogisticsInReport,
+      logisticsParams: {
+        sandDensity,
+        stoneDensity,
+        concreteDensity,
+        cementBagWeightKg: 50,
+        sandTruckCapacityTonnes: sandTruckCapacity,
+        stoneTruckCapacityTonnes: stoneTruckCapacity,
+      },
       levelSummary: formattedLevelSummary,
       calculatedData,
       materialQuantities,
@@ -458,6 +608,10 @@ export const MaterialTakeoff: React.FC = () => {
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                 Active CAD Batch Model
               </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/20 text-[11px] font-semibold font-mono">
+                <Truck className="w-3 h-3 text-amber-400" />
+                {materialQuantities.totalMaterialTonnes} Tonnes &bull; {materialQuantities.totalTrips} Tipper Trips (Sand &amp; Stone)
+              </span>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -467,7 +621,7 @@ export const MaterialTakeoff: React.FC = () => {
             </div>
 
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed pt-1">
-              Automated volumetric estimation (m³), mix batching breakdown (cement, sand, aggregate, water, chemical admixtures), element size schedule &amp; formwork surface contacts.
+              Automated volumetric estimation (m³), mix batching, material tonnage conversions &amp; aggregate tipper trips (Sand &amp; Stone).
             </p>
           </div>
 
@@ -489,7 +643,7 @@ export const MaterialTakeoff: React.FC = () => {
               <span>Export CSV</span>
             </button>
 
-            {/* Dual Print Action Button with Dropdown */}
+            {/* Dual Print Action Button with Dropdown & Report Preferences */}
             <div className="relative">
               <button
                 onClick={() => setShowPrintDropdown((prev) => !prev)}
@@ -501,47 +655,92 @@ export const MaterialTakeoff: React.FC = () => {
               </button>
 
               {showPrintDropdown && (
-                <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 mb-1 flex items-center justify-between">
+                <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 p-3 space-y-2.5 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-2 py-1.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
                     <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                      Select Report Format
+                      Report Content &amp; Inclusions
                     </span>
                     <ShieldCheck className="w-3.5 h-3.5 text-brand-500" />
                   </div>
 
-                  <button
-                    onClick={() => handlePrintReport("DETAILED")}
-                    className="w-full flex items-start gap-3 p-3 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-950/40 text-left transition cursor-pointer group border border-transparent hover:border-purple-200 dark:hover:border-purple-800/50"
-                  >
-                    <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300 shrink-0">
-                      <FileText className="w-4 h-4" />
+                  {/* Explicit Report Toggle Options */}
+                  <div className="space-y-1.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 text-xs">
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mb-1">
+                      Filter Elements &amp; Schedules:
                     </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 block">
-                        Detailed Report (Full Schedule)
-                      </span>
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5 leading-snug">
-                        Includes level &amp; category totals + full individual member schedule
-                      </span>
-                    </div>
-                  </button>
 
-                  <button
-                    onClick={() => handlePrintReport("SUMMARY")}
-                    className="w-full flex items-start gap-3 p-3 rounded-xl hover:bg-brand-50 dark:hover:bg-brand-950/40 text-left transition cursor-pointer group border border-transparent hover:border-brand-200 dark:hover:border-brand-800/50"
-                  >
-                    <div className="p-2 rounded-lg bg-brand-100 dark:bg-brand-900/50 text-brand-600 dark:text-brand-300 shrink-0">
-                      <BarChart3 className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-400 block">
-                        Summary Report (Executive)
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300 hover:text-brand-600">
+                      <input
+                        type="checkbox"
+                        checked={showFormworkInReport}
+                        onChange={(e) => setShowFormworkInReport(e.target.checked)}
+                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 w-3.5 h-3.5"
+                      />
+                      <span className="text-[11px] font-medium">Include Formwork Contact Area</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300 hover:text-brand-600">
+                      <input
+                        type="checkbox"
+                        checked={showRebarsInReport}
+                        onChange={(e) => setShowRebarsInReport(e.target.checked)}
+                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 w-3.5 h-3.5"
+                      />
+                      <span className="text-[11px] font-medium">Include Rebar Estimations</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300 hover:text-brand-600">
+                      <input
+                        type="checkbox"
+                        checked={showLogisticsInReport}
+                        onChange={(e) => setShowLogisticsInReport(e.target.checked)}
+                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 w-3.5 h-3.5"
+                      />
+                      <span className="text-[11px] font-semibold text-brand-600 dark:text-brand-400">
+                        Include Tonnes &amp; Aggregate Trips
                       </span>
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5 leading-snug">
-                        Mix parameters, level &amp; category materials + grand BoQ totals
-                      </span>
-                    </div>
-                  </button>
+                    </label>
+
+                    <p className="text-[9.5px] text-slate-400 dark:text-slate-500 leading-tight pt-1 border-t border-slate-200/50 dark:border-slate-800">
+                      Formwork &amp; rebars are hidden by default. Trips apply to Sand &amp; Stone only.
+                    </p>
+                  </div>
+
+                  <div className="pt-1 space-y-1.5">
+                    <button
+                      onClick={() => handlePrintReport("DETAILED")}
+                      className="w-full flex items-start gap-3 p-2.5 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-950/40 text-left transition cursor-pointer group border border-transparent hover:border-purple-200 dark:hover:border-purple-800/50"
+                    >
+                      <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300 shrink-0">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 block">
+                          Detailed Report (Full Schedule)
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5 leading-snug">
+                          Selected sections only, batch tonnes, aggregate trips + member schedule
+                        </span>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => handlePrintReport("SUMMARY")}
+                      className="w-full flex items-start gap-3 p-2.5 rounded-xl hover:bg-brand-50 dark:hover:bg-brand-950/40 text-left transition cursor-pointer group border border-transparent hover:border-brand-200 dark:hover:border-brand-800/50"
+                    >
+                      <div className="p-2 rounded-lg bg-brand-100 dark:bg-brand-900/50 text-brand-600 dark:text-brand-300 shrink-0">
+                        <BarChart3 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-400 block">
+                          Summary Report (Executive)
+                        </span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5 leading-snug">
+                          Material BoQ, tonnages, aggregate tipper deliveries &amp; mix specs
+                        </span>
+                      </div>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -558,9 +757,9 @@ export const MaterialTakeoff: React.FC = () => {
         }}
       />
 
-      {/* ─── Top 4 Dynamic KPI Summary Metric Cards ─── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Metric 1: Volume */}
+      {/* ─── Top 5 Dynamic KPI Summary Metric Cards ─── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* Metric 1: Concrete Volume */}
         <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm dark:shadow-xl hover:shadow-md transition border-t-4 border-t-brand-500 group">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -584,31 +783,55 @@ export const MaterialTakeoff: React.FC = () => {
           </div>
         </div>
 
-        {/* Metric 2: Rebar */}
-        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm dark:shadow-xl hover:shadow-md transition border-t-4 border-t-red-500 group">
+        {/* Metric 2: Total Material Weight in Tonnes */}
+        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm dark:shadow-xl hover:shadow-md transition border-t-4 border-t-amber-500 group">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Estimated Rebar
+              Total Materials Weight
             </span>
-            <div className="p-2 rounded-xl bg-red-50 dark:bg-red-950/80 text-red-600 dark:text-red-400">
-              <Package size={16} />
+            <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400">
+              <Scale size={16} />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-slate-900 dark:text-white font-mono tracking-tight">
-              {scopeEstimatedRebarTons}
+            <span className="text-3xl font-black text-amber-600 dark:text-amber-400 font-mono tracking-tight">
+              {materialQuantities.totalMaterialTonnes}
             </span>
-            <span className="text-sm font-bold text-red-600 dark:text-red-400 font-mono">Tons</span>
+            <span className="text-sm font-bold text-amber-600 dark:text-amber-400 font-mono">Tonnes</span>
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800/80 pt-2">
-            <span>Density factor:</span>
+            <span>All Materials:</span>
             <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
-              140 kg/m³ (G500B)
+              Cement + Sand + Stone + H₂O
             </span>
           </div>
         </div>
 
-        {/* Metric 3: Formwork */}
+        {/* Metric 3: Total Aggregate Tipper Trips (Sand & Stone) */}
+        <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm dark:shadow-xl hover:shadow-md transition border-t-4 border-t-indigo-500 group">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Aggregate Tipper Trips
+            </span>
+            <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400">
+              <Truck size={16} />
+            </div>
+          </div>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-3xl font-black text-indigo-600 dark:text-indigo-400 font-mono tracking-tight">
+              {materialQuantities.totalTrips}
+            </span>
+            <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400 font-mono">Trips</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800/80 pt-2">
+            <span>Sand &amp; Stone Only:</span>
+            <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
+              {materialQuantities.sandTrips} Sand + {materialQuantities.stoneTrips} Stone
+            </span>
+          </div>
+        </div>
+
+        {/* Metric 4: Formwork */}
         <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm dark:shadow-xl hover:shadow-md transition border-t-4 border-t-emerald-500 group">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -632,7 +855,7 @@ export const MaterialTakeoff: React.FC = () => {
           </div>
         </div>
 
-        {/* Metric 4: Admixture */}
+        {/* Metric 5: Admixture */}
         <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm dark:shadow-xl hover:shadow-md transition border-t-4 border-t-purple-500 group">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -650,7 +873,7 @@ export const MaterialTakeoff: React.FC = () => {
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800/80 pt-2">
             <span>Dosage rate:</span>
-            <span className="font-bold text-purple-700 dark:text-purple-300 font-mono truncate max-w-[120px]" title={admixtureType}>
+            <span className="font-bold text-purple-700 dark:text-purple-300 font-mono truncate max-w-[100px]" title={admixtureType}>
               {admixtureDosageMl} mL/bag
             </span>
           </div>
@@ -669,7 +892,7 @@ export const MaterialTakeoff: React.FC = () => {
             }`}
           >
             <Calculator className="w-4 h-4" />
-            <span>Mix Calculator &amp; BoQ</span>
+            <span>Mix Calculator, Tonnes &amp; Trips BoQ</span>
           </button>
 
           <button
@@ -729,7 +952,7 @@ export const MaterialTakeoff: React.FC = () => {
                   )}
                 </div>
                 <p className="text-xs text-slate-300 mt-0.5">
-                  Select a specific level to isolate materials, concrete volume, and member BoQ takeoff.
+                  Select a specific level to isolate materials, concrete volume, tonnages, and aggregate tipper trips.
                 </p>
               </div>
             </div>
@@ -888,7 +1111,7 @@ export const MaterialTakeoff: React.FC = () => {
                       Chemical Admixture Specification
                     </h3>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Performance additive &amp; dosage volume
+                      Performance additive &amp; dosage volume (Trips N/A)
                     </p>
                   </div>
                 </div>
@@ -955,12 +1178,224 @@ export const MaterialTakeoff: React.FC = () => {
             </div>
           </div>
 
+          {/* ─── DEDICATED CARD: FLEXIBLE AGGREGATE HAULAGE & MATERIAL DENSITY PARAMETERS ─── */}
+          <div className="bg-white dark:bg-slate-900/90 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl p-5 lg:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400">
+                  <Truck size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                      Aggregate Haulage &amp; Material Density Parameters (Sand &amp; Stone Trips)
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                      100% Flexible
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Trips are calculated exclusively for aggregate haulage (Sand &amp; Stone tippers). Cement is bagged/bulk, water is piped/reservoir.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={resetLogisticsParams}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  title="Reset haulage parameters to standard engineering defaults"
+                >
+                  <RotateCcw size={13} />
+                  <span>Reset Defaults</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Tipper Presets */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mr-1">
+                Tipper Presets:
+              </span>
+              {FLEET_PRESETS.map((fp) => (
+                <button
+                  key={fp.name}
+                  type="button"
+                  onClick={() => applyFleetPreset(fp)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-slate-700 dark:text-slate-300 hover:text-amber-600 dark:hover:text-amber-400 border border-slate-200 dark:border-slate-700 hover:border-amber-300 transition cursor-pointer"
+                >
+                  {fp.name}
+                </button>
+              ))}
+            </div>
+
+            {/* Flexible Input Fields Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 pt-2">
+              {/* Parameter 1: Sand Density */}
+              <div className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
+                  Sand Density
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="1.0"
+                    max="2.5"
+                    value={sandDensity}
+                    onChange={(e) => setSandDensity(Number(e.target.value))}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-amber-600 dark:text-amber-400 text-center focus:ring-2 focus:ring-amber-500"
+                  />
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 shrink-0">
+                    t/m³
+                  </span>
+                </div>
+                <span className="text-[9px] text-slate-400 dark:text-slate-500 block truncate">
+                  Zone II sharp river sand
+                </span>
+              </div>
+
+              {/* Parameter 2: Stone Density */}
+              <div className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
+                  Stone Density
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="1.0"
+                    max="2.5"
+                    value={stoneDensity}
+                    onChange={(e) => setStoneDensity(Number(e.target.value))}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-slate-700 dark:text-slate-300 text-center focus:ring-2 focus:ring-slate-500"
+                  />
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 shrink-0">
+                    t/m³
+                  </span>
+                </div>
+                <span className="text-[9px] text-slate-400 dark:text-slate-500 block truncate">
+                  Crushed 20mm granite
+                </span>
+              </div>
+
+              {/* Parameter 3: Sand Tipper Capacity */}
+              <div className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
+                  Sand Tipper Load
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    max="60"
+                    value={sandTruckCapacity}
+                    onChange={(e) => setSandTruckCapacity(Number(e.target.value))}
+                    className="w-full bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800/80 rounded-xl p-2 text-xs font-mono font-bold text-amber-600 dark:text-amber-400 text-center focus:ring-2 focus:ring-amber-500"
+                  />
+                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 shrink-0">
+                    T/trip
+                  </span>
+                </div>
+                <span className="text-[9px] text-slate-400 dark:text-slate-500 block truncate">
+                  Tipper truck payload
+                </span>
+              </div>
+
+              {/* Parameter 4: Stone Tipper Capacity */}
+              <div className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
+                  Stone Tipper Load
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    max="60"
+                    value={stoneTruckCapacity}
+                    onChange={(e) => setStoneTruckCapacity(Number(e.target.value))}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-2 text-xs font-mono font-bold text-slate-800 dark:text-slate-200 text-center focus:ring-2 focus:ring-slate-500"
+                  />
+                  <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 shrink-0">
+                    T/trip
+                  </span>
+                </div>
+                <span className="text-[9px] text-slate-400 dark:text-slate-500 block truncate">
+                  Tipper truck payload
+                </span>
+              </div>
+
+              {/* Parameter 5: Concrete Density */}
+              <div className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
+                  Wet Concrete Density
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="1.8"
+                    max="2.8"
+                    value={concreteDensity}
+                    onChange={(e) => setConcreteDensity(Number(e.target.value))}
+                    className="w-full bg-white dark:bg-slate-900 border border-brand-300 dark:border-brand-800/80 rounded-xl p-2 text-xs font-mono font-bold text-brand-600 dark:text-brand-400 text-center focus:ring-2 focus:ring-brand-500"
+                  />
+                  <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400 shrink-0">
+                    t/m³
+                  </span>
+                </div>
+                <span className="text-[9px] text-slate-400 dark:text-slate-500 block truncate">
+                  Wet mix density index
+                </span>
+              </div>
+            </div>
+
+            {/* Aggregate Dispatch Summary Strip */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-brand-500/10 to-indigo-500/10 border border-amber-500/20 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-300 flex items-center justify-center font-bold">
+                  <Truck size={18} />
+                </div>
+                <div>
+                  <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider block">
+                    Calculated Aggregate Tipper Deliveries for Current Scope
+                  </span>
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Fine Sand: <strong className="text-amber-600 dark:text-amber-400">{materialQuantities.sandTrips} trips</strong> ({materialQuantities.sandTonnes}T @ {sandTruckCapacity}T/tipper) &bull; Coarse Stone: <strong className="text-slate-800 dark:text-slate-200">{materialQuantities.stoneTrips} trips</strong> ({materialQuantities.stoneTonnes}T @ {stoneTruckCapacity}T/tipper)
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 shrink-0">
+                <div className="text-right">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block">
+                    Total Material Weight
+                  </span>
+                  <span className="text-base font-black text-amber-600 dark:text-amber-400 font-mono">
+                    {materialQuantities.totalMaterialTonnes} Tonnes
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block">
+                    Aggregate Tipper Deliveries
+                  </span>
+                  <span className="text-base font-black text-indigo-600 dark:text-indigo-400 font-mono">
+                    {materialQuantities.totalTrips} Trips
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* ─── STRUCTURAL ELEMENT CATEGORY FILTERS BANNER ─── */}
           <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Layers size={16} className="text-brand-600 dark:text-brand-400" />
               <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                Structural Sections Included in Take-Off:
+                Structural Sections Included in Take-Off &amp; Report:
               </span>
             </div>
 
@@ -992,7 +1427,7 @@ export const MaterialTakeoff: React.FC = () => {
 
           {/* ─── Main Grid: Volumetric Breakdown Left + BoQ Card Right ─── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left: Volumetric & Formwork Breakdown */}
+            {/* Left: Volumetric Breakdown */}
             <div className="lg:col-span-2 bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-xl overflow-hidden flex flex-col justify-between">
               <div>
                 <div className="px-5 py-4 bg-slate-50 dark:bg-slate-950/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
@@ -1002,7 +1437,7 @@ export const MaterialTakeoff: React.FC = () => {
                     </div>
                     <div>
                       <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                        Volumetric &amp; Formwork Category Breakdown
+                        Volumetric, Tonnes &amp; Aggregate Trips Breakdown
                       </h3>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
                         {selectedLevelId === "ALL"
@@ -1053,7 +1488,7 @@ export const MaterialTakeoff: React.FC = () => {
                                 )}
                               </div>
                               <p className="text-xs text-slate-500 dark:text-slate-400">
-                                {cat.count} elements in current scope
+                                {cat.count} elements &bull; {cat.materials.totalMaterialTonnes} Tonnes &bull; {cat.materials.totalTrips} Tipper Trips
                               </p>
                             </div>
                           </div>
@@ -1061,10 +1496,10 @@ export const MaterialTakeoff: React.FC = () => {
                           <div className="text-right flex items-center gap-6">
                             <div>
                               <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase">
-                                Formwork
+                                Weight &amp; Trips
                               </p>
-                              <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                                {cat.rawFormworkArea.toFixed(2)} m²
+                              <p className="text-sm font-bold text-amber-600 dark:text-amber-400 font-mono">
+                                {cat.materials.totalMaterialTonnes} T ({cat.materials.totalTrips} trp)
                               </p>
                             </div>
                             <div>
@@ -1083,57 +1518,68 @@ export const MaterialTakeoff: React.FC = () => {
                           <div className="px-5 pb-5 pt-3 bg-slate-50/80 dark:bg-slate-950/70 border-t border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in duration-150">
                             {/* 5-Card Mini Metric Grid */}
                             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                              {/* Cement Mini Card (Tonnes only - NO TRIPS) */}
                               <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
-                                  Formwork Contact
-                                </span>
-                                <span className="text-base font-black text-emerald-600 dark:text-emerald-400 font-mono block">
-                                  {cat.totalFormworkWithWaste.toFixed(2)} m²
-                                </span>
-                              </div>
-
-                              <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
-                                  Wet Volume
-                                </span>
-                                <span className="text-base font-black text-sky-600 dark:text-sky-400 font-mono block">
-                                  {cat.totalWithWaste.toFixed(3)} m³
-                                </span>
-                              </div>
-
-                              <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
-                                  Dry Volume
-                                </span>
-                                <span className="text-base font-black text-amber-600 dark:text-amber-400 font-mono block">
-                                  {cat.materials.dryVolume} m³
-                                </span>
-                                <span className="text-[9px] text-slate-400 dark:text-slate-500 block mt-0.5">
-                                  ×{dryVolumeFactor} factor
-                                </span>
-                              </div>
-
-                              <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block mb-1">
-                                  Cement Bags
+                                <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400 uppercase block mb-1">
+                                  Cement Cargo
                                 </span>
                                 <span className="text-base font-black text-brand-600 dark:text-brand-400 font-mono block">
-                                  {cat.materials.bagsCement}
+                                  {cat.materials.cementTonnes} T
                                 </span>
-                                <span className="text-[9px] text-slate-400 dark:text-slate-500 block mt-0.5">
-                                  {cat.materials.cementWeightKg} kg
+                                <span className="text-[9px] text-slate-500 dark:text-slate-400 block mt-0.5 font-mono">
+                                  {cat.materials.bagsCement} bags (50kg)
                                 </span>
                               </div>
 
+                              {/* Sand Mini Card (Tonnes & Trips) */}
                               <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                                <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 uppercase block mb-1">
-                                  Admixture
+                                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase block mb-1">
+                                  Sand Cargo
                                 </span>
-                                <span className="text-base font-black text-purple-600 dark:text-purple-400 font-mono block">
-                                  {cat.materials.admixtureLiters} L
+                                <span className="text-base font-black text-amber-600 dark:text-amber-400 font-mono block">
+                                  {cat.materials.sandTonnes} T
                                 </span>
-                                <span className="text-[9px] text-purple-600/70 dark:text-purple-400/70 block mt-0.5 truncate" title={admixtureType}>
-                                  {cat.materials.admixtureMl.toLocaleString()} mL
+                                <span className="text-[9px] text-slate-500 dark:text-slate-400 block mt-0.5 font-mono">
+                                  {cat.materials.sandM3} m³ &bull; <strong>{cat.materials.sandTrips} trips</strong>
+                                </span>
+                              </div>
+
+                              {/* Stone Mini Card (Tonnes & Trips) */}
+                              <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                                <span className="text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase block mb-1">
+                                  Stone Cargo
+                                </span>
+                                <span className="text-base font-black text-slate-800 dark:text-slate-200 font-mono block">
+                                  {cat.materials.stoneTonnes} T
+                                </span>
+                                <span className="text-[9px] text-slate-500 dark:text-slate-400 block mt-0.5 font-mono">
+                                  {cat.materials.stoneM3} m³ &bull; <strong>{cat.materials.stoneTrips} trips</strong>
+                                </span>
+                              </div>
+
+                              {/* Water Mini Card (Tonnes only - NO TRIPS) */}
+                              <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                                <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase block mb-1">
+                                  Water Cargo
+                                </span>
+                                <span className="text-base font-black text-blue-600 dark:text-blue-400 font-mono block">
+                                  {cat.materials.waterTonnes} T
+                                </span>
+                                <span className="text-[9px] text-slate-500 dark:text-slate-400 block mt-0.5 font-mono">
+                                  {cat.materials.waterLiters.toLocaleString()} Liters
+                                </span>
+                              </div>
+
+                              {/* Formwork Mini Card */}
+                              <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase block mb-1">
+                                  Formwork
+                                </span>
+                                <span className="text-base font-black text-emerald-600 dark:text-emerald-400 font-mono block">
+                                  {cat.totalFormworkWithWaste.toFixed(1)} m²
+                                </span>
+                                <span className="text-[9px] text-slate-400 dark:text-slate-500 block mt-0.5 font-mono">
+                                  Contact surface
                                 </span>
                               </div>
                             </div>
@@ -1194,10 +1640,18 @@ export const MaterialTakeoff: React.FC = () => {
                 <div className="text-right flex items-center gap-6">
                   <div>
                     <span className="text-[10px] block text-slate-500 dark:text-slate-400 uppercase font-bold">
-                      Formwork Contact
+                      Material Weight
                     </span>
-                    <span className="text-lg font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                      {calculatedData.totalWithWasteFormworkArea.toFixed(2)} m²
+                    <span className="text-lg font-black text-amber-600 dark:text-amber-400 font-mono">
+                      {materialQuantities.totalMaterialTonnes} Tonnes
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] block text-slate-500 dark:text-slate-400 uppercase font-bold">
+                      Aggregate Deliveries
+                    </span>
+                    <span className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-mono">
+                      {materialQuantities.totalTrips} Tipper Trips
                     </span>
                   </div>
                   <div>
@@ -1212,7 +1666,7 @@ export const MaterialTakeoff: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Material Bill of Quantities (BoQ) Card */}
+            {/* Right: Material Bill of Quantities (BoQ) Card with Tonnes & Aggregate Trips */}
             <div className="bg-white dark:bg-slate-900/95 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm dark:shadow-2xl space-y-5 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between pb-3.5 border-b border-slate-200 dark:border-slate-800">
@@ -1222,10 +1676,10 @@ export const MaterialTakeoff: React.FC = () => {
                     </div>
                     <div>
                       <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                        Material &amp; Formwork BoQ
+                        Material &amp; Aggregate BoQ
                       </h3>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                        Itemized batching manifest
+                        Itemized batching manifest &amp; tipper trips
                       </p>
                     </div>
                   </div>
@@ -1240,15 +1694,6 @@ export const MaterialTakeoff: React.FC = () => {
                     <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                       Surface &amp; Volume Metrics
                     </span>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-slate-600 dark:text-slate-400 flex items-center gap-2">
-                        <GridIcon size={14} className="text-emerald-600 dark:text-emerald-400" />
-                        Formwork Area
-                      </span>
-                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                        {calculatedData.totalWithWasteFormworkArea.toFixed(2)} m²
-                      </span>
-                    </div>
                     <div className="flex justify-between items-center text-xs">
                       <span className="text-slate-600 dark:text-slate-400 flex items-center gap-2">
                         <Droplets size={14} className="text-sky-600 dark:text-sky-400" />
@@ -1269,7 +1714,7 @@ export const MaterialTakeoff: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Portland Cement Item */}
+                  {/* Portland Cement Item (NO TRIPS) */}
                   <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 transition">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-brand-100 dark:bg-brand-950 border border-brand-200 dark:border-brand-800 flex items-center justify-center text-brand-600 dark:text-brand-400 font-bold text-xs font-mono">
@@ -1279,8 +1724,8 @@ export const MaterialTakeoff: React.FC = () => {
                         <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                           Portland Cement
                         </h4>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                          Standard 50kg Bags
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                          {materialQuantities.cementTonnes} Metric Tonnes
                         </p>
                       </div>
                     </div>
@@ -1288,13 +1733,13 @@ export const MaterialTakeoff: React.FC = () => {
                       <span className="text-xl font-black text-brand-600 dark:text-brand-400 font-mono block">
                         {materialQuantities.bagsCement}
                       </span>
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium font-mono">
                         Bags ({materialQuantities.cementWeightKg.toLocaleString()} kg)
                       </span>
                     </div>
                   </div>
 
-                  {/* Sand Item */}
+                  {/* Sand Item (WITH TRIPS) */}
                   <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 transition">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 flex items-center justify-center text-amber-600 dark:text-amber-400">
@@ -1304,8 +1749,8 @@ export const MaterialTakeoff: React.FC = () => {
                         <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                           Fine Aggregate (Sand)
                         </h4>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                          Clean River Sand
+                        <p className="text-[10px] text-amber-700 dark:text-amber-300 font-mono font-medium">
+                          {materialQuantities.sandTonnes} Tonnes &bull; <strong>{materialQuantities.sandTrips} Tipper Trips</strong> (@ {sandTruckCapacity}T)
                         </p>
                       </div>
                     </div>
@@ -1319,7 +1764,7 @@ export const MaterialTakeoff: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Stone Item */}
+                  {/* Stone Item (WITH TRIPS) */}
                   <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 transition">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-300">
@@ -1329,8 +1774,8 @@ export const MaterialTakeoff: React.FC = () => {
                         <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                           Coarse Aggregate (Stone)
                         </h4>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                          Crushed Granite / Gravel
+                        <p className="text-[10px] text-slate-600 dark:text-slate-400 font-mono font-medium">
+                          {materialQuantities.stoneTonnes} Tonnes &bull; <strong>{materialQuantities.stoneTrips} Tipper Trips</strong> (@ {stoneTruckCapacity}T)
                         </p>
                       </div>
                     </div>
@@ -1344,7 +1789,7 @@ export const MaterialTakeoff: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Water Item */}
+                  {/* Water Item (NO TRIPS) */}
                   <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 transition">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-400 text-xs font-black font-mono">
@@ -1354,8 +1799,8 @@ export const MaterialTakeoff: React.FC = () => {
                         <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                           Water Batch Volume
                         </h4>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                          Estimated @ ~0.50 W/C
+                        <p className="text-[10px] text-blue-600 dark:text-blue-400 font-mono font-medium">
+                          {materialQuantities.waterTonnes} Metric Tonnes (Piped / Reservoir)
                         </p>
                       </div>
                     </div>
@@ -1369,7 +1814,7 @@ export const MaterialTakeoff: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Chemical Admixture Item */}
+                  {/* Chemical Admixture Item (NO TRIPS) */}
                   <div className="flex items-center justify-between p-3.5 rounded-xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/50 hover:border-purple-300 transition">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/50 border border-purple-200 dark:border-purple-800 flex items-center justify-center text-purple-600 dark:text-purple-400">
@@ -1400,6 +1845,36 @@ export const MaterialTakeoff: React.FC = () => {
               </div>
 
               <div className="space-y-3 pt-2">
+                {/* Report Content Checkbox Options */}
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                  <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block tracking-wider">
+                    Report Content Preferences:
+                  </span>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={showFormworkInReport}
+                        onChange={(e) => setShowFormworkInReport(e.target.checked)}
+                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 w-3.5 h-3.5"
+                      />
+                      <span className="text-[11px]">Include Formwork in Report</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={showRebarsInReport}
+                        onChange={(e) => setShowRebarsInReport(e.target.checked)}
+                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 w-3.5 h-3.5"
+                      />
+                      <span className="text-[11px]">Include Rebars in Report</span>
+                    </label>
+                  </div>
+                  <p className="text-[9.5px] text-slate-400 dark:text-slate-500 leading-tight">
+                    Reports show selected items only. Formwork &amp; rebars omitted unless checked.
+                  </p>
+                </div>
+
                 {/* Print Buttons */}
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -1437,7 +1912,7 @@ export const MaterialTakeoff: React.FC = () => {
                         (net values).{" "}
                       </>
                     )}
-                    Dry material conversion utilizes standard{" "}
+                    Dry conversion uses{" "}
                     <strong className="text-slate-800 dark:text-slate-200">{dryVolumeFactor} shrinkage index</strong>.
                   </p>
                 </div>

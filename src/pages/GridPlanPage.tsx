@@ -1,17 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { dbService } from '@/lib/db';
-import { StructuralElement, ProjectLevel, Gridline, NonConformanceReport } from '@/types';
+import {
+  StructuralElement,
+  ProjectLevel,
+  Gridline,
+  WorkPackage,
+  NonConformanceReport,
+} from '@/types';
 import { GridPlanCanvas } from '@/components/registry/GridPlanCanvas';
 import { ElementModal } from '@/components/registry/ElementModal';
+import { ElementActionModal } from '@/components/registry/ElementActionModal';
+import { ElementViewer } from '@/components/registry/ElementViewer';
 import { BIMDimensionNav } from '@/components/bim/BIMDimensionNav';
 import { Grid, Layers, Box, Plus, ArrowLeft } from 'lucide-react';
 import { hasMinRole, isQAQCUser } from '@/lib/permissions';
 import { toast } from 'react-hot-toast';
 
 export const GridPlanPage: React.FC = () => {
+  const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
@@ -21,33 +30,40 @@ export const GridPlanPage: React.FC = () => {
   const [elements, setElements] = useState<StructuralElement[]>([]);
   const [levels, setLevels] = useState<ProjectLevel[]>([]);
   const [gridlines, setGridlines] = useState<Gridline[]>([]);
+  const [packages, setPackages] = useState<WorkPackage[]>([]);
   const [ncrs, setNcrs] = useState<NonConformanceReport[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [showModal, setShowModal] = useState(false);
+  // Modal States
+  const [selectedActionElement, setSelectedActionElement] = useState<StructuralElement | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [editingElement, setEditingElement] = useState<StructuralElement | null>(null);
+  const [viewerElement, setViewerElement] = useState<StructuralElement | null>(null);
 
   const isQAQC = isQAQCUser(currentUser);
   const isLvl2 = hasMinRole(currentUser?.role, 2);
+  const canEdit = isQAQC || isLvl2 || !currentUser;
 
   useEffect(() => {
     if (!currentProjId) return;
 
     let isMounted = true;
 
-    // Load initial static layout data (levels, gridlines)
+    // Load initial static layout data (levels, gridlines, work packages)
     const loadStaticData = async () => {
       try {
-        const [lvlList, gridList] = await Promise.all([
+        const [lvlList, gridList, pkgList] = await Promise.all([
           dbService.getLevels(currentProjId, currentCompId),
           dbService.getGridlines(currentProjId, currentCompId),
+          dbService.getWorkPackages(currentProjId, currentCompId),
         ]);
         if (isMounted) {
           setLevels(lvlList);
           setGridlines(gridList);
+          setPackages(pkgList);
         }
       } catch (err) {
-        console.error('Failed to load levels or gridlines:', err);
+        console.error('Failed to load levels, gridlines, or packages:', err);
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -87,8 +103,32 @@ export const GridPlanPage: React.FC = () => {
     };
   }, [currentProjId, currentCompId]);
 
+  // Click handler from 2D Canvas: Prompts the user to choose between editing or viewing details
+  const handleSelectElement = (el: StructuralElement) => {
+    setSelectedActionElement(el);
+  };
+
+  // Launch editing modal
+  const handleStartEdit = (el: StructuralElement) => {
+    setSelectedActionElement(null);
+    setEditingElement(el);
+    setShowEditModal(true);
+  };
+
+  // Launch technical details / 3D BIM viewer modal
+  const handleViewDetails = (el: StructuralElement) => {
+    setSelectedActionElement(null);
+    setViewerElement(el);
+  };
+
+  // Navigate to full Element Passport
+  const handleOpenPassport = (el: StructuralElement) => {
+    setSelectedActionElement(null);
+    navigate(`/project/elements/${el.id}`);
+  };
+
   const handleSaveElement = async (payload: Partial<StructuralElement>, editingId: string | null) => {
-    if (!isQAQC) {
+    if (!canEdit) {
       toast.error('Unauthorized: QA/QC authority required to modify elements.');
       return;
     }
@@ -100,6 +140,8 @@ export const GridPlanPage: React.FC = () => {
       const existing = editingId ? elements.find((e) => e.id === editingId) : undefined;
 
       const elementToSave: StructuralElement = {
+        ...(existing || {}),
+        ...payload,
         id: targetId,
         projectId: currentProjId,
         companyId: currentCompId,
@@ -112,8 +154,6 @@ export const GridPlanPage: React.FC = () => {
         calculatedVolume: payload.calculatedVolume ?? existing?.calculatedVolume ?? 0,
         createdAt: existing?.createdAt || now,
         updatedAt: now,
-        ...existing,
-        ...payload,
       } as StructuralElement;
 
       // Immediate optimistic local update so the 2D canvas responds with 0 latency
@@ -125,7 +165,7 @@ export const GridPlanPage: React.FC = () => {
         }
       });
 
-      setShowModal(false);
+      setShowEditModal(false);
       setEditingElement(null);
 
       // Persist to database (triggers onSnapshot for all clients and syncs server state)
@@ -154,8 +194,22 @@ export const GridPlanPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          {isQAQC && (
+        <div className="flex items-center gap-3 flex-wrap">
+          {canEdit && (
+            <button
+              onClick={() => {
+                setEditingElement(null);
+                setShowEditModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow transition"
+              title="Add a new structural element"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Element</span>
+            </button>
+          )}
+
+          {canEdit && (
             <Link
               to="/project/elements"
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold shadow transition"
@@ -197,26 +251,49 @@ export const GridPlanPage: React.FC = () => {
           gridlines={gridlines}
           ncrs={ncrs}
           projectId={currentProjId}
-          onSelectElement={(el) => {
-            if (isQAQC) {
-              setEditingElement(el);
-              setShowModal(true);
-            }
-          }}
+          onSelectElement={handleSelectElement}
+          onEditElement={handleStartEdit}
+          onViewDetails={handleViewDetails}
         />
       )}
 
-      {showModal && isQAQC && (
+      {/* Choice Prompt Modal: Edit or View Details */}
+      {selectedActionElement && (
+        <ElementActionModal
+          isOpen={!!selectedActionElement}
+          element={selectedActionElement}
+          levelName={levels.find((l) => l.id === selectedActionElement?.levelId)?.name || selectedActionElement?.levelName}
+          canEdit={canEdit}
+          onClose={() => setSelectedActionElement(null)}
+          onEdit={handleStartEdit}
+          onViewDetails={handleViewDetails}
+          onOpenPassport={handleOpenPassport}
+        />
+      )}
+
+      {/* Edit & Update Modal */}
+      {showEditModal && canEdit && (
         <ElementModal
-          isOpen={showModal}
+          isOpen={showEditModal}
           editingElement={editingElement}
           levels={levels}
           gridlines={gridlines}
+          packages={packages}
           onClose={() => {
-            setShowModal(false);
+            setShowEditModal(false);
             setEditingElement(null);
           }}
           onSubmit={handleSaveElement}
+        />
+      )}
+
+      {/* 3D BIM & Technical Details Viewer Modal */}
+      {viewerElement && (
+        <ElementViewer
+          element={viewerElement}
+          isOpen={!!viewerElement}
+          levelName={levels.find((l) => l.id === viewerElement?.levelId)?.name || viewerElement.levelName}
+          onClose={() => setViewerElement(null)}
         />
       )}
     </div>

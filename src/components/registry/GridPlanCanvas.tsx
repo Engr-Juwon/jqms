@@ -17,6 +17,8 @@ import {
   Layers,
   Search,
   Pencil,
+  Eye,
+  ExternalLink,
   Ruler,
   AlertTriangle,
   Download,
@@ -31,6 +33,7 @@ import {
   Compass,
   Palette,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { StructuralElement, ProjectLevel, Gridline, NCR } from "@/types";
 import {
   buildGridSystemGeometry,
@@ -196,6 +199,8 @@ interface GridPlanCanvasProps {
   className?: string;
   projectId?: string;
   onSelectElement?: (element: StructuralElement) => void;
+  onEditElement?: (element: StructuralElement) => void;
+  onViewDetails?: (element: StructuralElement) => void;
 }
 
 export type RiskLevel = "CRITICAL" | "MODERATE" | "LOW";
@@ -364,6 +369,8 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
   className = "",
   projectId,
   onSelectElement,
+  onEditElement,
+  onViewDetails,
 }) => {
   const { activeProject } = useProjectStore();
   const { currentUser, company } = useAuthStore();
@@ -3601,20 +3608,46 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                if (onViewDetails) {
+                  onViewDetails(inspectedElement);
+                } else if (onSelectElement) {
+                  onSelectElement(inspectedElement);
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-bold transition shadow-xs"
+              title="View 3D model, rebar and engineering details"
+            >
+              <Eye className="w-3.5 h-3.5" /> View Details
+            </button>
             {isQAQCUser(currentUser) && (
               <button
-                onClick={() =>
-                  onSelectElement && onSelectElement(inspectedElement)
-                }
+                onClick={() => {
+                  if (onEditElement) {
+                    onEditElement(inspectedElement);
+                  } else if (onSelectElement) {
+                    onSelectElement(inspectedElement);
+                  }
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition shadow"
+                title="Edit and update element properties"
               >
                 <Pencil className="w-3.5 h-3.5" /> Edit Element
               </button>
             )}
+            <Link
+              to={`/project/elements/${inspectedElement.id}`}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
+              title="Open full Element Passport"
+            >
+              <ExternalLink className="w-3.5 h-3.5" /> Passport
+            </Link>
             <button
               onClick={() => setInspectedElement(null)}
               className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition"
+              title="Close inspection drawer"
             >
               <X className="w-4 h-4" />
             </button>

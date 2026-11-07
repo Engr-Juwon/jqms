@@ -8,6 +8,8 @@ interface GridPlan2DProps {
   gridlines?: Gridline[];
   ncrs?: NCR[];
   onSelectElement?: (element: StructuralElement) => void;
+  onEditElement?: (element: StructuralElement) => void;
+  onViewDetails?: (element: StructuralElement) => void;
   selectedElementId?: string;
   projectId?: string;
   className?: string;
@@ -19,6 +21,8 @@ export const GridPlan2D: React.FC<GridPlan2DProps> = ({
   gridlines = [],
   ncrs = [],
   onSelectElement,
+  onEditElement,
+  onViewDetails,
   projectId,
   className = "",
 }) => {
@@ -30,6 +34,8 @@ export const GridPlan2D: React.FC<GridPlan2DProps> = ({
       ncrs={ncrs}
       projectId={projectId}
       onSelectElement={onSelectElement}
+      onEditElement={onEditElement}
+      onViewDetails={onViewDetails}
       className={className}
     />
   );

@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
-import { isQAQCUser, ROLE_TITLES } from "@/lib/permissions";
+import { isQAQCUser, ROLE_TITLES, canAccessBarCutting, canAccessRoute } from "@/lib/permissions";
 import { useCompany } from "@/lib/companyHelper";
 import { printQAQCHandbook } from "@/services/pdf/qaqcHandbookReport";
 import {
@@ -707,6 +707,10 @@ export const QAQCHandbookPage: React.FC = () => {
 
   const filteredChapters = useMemo(() => {
     return chapters.filter((c) => {
+      // Hide bar-cutting chapter completely if not QA/QC Manager
+      if (c.quickLink && c.quickLink.includes("bar-cutting") && !canAccessBarCutting(currentUser)) {
+        return false;
+      }
       const matchCat = activeCategory === "ALL" || c.category === activeCategory;
       const term = searchTerm.toLowerCase().trim();
       if (!term) return matchCat;
@@ -717,7 +721,7 @@ export const QAQCHandbookPage: React.FC = () => {
         (c.badge && c.badge.toLowerCase().includes(term));
       return matchCat && matchText;
     });
-  }, [chapters, activeCategory, searchTerm]);
+  }, [chapters, activeCategory, searchTerm, currentUser]);
 
   // If user is NOT a QA/QC authorized role, show restricted access gate
   if (!isAuthorized) {
@@ -936,7 +940,7 @@ export const QAQCHandbookPage: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-3 shrink-0 no-print">
-                    {chapter.quickLink && (
+                    {chapter.quickLink && canAccessRoute(currentUser, chapter.quickLink, activeProject) && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -967,7 +971,7 @@ export const QAQCHandbookPage: React.FC = () => {
                   <div className="p-4 sm:p-6 border-t border-slate-800 bg-slate-950/60 animate-in fade-in duration-200">
                     {chapter.content}
 
-                    {chapter.quickLink && (
+                    {chapter.quickLink && canAccessRoute(currentUser, chapter.quickLink, activeProject) && (
                       <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-center justify-between no-print">
                         <span className="text-[11px] text-slate-400">
                           Direct system module shortcut:

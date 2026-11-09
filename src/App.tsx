@@ -7,6 +7,7 @@ import { ProjectLayout } from "./components/common/ProjectLayout";
 import { BIMRouteGuard } from "./components/common/BIMRouteGuard";
 import { CompanyGuard } from "./components/common/CompanyGuard";
 import { CompanyLayout } from "./components/common/CompanyLayout";
+import { QAQCManagerGuard } from "./components/common/QAQCManagerGuard";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { PageLoadingFallback } from "./components/common/PageLoadingFallback";
 import { NavigationProgressBar } from "./components/common/NavigationProgressBar";
@@ -474,16 +475,35 @@ export const App: React.FC = () => {
               <Route path="steel" element={<SteelPage />} />
               <Route
                 path="steel/bar-cutting"
-                element={<BarCuttingRegistryPage />}
+                element={
+                  <QAQCManagerGuard>
+                    <BarCuttingRegistryPage />
+                  </QAQCManagerGuard>
+                }
               />
               <Route
                 path="steel/bar-cutting/:scheduleId"
-                element={<BarCuttingDetailPage />}
+                element={
+                  <QAQCManagerGuard>
+                    <BarCuttingDetailPage />
+                  </QAQCManagerGuard>
+                }
               />
-              <Route path="bar-cutting" element={<BarCuttingRegistryPage />} />
+              <Route
+                path="bar-cutting"
+                element={
+                  <QAQCManagerGuard>
+                    <BarCuttingRegistryPage />
+                  </QAQCManagerGuard>
+                }
+              />
               <Route
                 path="bar-cutting/:scheduleId"
-                element={<BarCuttingDetailPage />}
+                element={
+                  <QAQCManagerGuard>
+                    <BarCuttingDetailPage />
+                  </QAQCManagerGuard>
+                }
               />
               <Route path="deliveries" element={<DeliveriesPage />} />
 
@@ -668,16 +688,35 @@ export const App: React.FC = () => {
               <Route path="steel" element={<SteelPage />} />
               <Route
                 path="steel/bar-cutting"
-                element={<BarCuttingRegistryPage />}
+                element={
+                  <QAQCManagerGuard>
+                    <BarCuttingRegistryPage />
+                  </QAQCManagerGuard>
+                }
               />
               <Route
                 path="steel/bar-cutting/:scheduleId"
-                element={<BarCuttingDetailPage />}
+                element={
+                  <QAQCManagerGuard>
+                    <BarCuttingDetailPage />
+                  </QAQCManagerGuard>
+                }
               />
-              <Route path="bar-cutting" element={<BarCuttingRegistryPage />} />
+              <Route
+                path="bar-cutting"
+                element={
+                  <QAQCManagerGuard>
+                    <BarCuttingRegistryPage />
+                  </QAQCManagerGuard>
+                }
+              />
               <Route
                 path="bar-cutting/:scheduleId"
-                element={<BarCuttingDetailPage />}
+                element={
+                  <QAQCManagerGuard>
+                    <BarCuttingDetailPage />
+                  </QAQCManagerGuard>
+                }
               />
               <Route path="deliveries" element={<DeliveriesPage />} />
 

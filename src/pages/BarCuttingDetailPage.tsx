@@ -29,7 +29,10 @@ import {
   FileDown,
   Printer,
   ExternalLink,
+  ShieldAlert,
+  Lock,
 } from "lucide-react";
+import { canAccessBarCutting } from "@/lib/permissions";
 import { BBSUploadModal } from "@/components/steel/BBSUploadModal";
 import { CuttingPatternCard } from "@/components/steel/CuttingPatternCard";
 import { BarBundleTagsModal } from "@/components/steel/BarBundleTagsModal";
@@ -395,6 +398,39 @@ export const BarCuttingDetailPage: React.FC = () => {
       toast.error("Failed to export CSV.");
     }
   };
+
+  if (!canAccessBarCutting(currentUser)) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl text-center space-y-5">
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800/60">
+              <Lock className="w-3 h-3" />
+              <span>Restricted Governance Role</span>
+            </div>
+            <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+              QA/QC Manager Only
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+              Access to the Bar Bending Schedule (BBS) and Cutting Optimization module is strictly restricted to the QA/QC Manager role.
+            </p>
+          </div>
+          <div className="pt-2">
+            <button
+              onClick={() => navigate("/project/steel")}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 text-xs font-bold transition shadow"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Steel Testing</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

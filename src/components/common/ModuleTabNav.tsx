@@ -1,6 +1,9 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { LucideIcon } from "lucide-react";
+import { useAuthStore } from "@/stores/useAuthStore";
+import { useProjectStore } from "@/stores/useProjectStore";
+import { canAccessRoute } from "@/lib/permissions";
 
 export interface ModuleTabItem {
   label: string;
@@ -19,12 +22,24 @@ export const ModuleTabNav: React.FC<ModuleTabNavProps> = ({
   className = "",
 }) => {
   const location = useLocation();
+  const { currentUser } = useAuthStore();
+  const { activeProject } = useProjectStore();
+
+  const accessibleItems = useMemo(() => {
+    return items.filter((tab) =>
+      canAccessRoute(currentUser, tab.path, activeProject)
+    );
+  }, [items, currentUser, activeProject]);
+
+  if (accessibleItems.length <= 1) {
+    if (accessibleItems.length === 0) return null;
+  }
 
   return (
     <div
       className={`flex items-center gap-1.5 overflow-x-auto no-scrollbar p-1.5 bg-slate-100/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-2xl ${className}`}
     >
-      {items.map((tab) => {
+      {accessibleItems.map((tab) => {
         const isActive =
           location.pathname === tab.path ||
           location.pathname.startsWith(`${tab.path}/`);

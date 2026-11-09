@@ -109,6 +109,22 @@ export const ElementActionModal: React.FC<ElementActionModalProps> = ({
                   Grid: <strong className="text-brand-600 dark:text-brand-400 font-mono">{element.grid || element.gridAxis || 'N/A'}</strong>
                 </span>
               </p>
+              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                {(element.hasGridOffset || element.baseOffsetX || element.baseOffsetY) ? (
+                  <span className="text-[10.5px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-bold">
+                    Offset: ΔX = {(element.baseOffsetX || 0) > 0 ? `+${element.baseOffsetX}` : (element.baseOffsetX || 0)}m, ΔY = {(element.baseOffsetY || 0) > 0 ? `+${element.baseOffsetY}` : (element.baseOffsetY || 0)}m
+                  </span>
+                ) : (
+                  <span className="text-[10.5px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                    Directly on Grid (Centered)
+                  </span>
+                )}
+                {(element.isInclined || element.verticality === 'inclined') && (
+                  <span className="text-[10.5px] font-mono px-2 py-0.5 rounded bg-orange-500/10 text-orange-700 dark:text-orange-300 border border-orange-500/30 font-bold">
+                    Slanted: {element.inclinedFixedEnd === 'TOP' ? 'Top Fixed ⚓ · Base Moved' : 'Base Fixed ⚓ · Top Moved'} ({element.horizontalOffset || 0.4}m {element.inclinationDirection || 'EAST'})
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -216,6 +232,9 @@ export const ElementActionModal: React.FC<ElementActionModalProps> = ({
             </div>
             <ChevronRight className="w-5 h-5 text-blue-500 group-hover:translate-x-1 transition-transform shrink-0" />
           </button>
+
+          Acion 3: Change Staus
+          
         </div>
 
         {/* Footer Actions */}

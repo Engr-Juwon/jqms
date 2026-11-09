@@ -36,6 +36,9 @@ import {
   ArrowUpDown,
   Info,
   ArrowLeftRight,
+  MapPin,
+  Crosshair,
+  Move,
 } from 'lucide-react';
 import { SmartField } from './SmartField';
 import {
@@ -171,8 +174,12 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   const [levelId, setLevelId] = useState(activeProject?.currentLevelId || '');
   const [workPackageId, setWorkPackageId] = useState('');
   const [gridAxis, setGridAxis] = useState('B/2');
+  const [hasGridOffset, setHasGridOffset] = useState<boolean>(false);
   const [baseOffsetX, setBaseOffsetX] = useState<number>(0);
   const [baseOffsetY, setBaseOffsetY] = useState<number>(0);
+  const [beamGridOffset, setBeamGridOffset] = useState<number>(0);
+  const [beamStartOffset, setBeamStartOffset] = useState<number>(0);
+  const [beamEndOffset, setBeamEndOffset] = useState<number>(0);
   const [concreteGrade, setConcreteGrade] = useState('C40/50');
   const [rebarSpec, setRebarSpec] = useState('');
   const [plannedCastingDate, setPlannedCastingDate] = useState('');
@@ -197,6 +204,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
   const [horizontalOffset, setHorizontalOffset] = useState<number>(0.4);
   const [inclinationAngle, setInclinationAngle] = useState<number>(10);
   const [inclinationDirection, setInclinationDirection] = useState<'EAST' | 'WEST' | 'NORTH' | 'SOUTH'>('EAST');
+  const [inclinedFixedEnd, setInclinedFixedEnd] = useState<'BOTTOM' | 'TOP'>('BOTTOM');
 
   // Slab specific (Curved & Geometric Profile)
   const [slabShape, setSlabShape] = useState<
@@ -316,8 +324,17 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setLevelId(editingElement.levelId || '');
       setWorkPackageId(editingElement.workPackageId || '');
       setGridAxis(editingElement.grid || editingElement.gridAxis || '');
+      const existingHasOffset = editingElement.hasGridOffset !== undefined
+        ? !!editingElement.hasGridOffset
+        : ((editingElement.baseOffsetX !== undefined && editingElement.baseOffsetX !== 0) ||
+           (editingElement.baseOffsetY !== undefined && editingElement.baseOffsetY !== 0) ||
+           (editingElement.beamGridOffset !== undefined && editingElement.beamGridOffset !== 0));
+      setHasGridOffset(existingHasOffset);
       setBaseOffsetX(editingElement.baseOffsetX ?? 0);
       setBaseOffsetY(editingElement.baseOffsetY ?? 0);
+      setBeamGridOffset(editingElement.beamGridOffset ?? 0);
+      setBeamStartOffset(editingElement.beamStartOffset ?? 0);
+      setBeamEndOffset(editingElement.beamEndOffset ?? 0);
       setConcreteGrade(editingElement.concreteGrade || 'C40/50');
       setRebarSpec(editingElement.rebarSpec || '');
       setPlannedCastingDate(
@@ -368,6 +385,11 @@ export const ElementModal: React.FC<ElementModalProps> = ({
         (editingElement.inclinationDirection as any) === 'SOUTH'
           ? (editingElement.inclinationDirection as any)
           : 'EAST'
+      );
+      setInclinedFixedEnd(
+        (editingElement as any).inclinedFixedEnd === 'TOP' || (editingElement as any).fixedEnd === 'TOP'
+          ? 'TOP'
+          : 'BOTTOM'
       );
 
       // Slab Profile & Curved Parameters
@@ -471,8 +493,12 @@ export const ElementModal: React.FC<ElementModalProps> = ({
         setWorkPackageId(packages[0].id);
       }
       setGridAxis('A/1');
+      setHasGridOffset(false);
       setBaseOffsetX(0);
       setBaseOffsetY(0);
+      setBeamGridOffset(0);
+      setBeamStartOffset(0);
+      setBeamEndOffset(0);
       setConcreteGrade('C40/50');
       setRebarSpec('');
       setPlannedCastingDate('');
@@ -497,6 +523,7 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       setHorizontalOffset(0.4);
       setInclinationAngle(10);
       setInclinationDirection('EAST');
+      setInclinedFixedEnd('BOTTOM');
       setLength(0.6);
       setWidth(0.6);
       const initialStoreyHeight = deriveStoreyHeightForLevel(initialLvlId, levels);
@@ -981,8 +1008,12 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       levelName: selectedLevel?.name || '',
       grid: gridAxis.trim(),
       gridAxis: gridAxis.trim(),
-      baseOffsetX: baseOffsetX !== 0 ? Number(baseOffsetX) : undefined,
-      baseOffsetY: baseOffsetY !== 0 ? Number(baseOffsetY) : undefined,
+      hasGridOffset,
+      baseOffsetX: hasGridOffset && baseOffsetX !== 0 ? Number(baseOffsetX) : 0,
+      baseOffsetY: hasGridOffset && baseOffsetY !== 0 ? Number(baseOffsetY) : 0,
+      beamGridOffset: (elementType === 'BEAM' && hasGridOffset) ? (Number(beamGridOffset) || 0) : undefined,
+      beamStartOffset: (elementType === 'BEAM' && hasGridOffset) ? (Number(beamStartOffset) || 0) : undefined,
+      beamEndOffset: (elementType === 'BEAM' && hasGridOffset) ? (Number(beamEndOffset) || 0) : undefined,
       workPackageId: workPackageId || undefined,
       workPackageName: selectedPkg?.name || undefined,
       concreteGrade,
@@ -1026,6 +1057,8 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       horizontalOffset: isInclined ? Number(horizontalOffset) : undefined,
       inclinationAngle: isInclined ? Number(inclinationAngle) : undefined,
       inclinationDirection: isInclined ? inclinationDirection : undefined,
+      inclinedFixedEnd: elementType === 'COLUMN' && isInclined ? inclinedFixedEnd : undefined,
+      fixedEnd: elementType === 'COLUMN' && isInclined ? inclinedFixedEnd : undefined,
       verticalHeight: elementType === 'COLUMN' ? Number(height) : undefined,
 
       // Slab & Curved attributes
@@ -1366,40 +1399,155 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                 <p className="text-[11px] text-brand-600 dark:text-brand-400/90 mt-1 font-mono">{gridHint}</p>
               )}
 
-              {/* Optional Base Offset from Grid Intersection (e.g. starts 1m away from Grid A') */}
-              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800/60 mt-2">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                    Base Shift X from Grid (m)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    placeholder="e.g. +1.0m (East from A')"
-                    value={baseOffsetX || ''}
-                    onChange={(e) => setBaseOffsetX(Number(e.target.value) || 0)}
-                    className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:border-brand-500"
-                  />
-                  <span className="text-[9.5px] text-slate-400 dark:text-slate-500">
-                    {baseOffsetX > 0 ? `+${baseOffsetX}m East` : baseOffsetX < 0 ? `${baseOffsetX}m West` : 'On grid intersection'}
+              {/* ═══ Grid Offset Provision for Column, Beam & Other Elements ═══ */}
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800/60 mt-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Crosshair className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Grid Alignment & Offset Provision
+                    </label>
+                  </div>
+                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                    hasGridOffset
+                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300'
+                      : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                  }`}>
+                    {hasGridOffset ? 'Offset Applied' : 'Directly on Grid'}
                   </span>
                 </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                    Base Shift Y from Grid (m)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    placeholder="e.g. 0.0m"
-                    value={baseOffsetY || ''}
-                    onChange={(e) => setBaseOffsetY(Number(e.target.value) || 0)}
-                    className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:border-brand-500"
-                  />
-                  <span className="text-[9.5px] text-slate-400 dark:text-slate-500">
-                    {baseOffsetY > 0 ? `+${baseOffsetY}m South` : baseOffsetY < 0 ? `${baseOffsetY}m North` : 'On grid line'}
-                  </span>
+
+                {/* Provision Selector: Directly on Grid vs Offset */}
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasGridOffset(false);
+                      setBaseOffsetX(0);
+                      setBaseOffsetY(0);
+                      setBeamGridOffset(0);
+                      setBeamStartOffset(0);
+                      setBeamEndOffset(0);
+                    }}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      !hasGridOffset
+                        ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-xs border border-slate-200 dark:border-slate-700'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Directly on Grid</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasGridOffset(true);
+                    }}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      hasGridOffset
+                        ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Move className="w-3.5 h-3.5" />
+                    <span>Offset from Grid</span>
+                  </button>
                 </div>
+
+                {hasGridOffset ? (
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-amber-300/80 dark:border-amber-600/50 space-y-2.5 shadow-xs animate-in fade-in duration-150">
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                      Specify the shift distance of this {elementType === 'COLUMN' ? 'column centroid' : elementType === 'BEAM' ? 'beam axis' : 'element'} from referenced grid <strong>{gridAxis || 'Intersection'}</strong>:
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Shift X / East-West (m)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          placeholder="e.g. +0.15m"
+                          value={baseOffsetX || ''}
+                          onChange={(e) => setBaseOffsetX(Number(e.target.value) || 0)}
+                          className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:border-amber-500"
+                        />
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                          {baseOffsetX > 0 ? `+${baseOffsetX}m East (+X)` : baseOffsetX < 0 ? `${baseOffsetX}m West (-X)` : '0.00m (No X shift)'}
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Shift Y / North-South (m)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          placeholder="e.g. -0.20m"
+                          value={baseOffsetY || ''}
+                          onChange={(e) => setBaseOffsetY(Number(e.target.value) || 0)}
+                          className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:border-amber-500"
+                        />
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                          {baseOffsetY > 0 ? `+${baseOffsetY}m South (+Y)` : baseOffsetY < 0 ? `${baseOffsetY}m North (-Y)` : '0.00m (No Y shift)'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Common Offset Presets for quick site engineering entry */}
+                    <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] text-slate-400 font-medium">Quick Presets:</span>
+                      {[
+                        { label: '+50mm', val: 0.05 },
+                        { label: '+100mm', val: 0.10 },
+                        { label: '+150mm', val: 0.15 },
+                        { label: '+200mm', val: 0.20 },
+                        { label: '+250mm', val: 0.25 },
+                        { label: '-100mm', val: -0.10 },
+                        { label: '-150mm', val: -0.15 },
+                        { label: '-200mm', val: -0.20 },
+                      ].map((chip) => (
+                        <button
+                          key={chip.label}
+                          type="button"
+                          onClick={() => {
+                            // If baseOffsetX is unset, set X, otherwise set Y
+                            if (!baseOffsetX) {
+                              setBaseOffsetX(chip.val);
+                            } else {
+                              setBaseOffsetY(chip.val);
+                            }
+                          }}
+                          className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-700 dark:text-slate-300 text-[10px] font-mono transition"
+                        >
+                          {chip.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Real-time Offset Explanation Banner */}
+                    <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 flex items-center justify-between text-[11px]">
+                      <span className="text-amber-800 dark:text-amber-300 font-semibold">
+                        Offset Status:
+                      </span>
+                      <span className="font-mono text-amber-700 dark:text-amber-400 font-bold">
+                        {baseOffsetX !== 0 || baseOffsetY !== 0
+                          ? `ΔX = ${baseOffsetX > 0 ? `+${baseOffsetX}` : baseOffsetX}m, ΔY = ${baseOffsetY > 0 ? `+${baseOffsetY}` : baseOffsetY}m from [${gridAxis || 'Grid'}]`
+                          : 'Offset enabled (enter shift values)'}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-900/40 text-[11px] text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                    <span>
+                      Element centroid is locked <strong>directly on the reference grid</strong> without any offset.
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1911,6 +2059,63 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                       </div>
                     </div>
 
+                    {/* Fixed Datum vs Movement Origin Selector */}
+                    <div className="p-3 bg-slate-50 dark:bg-slate-950/80 rounded-xl border border-amber-200/80 dark:border-amber-900/60 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 text-amber-500" />
+                          Fixed Datum & Movement Origin
+                        </span>
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                          {inclinedFixedEnd === 'BOTTOM' ? 'Base Fixed ⚓ · Top Moved' : 'Top Fixed ⚓ · Base Moved'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                        Designate which end is anchored on the grid datum and where the movement occurred:
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setInclinedFixedEnd('BOTTOM')}
+                          className={`p-2.5 rounded-xl border text-left transition ${
+                            inclinedFixedEnd === 'BOTTOM'
+                              ? 'bg-amber-500/15 border-amber-500 text-slate-900 dark:text-white shadow-xs ring-1 ring-amber-500/50'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold text-xs text-amber-700 dark:text-amber-400">
+                            <span>⚓ Bottom (Base) Fixed</span>
+                          </div>
+                          <div className="text-[10.5px] font-medium text-slate-700 dark:text-slate-300 mt-1">
+                            Movement occurred at: <strong className="text-amber-600 dark:text-amber-400">TOP (Head)</strong>
+                          </div>
+                          <div className="text-[9.5px] text-slate-400 dark:text-slate-500 mt-0.5">
+                            Base stays on floor grid datum. Top displaced by ΔX = {derivedSlantValues.offset.toFixed(2)}m {inclinationDirection}.
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setInclinedFixedEnd('TOP')}
+                          className={`p-2.5 rounded-xl border text-left transition ${
+                            inclinedFixedEnd === 'TOP'
+                              ? 'bg-amber-500/15 border-amber-500 text-slate-900 dark:text-white shadow-xs ring-1 ring-amber-500/50'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold text-xs text-amber-700 dark:text-amber-400">
+                            <span>⚓ Top (Head) Fixed</span>
+                          </div>
+                          <div className="text-[10.5px] font-medium text-slate-700 dark:text-slate-300 mt-1">
+                            Movement occurred at: <strong className="text-amber-600 dark:text-amber-400">BOTTOM (Base)</strong>
+                          </div>
+                          <div className="text-[9.5px] text-slate-400 dark:text-slate-500 mt-0.5">
+                            Head stays on upper grid datum. Base kicked out / raked by ΔX = {derivedSlantValues.offset.toFixed(2)}m {inclinationDirection}.
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {inclinedCalcMode === 'offset' ? (
                         <div className="space-y-1">
@@ -1974,57 +2179,102 @@ export const ElementModal: React.FC<ElementModalProps> = ({
 
                     {/* Visual 2D Elevation Slant Schematic */}
                     <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center">
-                      <svg width="240" height="95" viewBox="0 0 240 95" className="overflow-visible">
+                      <svg width="260" height="105" viewBox="0 0 260 105" className="overflow-visible">
                         {/* Floor and Ceiling slab lines */}
-                        <line x1="15" y1="18" x2="225" y2="18" stroke="#334155" strokeWidth="2" strokeDasharray="3 3" />
-                        <line x1="15" y1="80" x2="225" y2="80" stroke="#475569" strokeWidth="2" />
-                        <text x="20" y="14" fill="#64748b" fontSize="8" fontFamily="monospace">Upper Level (Top Datum)</text>
-                        <text x="20" y="90" fill="#64748b" fontSize="8" fontFamily="monospace">Current Floor (Base Datum)</text>
+                        <line x1="15" y1="20" x2="245" y2="20" stroke="#334155" strokeWidth="2" strokeDasharray="3 3" />
+                        <line x1="15" y1="80" x2="245" y2="80" stroke="#475569" strokeWidth="2" />
+                        <text x="18" y="14" fill="#64748b" fontSize="8" fontFamily="monospace">Upper Level (Top Datum)</text>
+                        <text x="18" y="93" fill="#64748b" fontSize="8" fontFamily="monospace">Current Floor (Base Datum)</text>
 
                         {/* Plumb vertical line */}
-                        <line x1="80" y1="18" x2="80" y2="80" stroke="#64748b" strokeWidth="1" strokeDasharray="3 3" />
+                        <line x1="100" y1="20" x2="100" y2="80" stroke="#64748b" strokeWidth="1" strokeDasharray="3 3" />
 
                         {/* Slanted Column body */}
                         {(() => {
                           const isWest = inclinationDirection === 'WEST';
-                          const topX = isWest ? 45 : 125;
+                          const isBottomFixed = inclinedFixedEnd === 'BOTTOM';
+                          const baseX = isBottomFixed ? 100 : (isWest ? 65 : 145);
+                          const topX = isBottomFixed ? (isWest ? 65 : 145) : 100;
+                          const fixedX = isBottomFixed ? 100 : 100;
+                          const fixedY = isBottomFixed ? 80 : 20;
+                          const movedX = isBottomFixed ? topX : baseX;
+                          const movedY = isBottomFixed ? 20 : 80;
+
                           return (
                             <>
                               {/* Slanted centerline */}
                               <line
-                                x1="80"
+                                x1={baseX}
                                 y1="80"
                                 x2={topX}
-                                y2="18"
+                                y2="20"
                                 stroke="#f59e0b"
                                 strokeWidth="8"
                                 strokeLinecap="round"
                                 opacity="0.8"
                               />
                               <line
-                                x1="80"
+                                x1={baseX}
                                 y1="80"
                                 x2={topX}
-                                y2="18"
+                                y2="20"
                                 stroke="#fbbf24"
                                 strokeWidth="2"
                               />
-                              {/* Offset delta dimension */}
-                              <line x1="80" y1="14" x2={topX} y2="14" stroke="#f59e0b" strokeWidth="1" />
+
+                              {/* Fixed End Anchor Pin & Label */}
+                              <circle
+                                cx={fixedX}
+                                cy={fixedY}
+                                r="4.5"
+                                fill="#10b981"
+                                stroke="#ffffff"
+                                strokeWidth="1.5"
+                              />
                               <text
-                                x={(80 + topX) / 2}
-                                y="11"
+                                x={fixedX + (isWest ? 12 : -12)}
+                                y={isBottomFixed ? 92 : 12}
+                                fill="#10b981"
+                                fontSize="8"
+                                fontWeight="bold"
+                                textAnchor={isWest ? 'start' : 'end'}
+                                fontFamily="monospace"
+                              >
+                                ⚓ {isBottomFixed ? 'FIXED BASE' : 'FIXED HEAD'}
+                              </text>
+
+                              {/* Moved End Motion Marker & Label */}
+                              <circle
+                                cx={movedX}
+                                cy={movedY}
+                                r="4"
                                 fill="#f59e0b"
-                                fontSize="8.5"
+                                stroke="#ffffff"
+                                strokeWidth="1.2"
+                              />
+                              <line
+                                x1={fixedX}
+                                y1={isBottomFixed ? 16 : 84}
+                                x2={movedX}
+                                y2={isBottomFixed ? 16 : 84}
+                                stroke="#f59e0b"
+                                strokeWidth="1.5"
+                              />
+                              <text
+                                x={(fixedX + movedX) / 2}
+                                y={isBottomFixed ? 12 : 95}
+                                fill="#f59e0b"
+                                fontSize="8"
                                 fontWeight="bold"
                                 textAnchor="middle"
                                 fontFamily="monospace"
                               >
-                                ΔX = {derivedSlantValues.offset.toFixed(2)}m
+                                {isBottomFixed ? '▲ TOP MOVED' : '▼ BASE MOVED'} (ΔX = {derivedSlantValues.offset.toFixed(2)}m)
                               </text>
+
                               {/* Slant Length label */}
                               <text
-                                x={(80 + topX) / 2 + (isWest ? -18 : 18)}
+                                x={(baseX + topX) / 2 + (isWest ? -22 : 22)}
                                 y="52"
                                 fill="#fbbf24"
                                 fontSize="9"
@@ -2034,10 +2284,11 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                               >
                                 L = {derivedSlantValues.slantLength.toFixed(3)}m
                               </text>
+
                               {/* Plumb Angle arc text */}
                               <text
-                                x="88"
-                                y="72"
+                                x={isBottomFixed ? '106' : '106'}
+                                y={isBottomFixed ? '72' : '34'}
                                 fill="#94a3b8"
                                 fontSize="8"
                                 fontFamily="monospace"

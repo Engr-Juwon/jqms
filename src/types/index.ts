@@ -486,6 +486,10 @@ export interface StructuralElement {
   elevationOffset?: number; // Specific offset from level datum (e.g. step down -0.05m)
   baseOffsetX?: number; // Base offset from grid along X (East/West) in meters (e.g. +1.0m)
   baseOffsetY?: number; // Base offset from grid along Y (North/South) in meters
+  hasGridOffset?: boolean; // Whether element is offset from the reference grid or placed directly on grid
+  beamGridOffset?: number; // Transverse offset of beam centerline from reference gridline axis (meters)
+  beamStartOffset?: number; // Longitudinal start offset of beam along grid span (meters)
+  beamEndOffset?: number; // Longitudinal end offset of beam along grid span (meters)
 
   // Dimensions & Profile
   length?: number; // in meters
@@ -521,6 +525,8 @@ export interface StructuralElement {
   inclinationAngle?: number;
   inclinedCalcMode?: "offset" | "angle";
   inclinationDirection?: "EAST" | "WEST" | "NORTH" | "SOUTH" | "+X" | "-X" | "+Y" | "-Y";
+  inclinedFixedEnd?: "BOTTOM" | "TOP"; // Which part of inclined column is fixed: BOTTOM (base on floor grid) or TOP (head on upper grid)
+  fixedEnd?: "BOTTOM" | "TOP"; // Alias for inclinedFixedEnd
   calculatedFormworkArea?: number; // in m2
   area?: number; // in m2
   dimensions: {

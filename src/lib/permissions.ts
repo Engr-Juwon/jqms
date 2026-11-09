@@ -120,6 +120,50 @@ export function isQAQCEngineerRole(role?: UserRole | string): boolean {
 }
 
 /**
+ * Checks whether a user holds the QA/QC Manager role.
+ * Requirement: "Hide the bar cutting schedule completely . only qaqc manager role can see and access it."
+ * Matches QAQC_MANAGER, QUALITY_MANAGER, DEPUTY_QUALITY_MANAGER, or top quality governance (QUALITY_DIRECTOR, SUPER_ADMIN),
+ * or title/designation indicating QA/QC Manager.
+ */
+export function isQAQCManagerRole(
+  user?: { role?: UserRole | string; designation?: string; title?: string } | null,
+): boolean {
+  if (!user) return false;
+  const canonical = normalizeUserRole(user.role);
+  if (
+    canonical === "QAQC_MANAGER" ||
+    canonical === "QUALITY_MANAGER" ||
+    canonical === "DEPUTY_QUALITY_MANAGER" ||
+    canonical === "QUALITY_DIRECTOR" ||
+    canonical === "SUPER_ADMIN"
+  ) {
+    return true;
+  }
+  const title = ((user.title || "") + " " + (user.designation || "")).toLowerCase();
+  if (
+    (title.includes("qa") && title.includes("qc") && title.includes("manager")) ||
+    title.includes("qaqc manager") ||
+    title.includes("qa/qc manager") ||
+    title.includes("quality manager") ||
+    title.includes("quality director")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Validates access to the Bar Bending Schedule (BBS) and Cutting Schedule registry.
+ * Strictly restricted to QA/QC Manager role.
+ */
+export function canAccessBarCutting(
+  user?: { role?: UserRole | string; designation?: string; title?: string; status?: string; isActive?: boolean } | null,
+): boolean {
+  if (!user || isUserSuspended(user)) return false;
+  return isQAQCManagerRole(user);
+}
+
+/**
  * Returns the formal signing / job title to write on signature stamps, reports, and certificates.
  * Principle: "Functionality differs from title" - e.g., role can be QUALITY_MANAGER (giving L5 QA/QC powers)
  * while title is written as "QA/QC Engineer" or "Lead Quality Auditor".
@@ -876,11 +920,19 @@ export function canAccessRoute(
     normalized.startsWith("/project/permit-to-pour") ||
     normalized.startsWith("/project/concrete") ||
     normalized.startsWith("/project/steel") ||
-    normalized.startsWith("/project/bar-cutting") ||
     normalized.startsWith("/project/deliveries") ||
     normalized.startsWith("/project/mir")
   ) {
     return isQAQC || lvl >= 2 || isUserEligibleForStakeholderRole(user, "Consultant");
+  }
+
+  // 7b. Bar Cutting Schedule & BBS (STRICT: QA/QC Manager ONLY)
+  if (
+    normalized.startsWith("/project/bar-cutting") ||
+    normalized.startsWith("/project/steel/bar-cutting") ||
+    normalized.includes("/bar-cutting")
+  ) {
+    return canAccessBarCutting(user);
   }
 
   // 8. Daily Site Diary, 4D Quality Planner

@@ -45,6 +45,7 @@ import {
   getOrCalculateFormworkArea,
   getColumn2DDimensions,
   getBeam2DDimensions,
+  getColumnInclinationInfo,
 } from "@/lib/elementCalculations";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -3087,6 +3088,15 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             />
                           );
                         })()}
+                        {/* Fixed Datum Anchor Pin at grid datum (cx, cy) */}
+                        <circle
+                          cx={cx}
+                          cy={cy}
+                          r="4"
+                          fill="#10b981"
+                          stroke="#ffffff"
+                          strokeWidth="1.2"
+                        />
                         {/* Top Projected Footprint */}
                         {isCircular ? (
                           <circle
@@ -3136,6 +3146,18 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                             />
                           </>
                         )}
+                        {/* Slant Movement Readout Tag */}
+                        <text
+                          x={cx + dxPx / 2}
+                          y={cy + dyPx / 2 - 8}
+                          fill="#f59e0b"
+                          fontSize="7.5"
+                          fontWeight="bold"
+                          textAnchor="middle"
+                          fontFamily="monospace"
+                        >
+                          {incInfo.fixedEnd === 'TOP' ? '⚓ Head Fixed · Base Moved' : '⚓ Base Fixed · Top Moved'} ({incInfo.horizontalOffsetM.toFixed(2)}m)
+                        </text>
                       </g>
                     )}
 
@@ -3606,6 +3628,28 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                   {getOrCalculateFormworkArea(inspectedElement).toFixed(2)} m²
                 </strong>
               </p>
+              <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[10.5px]">
+                {/* Grid Offset Badge */}
+                {(inspectedElement.hasGridOffset || inspectedElement.baseOffsetX || inspectedElement.baseOffsetY) ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-mono font-bold">
+                    Offset: ΔX = {(inspectedElement.baseOffsetX || 0) > 0 ? `+${inspectedElement.baseOffsetX}` : (inspectedElement.baseOffsetX || 0)}m, ΔY = {(inspectedElement.baseOffsetY || 0) > 0 ? `+${inspectedElement.baseOffsetY}` : (inspectedElement.baseOffsetY || 0)}m
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-mono">
+                    Directly on Grid (Centered)
+                  </span>
+                )}
+
+                {/* Inclined Column Fixed Part / Movement Readout */}
+                {(inspectedElement.isInclined || inspectedElement.verticality === "inclined") && (() => {
+                  const inc = getColumnInclinationInfo(inspectedElement);
+                  return (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-500/30 font-mono font-bold">
+                      Slant: θ={inc.inclinationAngleDeg}°, {inc.movementDescription}
+                    </span>
+                  );
+                })()}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">

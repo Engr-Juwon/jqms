@@ -391,6 +391,9 @@ export interface ColumnInclinationInfo {
   inclinationAngleDeg: number;
   effectiveLengthM: number;
   direction: "EAST" | "WEST" | "NORTH" | "SOUTH";
+  fixedEnd: "BOTTOM" | "TOP";
+  movementLocation: "TOP" | "BOTTOM";
+  movementDescription: string;
   deltaX: number; // in meters (world X)
   deltaY: number; // in meters (2D plan Y: North is negative, South is positive)
   deltaZ: number; // in meters (Three.js world Z: North is negative, South is positive)
@@ -404,6 +407,10 @@ export function getColumnInclinationInfo(el: Partial<StructuralElement>): Column
   if (rawDir.includes("WEST") || rawDir === "-X" || rawDir === "LEFT") direction = "WEST";
   else if (rawDir.includes("NORTH") || rawDir === "+Y" || rawDir === "TOP") direction = "NORTH";
   else if (rawDir.includes("SOUTH") || rawDir === "-Y" || rawDir === "BOTTOM") direction = "SOUTH";
+
+  const rawFixed = String((el as any).inclinedFixedEnd || (el as any).fixedEnd || "BOTTOM").toUpperCase();
+  const fixedEnd: "BOTTOM" | "TOP" = rawFixed === "TOP" ? "TOP" : "BOTTOM";
+  const movementLocation: "TOP" | "BOTTOM" = fixedEnd === "BOTTOM" ? "TOP" : "BOTTOM";
 
   let offsetM = Number(el.horizontalOffset) || 0;
   let angleDeg = Number(el.inclinationAngle) || 0;
@@ -445,6 +452,12 @@ export function getColumnInclinationInfo(el: Partial<StructuralElement>): Column
     }
   }
 
+  const movementDescription = isInclined
+    ? fixedEnd === "BOTTOM"
+      ? `Base fixed on grid; Top moved ${offsetM.toFixed(2)}m ${direction}`
+      : `Top fixed on grid; Base moved ${offsetM.toFixed(2)}m ${direction}`
+    : "Straight / plumb";
+
   return {
     isInclined,
     verticalHeightM: H,
@@ -452,6 +465,9 @@ export function getColumnInclinationInfo(el: Partial<StructuralElement>): Column
     inclinationAngleDeg: angleDeg,
     effectiveLengthM,
     direction,
+    fixedEnd,
+    movementLocation,
+    movementDescription,
     deltaX,
     deltaY,
     deltaZ,

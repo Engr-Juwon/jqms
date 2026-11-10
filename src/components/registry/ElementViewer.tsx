@@ -214,17 +214,31 @@ const InclinedColumn3D: React.FC<{
   width: number;
   height: number;
   tiltAngle?: number;
+  fixedEnd?: "BOTTOM" | "TOP";
+  direction?: string;
   showRebar: boolean;
   showDimensions: boolean;
   wireframe: boolean;
-}> = ({ length, width, height, tiltAngle = 12, showRebar, showDimensions, wireframe }) => {
+}> = ({
+  length,
+  width,
+  height,
+  tiltAngle = 12,
+  fixedEnd = "BOTTOM",
+  direction = "EAST",
+  showRebar,
+  showDimensions,
+  wireframe,
+}) => {
   const sL = (length && length > 50 ? length / 1000 : length) || 0.6;
   const sW = (width && width > 50 ? width / 1000 : width) || 0.6;
   const sH = (height && height > 50 ? height / 1000 : height) || 3.0;
   const rad = (tiltAngle * Math.PI) / 180;
+  const isTopFixed = fixedEnd === "TOP";
+  const posX = isTopFixed ? -(sH / 2) * Math.sin(rad) : (sH / 2) * Math.sin(rad);
 
   return (
-    <group rotation={[0, 0, rad]} position={[(sH / 2) * Math.sin(rad), (sH / 2) * Math.cos(rad), 0]}>
+    <group rotation={[0, 0, isTopFixed ? -rad : rad]} position={[posX, (sH / 2) * Math.cos(rad), 0]}>
       <DreiBox args={[sL, sH, sW]}>
         <ConcreteMaterial wireframe={wireframe} />
       </DreiBox>
@@ -233,7 +247,7 @@ const InclinedColumn3D: React.FC<{
         <DimensionLabel
           start={[-sL / 2 - 0.15, -sH / 2, 0]}
           end={[-sL / 2 - 0.15, sH / 2, 0]}
-          text={`Height: ${(sH * 1000).toFixed(0)} mm (${tiltAngle}° inclined)`}
+          text={`H: ${(sH * 1000).toFixed(0)} mm (${tiltAngle}° inclined, ${isTopFixed ? "Top Fixed ⚓ · Base Moved" : "Base Fixed ⚓ · Top Moved"})`}
           offset={[-0.2, 0, 0]}
         />
       )}
@@ -859,8 +873,9 @@ const Stair3D: React.FC<{
   const sH = (height && height > 50 ? height / 1000 : height) || 2.0;
 
   const steps = 10;
-  const stepLength = sL / steps;
+  const stepLength = (sL * 0.75) / steps;
   const stepHeight = sH / steps;
+  const landingLength = sL * 0.25;
 
   return (
     <group>
@@ -879,13 +894,68 @@ const Stair3D: React.FC<{
         </DreiBox>
       ))}
 
+      {/* Top Landing Platform flush with Upper Floor Level */}
+      <DreiBox
+        args={[landingLength, 0.2, sW]}
+        position={[
+          sL / 2 - landingLength / 2,
+          sH - 0.1,
+          0,
+        ]}
+      >
+        <ConcreteMaterial wireframe={wireframe} />
+      </DreiBox>
+
+      {/* Waist solid fill under landing */}
+      <DreiBox
+        args={[landingLength, Math.max(0.1, sH - 0.2), sW]}
+        position={[
+          sL / 2 - landingLength / 2,
+          (sH - 0.2) / 2,
+          0,
+        ]}
+      >
+        <ConcreteMaterial wireframe={wireframe} />
+      </DreiBox>
+
       {showDimensions && (
-        <DimensionLabel
-          start={[-sL / 2, 0, sW / 2 + 0.1]}
-          end={[sL / 2, 0, sW / 2 + 0.1]}
-          text={`${(sL * 1000).toFixed(0)} mm`}
-          offset={[0, -0.15, 0]}
-        />
+        <>
+          {/* Total Length Run */}
+          <DimensionLabel
+            start={[-sL / 2, 0, sW / 2 + 0.1]}
+            end={[sL / 2, 0, sW / 2 + 0.1]}
+            text={`L = ${(sL * 1000).toFixed(0)} mm`}
+            offset={[0, -0.15, 0]}
+          />
+          {/* Total Rise Height */}
+          <DimensionLabel
+            start={[sL / 2 + 0.1, 0, 0]}
+            end={[sL / 2 + 0.1, sH, 0]}
+            text={`H = ${(sH * 1000).toFixed(0)} mm`}
+            offset={[0.15, 0, 0]}
+          />
+          {/* Flight Width */}
+          <DimensionLabel
+            start={[-sL / 2, 0, -sW / 2]}
+            end={[-sL / 2, 0, sW / 2]}
+            text={`W = ${(sW * 1000).toFixed(0)} mm`}
+            offset={[-0.15, 0, 0]}
+          />
+          {/* Top Arrival Datum Callout */}
+          <DimensionLabel
+            start={[sL / 2, sH, 0]}
+            end={[sL / 2, sH, 0]}
+            text={`△ Top Level (Arrival)`}
+            offset={[0, 0.18, 0]}
+          />
+          {/* Base Departure Datum Callout */}
+          <DimensionLabel
+            start={[-sL / 2, 0, 0]}
+            end={[-sL / 2, 0, 0]}
+            text={`▽ Floor Below (Departure)`}
+            offset={[0, 0.12, 0]}
+          />
+        </>
       )}
     </group>
   );
@@ -988,6 +1058,57 @@ const CrossSectionView: React.FC<{
             fontFamily="monospace"
           >
             Ø {dia.toFixed(0)} mm
+          </text>
+        </g>
+      );
+    }
+
+    if (type.includes("STAIR")) {
+      const stairL = (element.length && element.length > 50 ? element.length : 3000);
+      const stairH = (element.height && element.height > 50 ? element.height : 2000);
+      const scale = Math.min((svgW - padding * 2 - 40) / stairL, (svgH - padding * 2 - 40) / stairH);
+      const flightW = stairL * scale;
+      const flightH = stairH * scale;
+      const sx = (svgW - flightW) / 2 - 10;
+      const sy = svgH - padding - 20;
+      const steps = 8;
+      const stW = (flightW * 0.75) / steps;
+      const stH = flightH / steps;
+      const landW = flightW * 0.25;
+
+      let p = `M ${sx} ${sy}`;
+      for (let i = 0; i < steps; i++) {
+        p += ` L ${sx + i * stW} ${sy - (i + 1) * stH} L ${sx + (i + 1) * stW} ${sy - (i + 1) * stH}`;
+      }
+      const topX = sx + steps * stW;
+      const topY = sy - flightH;
+      p += ` L ${topX + landW} ${topY} L ${topX + landW} ${topY + 16} L ${topX} ${topY + 16}`;
+      p += ` L ${sx + 16} ${sy + 16} L ${sx} ${sy + 16} Z`;
+
+      return (
+        <g>
+          <path
+            d={p}
+            fill={isLight ? "#ecfdf5" : "#064e3b40"}
+            stroke={isLight ? "#059669" : "#10b981"}
+            strokeWidth={2}
+          />
+          {/* Base departure level */}
+          <line x1={sx - 15} y1={sy} x2={sx + 30} y2={sy} stroke="#64748b" strokeWidth={1.5} strokeDasharray="3 3" />
+          <text x={sx - 18} y={sy - 4} fill={isLight ? "#047857" : "#34d399"} fontSize="9" fontWeight="bold" fontFamily="monospace" textAnchor="end">
+            ▽ Floor Below
+          </text>
+
+          {/* Top arrival level */}
+          <line x1={topX - 10} y1={topY} x2={topX + landW + 25} y2={topY} stroke="#0284c7" strokeWidth={1.5} strokeDasharray="3 3" />
+          <text x={topX + landW + 30} y={topY - 4} fill={isLight ? "#0284c7" : "#38bdf8"} fontSize="9" fontWeight="bold" fontFamily="monospace">
+            △ Top Level (Arrival)
+          </text>
+
+          {/* Height Dimension */}
+          <line x1={topX + landW + 15} y1={topY} x2={topX + landW + 15} y2={sy} stroke={isLight ? "#64748b" : "#94a3b8"} strokeWidth={1.2} />
+          <text x={topX + landW + 20} y={(topY + sy) / 2 + 4} fill={isLight ? "#0f172a" : "#f8fafc"} fontSize="10" fontWeight="bold" fontFamily="monospace">
+            Rise: {stairH.toFixed(0)} mm
           </text>
         </g>
       );
@@ -1102,12 +1223,15 @@ const Element3DScene: React.FC<{
           />
         );
       }
-      if (element.columnShape === "inclined") {
+      if (element.columnShape === "inclined" || element.isInclined || element.verticality === "inclined") {
         return (
           <InclinedColumn3D
             length={element.length || element.dimensions?.length || 600}
             width={element.width || element.dimensions?.width || 600}
             height={element.height || element.dimensions?.height || 3000}
+            tiltAngle={element.inclinationAngle || 10}
+            fixedEnd={element.inclinedFixedEnd || element.fixedEnd || "BOTTOM"}
+            direction={element.inclinationDirection || "EAST"}
             showRebar={showRebar}
             showDimensions={showDimensions}
             wireframe={wireframe}

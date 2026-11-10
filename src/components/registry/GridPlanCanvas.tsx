@@ -46,6 +46,7 @@ import {
   getColumn2DDimensions,
   getBeam2DDimensions,
   getColumnInclinationInfo,
+  calculateElementElevations,
 } from "@/lib/elementCalculations";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -469,6 +470,12 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
   const levelNameMap = useMemo(() => {
     const map = new Map<string, string>();
     levels.forEach((l) => map.set(l.id, l.name));
+    return map;
+  }, [levels]);
+
+  const levelElevationMap = useMemo(() => {
+    const map = new Map<string, number>();
+    levels.forEach((l) => map.set(l.id, l.elevation ?? 0));
     return map;
   }, [levels]);
 
@@ -1810,11 +1817,14 @@ export const GridPlanCanvas: React.FC<GridPlanCanvasProps> = ({
                 const flightW = (el.flightWidth || 1.2) * scaleFactor;
                 const flightWPx = Math.max(28, flightW);
 
-                // Elevation callout text (▽ Base -> △ Top)
-                const baseElev = el.bottomElevation ?? 0;
-                const topElev =
-                  el.topElevation ?? baseElev + (el.height || 3.0);
-                const elevTag = `▽${baseElev.toFixed(2)}m → △+${topElev.toFixed(2)}m`;
+                // Elevation callout text (▽ Base Departure from floor below -> △ Top Arrival at current floor level)
+                const levelDatum: number =
+                  (el.levelId ? levelElevationMap.get(el.levelId) : undefined) ??
+                  (el.gridY !== undefined ? Number(el.gridY) : el.elevation !== undefined ? Number(el.elevation) : 0);
+                const stairElevCalc = calculateElementElevations(el, levelDatum);
+                const baseElev = stairElevCalc.bottom;
+                const topElev = stairElevCalc.top;
+                const elevTag = `▽${baseElev.toFixed(2)}m (Below) → △+${topElev.toFixed(2)}m (Arrival)`;
 
                 const hasTwoFlights =
                   el.stairConfiguration === "DOGLEG_HALF_TURN" ||

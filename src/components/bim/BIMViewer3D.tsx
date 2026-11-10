@@ -1238,17 +1238,18 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
 
         if (incInfo.isInclined) {
           // Precise 3D spatial alignment for inclined / slanted column:
-          // Base grounded at (coords.x1, elevCalc.bottom, coords.y1)
-          // Top shifts by deltaX, deltaZ at upper level datum
+          // If BOTTOM is fixed: Base grounded at grid (coords.x1, coords.y1), Top shifts by deltaX, deltaZ
+          // If TOP is fixed: Head anchored at grid (coords.x1, coords.y1) at upper level, Base kicks out by -deltaX, -deltaZ
           const baseBottomY = elevCalc.bottom * explodeFactor;
           const verticalH = colH;
           const deltaX = incInfo.deltaX;
           const deltaZ = incInfo.deltaZ; // In Three.js world space: X is East(+)/West(-), Z is South(+)/North(-)
           const slantL = Math.sqrt(verticalH * verticalH + deltaX * deltaX + deltaZ * deltaZ);
+          const isTopFixed = incInfo.fixedEnd === "TOP";
 
-          posX = coords.x1 - centerOffsetX + deltaX / 2;
+          posX = coords.x1 - centerOffsetX + (isTopFixed ? -deltaX / 2 : deltaX / 2);
           posY = baseBottomY + verticalH / 2;
-          posZ = coords.y1 - centerOffsetZ + deltaZ / 2;
+          posZ = coords.y1 - centerOffsetZ + (isTopFixed ? -deltaZ / 2 : deltaZ / 2);
 
           if (isCircular) {
             const dia = diameterM || widthM || 0.45;
@@ -2185,6 +2186,30 @@ export const BIMViewer3D: React.FC<BIMViewer3DProps> = ({
                   singleSelectedElement.gridAxis ||
                   "N/A"}
               </span>
+              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                {singleSelectedElement.hasGridOffset || singleSelectedElement.baseOffsetX || singleSelectedElement.baseOffsetY ? (
+                  <span className="px-1.5 py-0.5 rounded text-[9.5px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    Offset: ΔX={(singleSelectedElement.baseOffsetX || 0) > 0 ? `+${singleSelectedElement.baseOffsetX}` : singleSelectedElement.baseOffsetX || 0}m, ΔY={(singleSelectedElement.baseOffsetY || 0) > 0 ? `+${singleSelectedElement.baseOffsetY}` : singleSelectedElement.baseOffsetY || 0}m
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded text-[9.5px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                    On Grid (0.00m)
+                  </span>
+                )}
+                {singleSelectedElement.elevationOffset ? (
+                  <span className="px-1.5 py-0.5 rounded text-[9.5px] font-mono bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                    Level Offset: {singleSelectedElement.elevationOffset > 0 ? `+${singleSelectedElement.elevationOffset}` : singleSelectedElement.elevationOffset}m
+                  </span>
+                ) : null}
+                {(singleSelectedElement.isInclined || singleSelectedElement.verticality === "inclined") && (() => {
+                  const inc = getColumnInclinationInfo(singleSelectedElement);
+                  return (
+                    <span className="px-1.5 py-0.5 rounded text-[9.5px] font-mono font-bold bg-orange-500/15 text-orange-300 border border-orange-500/30">
+                      {inc.fixedEnd === "TOP" ? "Top Fixed ⚓ · Base Moved" : "Base Fixed ⚓ · Top Moved"} (θ={inc.inclinationAngleDeg}°)
+                    </span>
+                  );
+                })()}
+              </div>
             </div>
             <div className="flex items-center gap-1.5">
               <span

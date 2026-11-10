@@ -633,8 +633,10 @@ export const ElementModal: React.FC<ElementModalProps> = ({
       top = baseWithOffset;
       base = top - depth;
     } else if (elementType === 'STAIR') {
-      base = baseWithOffset;
-      top = baseWithOffset + height;
+      // For stairs, the assigned floor level is the Top Arrival Level!
+      // The stair departs from the floor below and ascends up to the assigned floor level.
+      top = baseWithOffset;
+      base = top - height;
     }
 
     if (elevationMode === 'manual') {
@@ -1580,26 +1582,38 @@ export const ElementModal: React.FC<ElementModalProps> = ({
             {elevationMode === 'auto' ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3 bg-white dark:bg-slate-850 rounded-lg border border-slate-200 dark:border-slate-700/50">
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">Level Datum</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                    {elementType === 'STAIR' ? 'Level Datum (Arrival Floor)' : 'Level Datum'}
+                  </span>
                   <span className="text-sm font-mono font-bold text-slate-900 dark:text-white">
                     {calculatedElevations.levelDatum >= 0 ? '+' : ''}
                     {calculatedElevations.levelDatum.toFixed(3)} m
                   </span>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-850 rounded-lg border border-slate-200 dark:border-slate-700/50">
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">Base Elevation</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                    {elementType === 'STAIR' ? 'Base Elevation (Floor Below)' : 'Base Elevation'}
+                  </span>
                   <span className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400">
                     {calculatedElevations.baseElevation >= 0 ? '+' : ''}
                     {calculatedElevations.baseElevation.toFixed(3)} m
                   </span>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-850 rounded-lg border border-slate-200 dark:border-slate-700/50">
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">Top Elevation</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block">
+                    {elementType === 'STAIR' ? 'Top Elevation (Arrival Level)' : 'Top Elevation'}
+                  </span>
                   <span className="text-sm font-mono font-bold text-cyan-600 dark:text-cyan-400">
                     {calculatedElevations.topElevation >= 0 ? '+' : ''}
                     {calculatedElevations.topElevation.toFixed(3)} m
                   </span>
                 </div>
+                {elementType === 'STAIR' && (
+                  <div className="col-span-full px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-700 dark:text-emerald-300 flex items-start gap-2">
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400 shrink-0">📐 Top Arrival Datum:</span>
+                    <span>For structural stairs, the assigned floor level datum is the <strong>Top Arrival Level</strong> ({calculatedElevations.topElevation >= 0 ? '+' : ''}{calculatedElevations.topElevation.toFixed(3)}m). The stair ascends from the floor below ({calculatedElevations.baseElevation >= 0 ? '+' : ''}{calculatedElevations.baseElevation.toFixed(3)}m) to land flush at this level.</span>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -4619,13 +4633,13 @@ export const ElementModal: React.FC<ElementModalProps> = ({
                             {/* Base FFL Level */}
                             <line x1={20} y1={startY} x2={startX + 30} y2={startY} stroke="#64748b" strokeWidth="1.2" strokeDasharray="3 3" />
                             <text x={25} y={startY - 6} fill="#94a3b8" fontSize="9" fontWeight="bold" fontFamily="monospace">
-                              ▽ FFL 0.000m
+                              ▽ Dep. FFL {calculatedElevations.baseElevation >= 0 ? '+' : ''}{calculatedElevations.baseElevation.toFixed(3)}m (Floor Below)
                             </text>
 
-                            {/* Top FFL Level */}
+                            {/* Top FFL Level (Assigned Level) */}
                             <line x1={topX - 20} y1={topY} x2={topX + landW_px + 40} y2={topY} stroke="#64748b" strokeWidth="1.2" strokeDasharray="3 3" />
-                            <text x={topX + landW_px + 8} y={topY - 6} fill="#94a3b8" fontSize="9" fontWeight="bold" fontFamily="monospace">
-                              △ FFL +{storyHeightM.toFixed(2)}m
+                            <text x={topX + landW_px + 8} y={topY - 6} fill="#38bdf8" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                              △ Arr. FFL {calculatedElevations.topElevation >= 0 ? '+' : ''}{calculatedElevations.topElevation.toFixed(3)}m (Floor Level)
                             </text>
 
                             {/* Annotation: Riser & Tread Zoom Indicator */}

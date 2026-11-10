@@ -716,7 +716,8 @@ export interface CalculatedElevations {
  * 
  * If level datum is e.g. +7.40m and element has elevationOffset +0.10m,
  * base elevation = 7.50m.
- * For columns/walls/stairs: base = baseWithOffset, top = base + height (default 3.2m).
+ * For columns/walls: base = baseWithOffset, top = base + height (default 3.2m).
+ * For stairs: top = baseWithOffset (the assigned floor level is the Top Arrival Level), bottom = top - height.
  * For beams: top = baseWithOffset, bottom = top - depth (default 0.6m).
  * For slabs: top = baseWithOffset, bottom = top - thickness (default 0.175m).
  * For footings: top = baseWithOffset, bottom = top - depth (default 1.0m).
@@ -749,10 +750,17 @@ export function calculateElementElevations(
   let top = baseWithOffset + height;
   let bottom = baseWithOffset;
 
-  if (type.includes("COLUMN") || type.includes("WALL") || type.includes("STAIR")) {
+  if (type.includes("COLUMN") || type.includes("WALL")) {
     base = baseWithOffset;
     bottom = baseWithOffset;
     top = baseWithOffset + height;
+  } else if (type.includes("STAIR")) {
+    // For stairs, the assigned floor level is the Top Arrival Level!
+    // The stair departs from the floor below (base/bottom = levelDatum + offset - height)
+    // and ascends up to the assigned floor level (top = levelDatum + offset).
+    top = baseWithOffset;
+    bottom = baseWithOffset - height;
+    base = bottom;
   } else if (type.includes("BEAM")) {
     top = baseWithOffset;
     bottom = baseWithOffset - depth;
@@ -777,6 +785,9 @@ export function calculateElementElevations(
   }
   if (element.topElevation !== undefined && element.topElevation !== null) {
     top = normalizeDimension(element.topElevation);
+  }
+  if (type.includes("STAIR")) {
+    base = bottom;
   }
 
   return {

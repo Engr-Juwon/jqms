@@ -30,6 +30,7 @@ export type OfflineSyncEntityType =
   | "STRUCTURAL_ELEMENTS"
   | "GRIDLINES"
   | "WORK_PACKAGE"
+  | "PROJECT_UNIT"
   | "TRADE"
   | "INSPECTION_TEMPLATE";
 

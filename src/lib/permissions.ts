@@ -647,6 +647,7 @@ export function getBimModuleForRoute(path: string): BimModuleKey | null {
   if (parts.includes("gridlines")) return "gridlines";
   if (parts.includes("levels")) return "levels";
   if (parts.includes("packages")) return "packages";
+  if (parts.includes("units")) return "units";
 
   return null;
 }
@@ -673,6 +674,7 @@ export function getModuleSettingField(key: BimModuleKey): keyof BimModuleSetting
     case "gridlines": return "enableGridlines";
     case "levels": return "enableLevels";
     case "packages": return "enablePackages";
+    case "units": return "enableUnits";
   }
 }
 
@@ -887,10 +889,11 @@ export function canAccessRoute(
     return lvl >= 3 || isQAQC;
   }
 
-  // 4. BIM & Spatial Hierarchy (Levels, Packages)
+  // 4. BIM & Spatial Hierarchy (Levels, Packages, Units)
   if (
     normalized.startsWith("/project/levels") ||
-    normalized.startsWith("/project/packages")
+    normalized.startsWith("/project/packages") ||
+    normalized.startsWith("/project/units")
   ) {
     return isQAQC || lvl >= 3;
   }

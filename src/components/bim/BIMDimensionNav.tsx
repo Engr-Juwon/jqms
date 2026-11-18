@@ -167,6 +167,14 @@ export const BIMDimensionNav: React.FC<BIMDimensionNavProps> = ({
                 <span>Levels{counts?.levels !== undefined ? ` (${counts.levels})` : ""}</span>
               </Link>
             )}
+            <Link
+              to="/project/units"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium transition"
+              title="Multi-Unit Spatial & Mixed-Use Directory"
+            >
+              <Building2 className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Units Directory</span>
+            </Link>
             {canShowPackages && (
               <Link
                 to="/project/packages"

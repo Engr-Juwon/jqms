@@ -1112,6 +1112,15 @@ service cloud.firestore {
       allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
     }
 
+    match /projectUnits/{id} {
+      allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
+      allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)
+        && isValidProjectScopedRecord(request.resource.data, id, 80);
+      allow update: if isTenantMemberWithMinRole(resource.data.companyId, 2)
+        && isValidProjectRecordUpdate(id, 80);
+      allow delete: if isTenantMemberWithMinRole(resource.data.companyId, 3);
+    }
+
     match /structuralElements/{id} {
       allow read: if isTenantMemberWithMinRole(resource.data.companyId, 1);
       allow create: if isTenantMemberWithMinRole(request.resource.data.companyId, 2)

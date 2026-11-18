@@ -308,7 +308,8 @@ export type BimModuleKey =
   | "mto"
   | "gridlines"
   | "levels"
-  | "packages";
+  | "packages"
+  | "units";
 
 export interface BimModuleSettings {
   enable2D?: boolean; // 2D Spatial CAD / Grid Plan (/project/grid-plan) - default true
@@ -321,6 +322,7 @@ export interface BimModuleSettings {
   enableGridlines?: boolean; // Gridlines & Axis Matrix (/project/gridlines) - default true
   enableLevels?: boolean; // Floor Levels & Vertical Zones (/project/levels) - default true
   enablePackages?: boolean; // Work Packages & Disciplines (/project/packages) - default true
+  enableUnits?: boolean; // Multi-Unit Directory & Heatmap (/project/units) - default true
 }
 
 export const DEFAULT_BIM_SETTINGS: Required<BimModuleSettings> = {
@@ -334,6 +336,7 @@ export const DEFAULT_BIM_SETTINGS: Required<BimModuleSettings> = {
   enableGridlines: true,
   enableLevels: true,
   enablePackages: true,
+  enableUnits: true,
 };
 
 // ─── WORK PACKAGE ───
@@ -371,6 +374,65 @@ export interface ProjectLevel {
   createdAt?: number | string;
 }
 export type Level = ProjectLevel;
+
+// ─── PROJECT UNIT (MULTI-UNIT / MIXED-USE REGISTER) ───
+export type UnitUsageType =
+  | "RESIDENTIAL"
+  | "COMMERCIAL_RETAIL"
+  | "OFFICE"
+  | "HOSPITALITY"
+  | "PARKING_STORAGE"
+  | "AMENITY_FACILITY"
+  | "UTILITY_MEP"
+  | "FULL_DUPLEX"
+  | "TERRACE_DUPLEX"
+  | "HIGHRISE_TOWER"
+  | "OTHER";
+
+export type UnitStageStatus =
+  | "NOT_STARTED"
+  | "SUBSTRUCTURE"
+  | "SUPERSTRUCTURE"
+  | "FIRST_FIX"
+  | "SECOND_FIX"
+  | "FINISHES"
+  | "PRE_SNAG"
+  | "CLIENT_SNAG"
+  | "READY_FOR_HANDOVER"
+  | "HANDED_OVER";
+
+export interface ProjectUnit {
+  id: string;
+  projectId: string;
+  companyId: string;
+  unitNumber: string; // e.g., "101", "G-05", "OFF-201", "DX-04"
+  name: string; // e.g., "Azure Heights 1402", "Oakwood Duplex D-04", "Coral Tower"
+  code?: string; // e.g., "T1-L01-101", "DX-BLK3-04"
+  building: string; // e.g., "Tower 1", "Podium Retail", "Duplex Block 3", "Coral Tower"
+  levelId?: string; // Reference to ProjectLevel.id
+  levelName: string; // e.g., "Ground Floor", "Level 01", "Level 14", "Duplex Ground", "Full Height"
+  unitType: UnitUsageType;
+  typology?: string; // e.g., "FULL_DUPLEX", "TERRACE_DUPLEX", "HIGHRISE_TOWER", "APARTMENT", "PENTHOUSE", "RETAIL_COMMERCIAL", "OFFICE_SUITE", "STANDALONE_BUILDING"
+  subType?: string; // e.g., "Studio", "1BR", "2BR", "3BR", "Penthouse", "Full Duplex Villa", "Tower Block"
+  stageStatus: UnitStageStatus;
+  grossFloorArea?: number; // in m2
+  rooms: string[]; // e.g., ["Living Room", "Master Bedroom", "Kitchen", "Guest Bath"]
+  assignedContractor?: string;
+  assignedStaff?: string[];
+  targetHandoverDate?: string;
+  actualHandoverDate?: string;
+  keyHolder?: string;
+  snagStats?: {
+    total: number;
+    open: number;
+    rectified: number;
+    verified: number;
+  };
+  tocId?: string; // Associated Taking Over Certificate ID
+  notes?: string;
+  createdAt: number | string;
+  updatedAt?: number | string;
+}
 
 // ─── GRIDLINE ───
 export interface Gridline {

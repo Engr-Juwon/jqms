@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useCompany } from "@/lib/companyHelper";
@@ -42,6 +43,7 @@ import {
   PunchStageStatus,
   PunchSeverity,
   HandoverStatus,
+  ProjectUnit,
 } from "@/types";
 
 const STAGE_CONFIG: Record<
@@ -169,11 +171,27 @@ export const PunchListHandoverPage: React.FC = () => {
       }
     }
   }, [activeProject?.currentLevelName]);
+  const [searchParams] = useSearchParams();
+  const [registeredUnits, setRegisteredUnits] = useState<ProjectUnit[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string>("ALL");
   const [selectedRoom, setSelectedRoom] = useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [selectedTrade, setSelectedTrade] = useState<string>("ALL");
   const [selectedSeverity, setSelectedSeverity] = useState<string>("ALL");
+
+  useEffect(() => {
+    const unitParam = searchParams.get("unit");
+    if (unitParam) {
+      setSelectedUnit(unitParam);
+      setFormUnit(unitParam);
+      setTocUnit(unitParam);
+    }
+    const tabParam = searchParams.get("tab");
+    if (tabParam === "handover") {
+      setActiveTab("tocs");
+      setShowTOCModal(true);
+    }
+  }, [searchParams]);
 
   // Modals & Drawers
   const [showNewSnagModal, setShowNewSnagModal] = useState(false);
@@ -220,12 +238,14 @@ export const PunchListHandoverPage: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [items, certs] = await Promise.all([
+      const [items, certs, unitsList] = await Promise.all([
         dbService.getRoomPunchItems(projectId, companyId),
         dbService.getTakingOverCertificates(projectId, companyId),
+        dbService.getProjectUnits(projectId, companyId),
       ]);
       setPunchItems(items);
       setTocs(certs);
+      setRegisteredUnits(unitsList);
     } catch (err) {
       console.error("Failed to load punch items:", err);
       toast.error("Failed to load punch list & handover register.");
@@ -241,27 +261,47 @@ export const PunchListHandoverPage: React.FC = () => {
   // Derived Spatial Trees
   const buildings = useMemo(() => {
     const set = new Set<string>();
+    registeredUnits.forEach((u) => u.building && set.add(u.building));
     punchItems.forEach((i) => i.building && set.add(i.building));
     if (set.size === 0) set.add("Tower 1");
     return Array.from(set);
-  }, [punchItems]);
+  }, [registeredUnits, punchItems]);
 
   const levels = useMemo(() => {
     const set = new Set<string>();
+    registeredUnits.forEach((u) => u.levelName && set.add(u.levelName));
     punchItems.forEach((i) => i.levelName && set.add(i.levelName));
     if (set.size === 0) set.add("Level 04");
     return Array.from(set);
-  }, [punchItems]);
+  }, [registeredUnits, punchItems]);
 
   const units = useMemo(() => {
     const set = new Set<string>();
+    registeredUnits.forEach((u) => u.unitNumber && set.add(u.unitNumber));
     punchItems.forEach((i) => i.unitName && set.add(i.unitName));
     if (set.size === 0) {
       set.add("Apt 401");
       set.add("Apt 402");
     }
-    return Array.from(set);
-  }, [punchItems]);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [registeredUnits, punchItems]);
+
+  const handleFormUnitChange = (val: string) => {
+    setFormUnit(val);
+    const matched = registeredUnits.find(
+      (u) =>
+        u.unitNumber.toLowerCase() === val.trim().toLowerCase() ||
+        u.name.toLowerCase() === val.trim().toLowerCase()
+    );
+    if (matched) {
+      if (matched.building) setFormBuilding(matched.building);
+      if (matched.levelName) setFormLevel(matched.levelName);
+      if (matched.assignedContractor) setFormContractor(matched.assignedContractor);
+      if (matched.rooms && matched.rooms.length > 0) {
+        setFormRoom(matched.rooms[0]);
+      }
+    }
+  };
 
   const rooms = useMemo(() => {
     const set = new Set<string>();
@@ -1190,10 +1230,17 @@ export const PunchListHandoverPage: React.FC = () => {
                   <label className="text-xs font-semibold text-slate-500 uppercase">Unit / Apt</label>
                   <input
                     type="text"
+                    list="registered-units-datalist"
                     value={formUnit}
-                    onChange={(e) => setFormUnit(e.target.value)}
+                    onChange={(e) => handleFormUnitChange(e.target.value)}
+                    placeholder="Type or pick unit..."
                     className="w-full mt-1 px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
                   />
+                  <datalist id="registered-units-datalist">
+                    {units.map((u) => (
+                      <option key={u} value={u} />
+                    ))}
+                  </datalist>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 uppercase">Room</label>

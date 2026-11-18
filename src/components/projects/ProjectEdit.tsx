@@ -163,6 +163,7 @@ export const ProjectEdit: React.FC = () => {
           enableGridlines: existingBim.enableGridlines ?? DEFAULT_BIM_SETTINGS.enableGridlines,
           enableLevels: existingBim.enableLevels ?? DEFAULT_BIM_SETTINGS.enableLevels,
           enablePackages: existingBim.enablePackages ?? DEFAULT_BIM_SETTINGS.enablePackages,
+          enableUnits: existingBim.enableUnits ?? DEFAULT_BIM_SETTINGS.enableUnits,
         };
         setBimSettings(loadedBim);
         setEnableBim(
@@ -561,6 +562,7 @@ export const ProjectEdit: React.FC = () => {
         enableGridlines: true,
         enableLevels: true,
         enablePackages: true,
+        enableUnits: true,
       },
       "All 10 BIM modules enabled and active across navigation & routing",
     );
@@ -583,6 +585,7 @@ export const ProjectEdit: React.FC = () => {
         enableGridlines: false,
         enableLevels: false,
         enablePackages: false,
+        enableUnits: false,
       },
       "All 10 BIM modules disabled and blocked across navigation & routing",
     );

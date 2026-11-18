@@ -102,6 +102,9 @@ async function replayOfflineItem(item: OfflineSyncItem): Promise<void> {
     case "WORK_PACKAGE":
       await dbService.saveWorkPackage(payload);
       return;
+    case "PROJECT_UNIT":
+      await dbService.saveProjectUnit(payload);
+      return;
     case "TRADE":
       await dbService.saveTrade(payload);
       return;

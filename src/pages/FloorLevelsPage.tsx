@@ -28,6 +28,14 @@ export const FloorLevelsPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
+          <Link
+            to="/project/units"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold shadow transition"
+          >
+            <Building2 className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+            <span>Units Directory</span>
+          </Link>
+
           {show7D && (
             <Link
               to="/project/elements"

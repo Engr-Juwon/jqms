@@ -323,6 +323,12 @@ export const Sidebar: React.FC = () => {
             description: "Foundation, basement & floor-by-floor management",
           },
           {
+            label: "Units Directory (550 Units)",
+            path: "/project/units",
+            icon: Building2,
+            description: "Multi-unit register, mixed-use directory & heatmap",
+          },
+          {
             label: "Work Packages & Disciplines",
             path: "/project/packages",
             icon: Wrench,

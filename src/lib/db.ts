@@ -54,6 +54,7 @@ import {
   RoomPunchItem,
   TakingOverCertificate,
   MethodStatement,
+  ProjectUnit,
 } from "@/types";
 import {
   getVaultRecord,
@@ -1376,6 +1377,149 @@ export const dbService = {
       );
     }
     await deleteDoc(doc(firestore, "workPackages", pkgId));
+  },
+
+  // --- Project Units (Multi-Unit & Mixed-Use Directory) ---
+  async getProjectUnits(
+    projectId: string,
+    companyId?: string,
+  ): Promise<ProjectUnit[]> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId) return [];
+    const cacheKey = scopedCacheKey("project_units", projectId, effectiveCompId);
+    try {
+      const q = query(
+        collection(firestore, "projectUnits"),
+        where("projectId", "==", projectId),
+        where("companyId", "==", effectiveCompId),
+      );
+      const snap = await getDocs(q);
+      const list = snap.docs
+        .map((d) => ({ ...d.data(), id: d.id }) as ProjectUnit)
+        .sort((a, b) => {
+          if (a.building !== b.building) return (a.building || "").localeCompare(b.building || "");
+          return (a.unitNumber || "").localeCompare(b.unitNumber || "", undefined, { numeric: true });
+        });
+      setCache(cacheKey, list);
+      return list;
+    } catch (e) {
+      console.warn("Firestore getProjectUnits warning, reading local cache:", e);
+      return getCache<ProjectUnit[]>(cacheKey, []);
+    }
+  },
+
+  async saveProjectUnit(unit: ProjectUnit): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(unit.companyId);
+    const cleaned = cleanForFirestore({ ...unit, companyId: effectiveCompId, updatedAt: Date.now() });
+    const cacheKey = scopedCacheKey(
+      "project_units",
+      cleaned.projectId,
+      effectiveCompId,
+    );
+    await persistRecord(
+      "projectUnits",
+      "PROJECT_UNIT",
+      cleaned,
+      cacheKey,
+      (a, b) => (a.unitNumber || "").localeCompare(b.unitNumber || "", undefined, { numeric: true }),
+    );
+  },
+
+  async saveProjectUnits(
+    units: ProjectUnit[],
+    projectId: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId || units.length === 0) return;
+
+    const cleanedUnits = units.map((u) =>
+      cleanForFirestore({
+        ...u,
+        projectId,
+        companyId: effectiveCompId,
+        updatedAt: Date.now(),
+      }),
+    );
+
+    const cacheKey = scopedCacheKey("project_units", projectId, effectiveCompId);
+    const existing = getCache<ProjectUnit[]>(cacheKey, []);
+    const mergedMap = new Map<string, ProjectUnit>();
+    existing.forEach((u) => mergedMap.set(u.id, u));
+    cleanedUnits.forEach((u) => mergedMap.set(u.id, u));
+    const sorted = Array.from(mergedMap.values()).sort((a, b) => {
+      if (a.building !== b.building) return (a.building || "").localeCompare(b.building || "");
+      return (a.unitNumber || "").localeCompare(b.unitNumber || "", undefined, { numeric: true });
+    });
+    setCache(cacheKey, sorted);
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      for (const u of cleanedUnits) {
+        await queueOfflineAction({
+          type: "PROJECT_UNIT",
+          projectId,
+          companyId: effectiveCompId,
+          payload: u,
+        });
+      }
+      return;
+    }
+
+    try {
+      await commitInChunks(cleanedUnits, (batch, u) => {
+        batch.set(doc(firestore, "projectUnits", u.id), u, { merge: true });
+      });
+    } catch (err: any) {
+      if (isTransientNetworkError(err)) {
+        for (const u of cleanedUnits) {
+          await queueOfflineAction({
+            type: "PROJECT_UNIT",
+            projectId,
+            companyId: effectiveCompId,
+            payload: u,
+          });
+        }
+        return;
+      }
+      throw err;
+    }
+  },
+
+  async deleteProjectUnit(
+    unitId: string,
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    removeFromAllVaultCaches("jqms_project_units_", unitId);
+    if (projectId && effectiveCompId) {
+      const cacheKey = scopedCacheKey("project_units", projectId, effectiveCompId);
+      const list = getCache<ProjectUnit[]>(cacheKey, []);
+      setCache(
+        cacheKey,
+        list.filter((u) => u.id !== unitId),
+      );
+    }
+    await deleteDoc(doc(firestore, "projectUnits", unitId));
+  },
+
+  async bulkDeleteProjectUnits(
+    unitIds: string[],
+    projectId?: string,
+    companyId?: string,
+  ): Promise<void> {
+    const effectiveCompId = resolveEffectiveCompanyId(companyId);
+    if (!projectId || !effectiveCompId || unitIds.length === 0) return;
+    const cacheKey = scopedCacheKey("project_units", projectId, effectiveCompId);
+    const idSet = new Set(unitIds);
+    const list = getCache<ProjectUnit[]>(cacheKey, []);
+    setCache(
+      cacheKey,
+      list.filter((u) => !idSet.has(u.id)),
+    );
+    await commitInChunks(unitIds, (batch, id) => {
+      batch.delete(doc(firestore, "projectUnits", id));
+    });
   },
 
   // --- Site Comments / Observations ---

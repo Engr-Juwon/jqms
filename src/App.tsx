@@ -107,6 +107,10 @@ const FloorLevelsPage = lazyPage(
   () => import("./pages/FloorLevelsPage"),
   "FloorLevelsPage",
 );
+const UnitsDirectoryPage = lazyPage(
+  () => import("./pages/UnitsDirectoryPage"),
+  "UnitsDirectoryPage",
+);
 const WorkPackagesPage = lazyPage(
   () => import("./pages/WorkPackagesPage"),
   "WorkPackagesPage",
@@ -372,6 +376,7 @@ export const App: React.FC = () => {
               <Route path="sustainability" element={<BIMRouteGuard><BIM6DCarbonPage /></BIMRouteGuard>} />
               <Route path="levels" element={<BIMRouteGuard><FloorLevelsPage /></BIMRouteGuard>} />
               <Route path="packages" element={<BIMRouteGuard><WorkPackagesPage /></BIMRouteGuard>} />
+              <Route path="units" element={<BIMRouteGuard><UnitsDirectoryPage /></BIMRouteGuard>} />
               <Route path="gridlines" element={<BIMRouteGuard><GridlinesPage /></BIMRouteGuard>} />
               <Route path="mto" element={<BIMRouteGuard><MaterialTakeoff /></BIMRouteGuard>} />
               <Route path="size-schedule" element={<BIMRouteGuard><MaterialTakeoff /></BIMRouteGuard>} />
@@ -585,6 +590,7 @@ export const App: React.FC = () => {
               <Route path="sustainability" element={<BIMRouteGuard><BIM6DCarbonPage /></BIMRouteGuard>} />
               <Route path="levels" element={<BIMRouteGuard><FloorLevelsPage /></BIMRouteGuard>} />
               <Route path="packages" element={<BIMRouteGuard><WorkPackagesPage /></BIMRouteGuard>} />
+              <Route path="units" element={<BIMRouteGuard><UnitsDirectoryPage /></BIMRouteGuard>} />
               <Route path="gridlines" element={<BIMRouteGuard><GridlinesPage /></BIMRouteGuard>} />
               <Route path="mto" element={<BIMRouteGuard><MaterialTakeoff /></BIMRouteGuard>} />
               <Route path="size-schedule" element={<BIMRouteGuard><MaterialTakeoff /></BIMRouteGuard>} />

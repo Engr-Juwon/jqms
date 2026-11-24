@@ -6,6 +6,12 @@ import {
   DiameterCuttingBreakdown,
 } from "@/types";
 import { getRebarUnitWeight } from "./bbsParser";
+<<<<<<< HEAD
+=======
+import { splitRebarRunM, splitRebarRun, splitBBSItem, verifyRebarSplitInvariant } from "./rebarSplitter";
+
+export { splitRebarRun, splitRebarRunM, splitBBSItem, verifyRebarSplitInvariant };
+>>>>>>> 2933372 (cutting)
 
 export interface OptimizerOptions {
   stockLengthM?: number; // default 12.0
@@ -97,6 +103,7 @@ export function optimizeBarCutting(
 
     const pieces: Piece[] = [];
     for (const item of diaItems) {
+<<<<<<< HEAD
       for (let i = 0; i < item.totalBars; i++) {
         const length = Math.min(item.cutLengthM, stockLengthM);
         pieces.push({
@@ -105,6 +112,33 @@ export function optimizeBarCutting(
           member: item.member,
           cutLengthM: length,
         });
+=======
+      if (item.cutLengthM > stockLengthM) {
+        // Continuous rebar run exceeding standard stock length:
+        // Automatically split into <= 12m stock segments with 50d structural laps & prime notation
+        const segments = splitRebarRunM(item.barMark, item.cutLengthM, dia, {
+          stockLengthMm: Math.round(stockLengthM * 1000),
+        });
+        for (const seg of segments) {
+          for (let i = 0; i < item.totalBars; i++) {
+            pieces.push({
+              bbsItemId: item.id,
+              barMark: seg.barMark,
+              member: item.member,
+              cutLengthM: seg.cutLengthM,
+            });
+          }
+        }
+      } else {
+        for (let i = 0; i < item.totalBars; i++) {
+          pieces.push({
+            bbsItemId: item.id,
+            barMark: item.barMark,
+            member: item.member,
+            cutLengthM: item.cutLengthM,
+          });
+        }
+>>>>>>> 2933372 (cutting)
       }
     }
 

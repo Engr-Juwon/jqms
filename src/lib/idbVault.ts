@@ -545,6 +545,55 @@ export function findInVaultCaches<T extends { id?: string; sampleId?: string }>(
 }
 
 /**
+<<<<<<< HEAD
+=======
+ * Find all items across all cached records matching a prefix
+ */
+export function findAllInVaultCaches<T extends { id?: string }>(
+  prefix: string,
+  predicate?: (item: T) => boolean,
+): T[] {
+  const keysToProcess = new Set<string>();
+
+  for (const key of memoryCache.keys()) {
+    if (key.startsWith(prefix)) {
+      keysToProcess.add(key);
+    }
+  }
+
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) {
+        keysToProcess.add(k);
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  const seenIds = new Set<string>();
+  const results: T[] = [];
+
+  for (const key of keysToProcess) {
+    const list = getVaultRecord<T[]>(key, []);
+    if (Array.isArray(list)) {
+      for (const item of list) {
+        if (item && item.id && !seenIds.has(item.id)) {
+          if (!predicate || predicate(item)) {
+            seenIds.add(item.id);
+            results.push(item);
+          }
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+>>>>>>> 2933372 (cutting)
  * Upsert an item into a vault cache list safely
  */
 export function upsertInVaultCache<T extends { id?: string; sampleId?: string }>(

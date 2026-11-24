@@ -95,6 +95,7 @@ export const BarCuttingDetailPage: React.FC = () => {
         dbService.getBarCuttingSchedules(currentProjId, currentCompId),
         dbService.getSteelTests(currentProjId, currentCompId),
       ]);
+<<<<<<< HEAD
       const sorted = sortByNewestFirst(schedList);
       setSchedules(sorted);
       setSteelTests(testList);
@@ -104,6 +105,46 @@ export const BarCuttingDetailPage: React.FC = () => {
           ? sorted.find((s) => s.id === scheduleId)
           : sorted[0];
         setActiveSchedule(found || sorted[0]);
+=======
+      let sorted = sortByNewestFirst(schedList);
+
+      // If a specific scheduleId was requested in the URL, ensure it is directly fetched if not in sorted
+      let targetSchedule: BarCuttingSchedule | null = null;
+      if (scheduleId) {
+        targetSchedule = sorted.find((s) => s.id === scheduleId) || null;
+        if (!targetSchedule) {
+          targetSchedule = await dbService.getBarCuttingSchedule(
+            scheduleId,
+            currentProjId,
+            currentCompId,
+          );
+          if (targetSchedule) {
+            sorted = [
+              targetSchedule,
+              ...sorted.filter((s) => s.id !== targetSchedule!.id),
+            ];
+          }
+        }
+      }
+
+      // If no schedules found with currentProjId, attempt company-wide query
+      if (sorted.length === 0 && currentCompId) {
+        const companyWide = await dbService.getBarCuttingSchedules("", currentCompId);
+        if (companyWide.length > 0) {
+          sorted = sortByNewestFirst(companyWide);
+        }
+      }
+
+      setSchedules(sorted);
+      setSteelTests(testList);
+
+      if (targetSchedule) {
+        setActiveSchedule(targetSchedule);
+      } else if (sorted.length > 0) {
+        setActiveSchedule(sorted[0]);
+      } else {
+        setActiveSchedule(null);
+>>>>>>> 2933372 (cutting)
       }
     } catch (e) {
       console.error("Error loading bar cutting schedule:", e);
@@ -252,6 +293,7 @@ export const BarCuttingDetailPage: React.FC = () => {
     );
   };
 
+<<<<<<< HEAD
   // 3. Add or Edit a single BBS Rebar Mark
   const handleSaveBBSItem = async (item: BBSItem) => {
     if (!activeSchedule) return;
@@ -268,6 +310,27 @@ export const BarCuttingDetailPage: React.FC = () => {
       updatedItems[existingIndex] = item;
     } else {
       updatedItems = [...activeSchedule.bbsItems, item];
+=======
+  // 3. Add or Edit BBS Rebar Mark(s)
+  const handleSaveBBSItem = async (itemOrItems: BBSItem | BBSItem[]) => {
+    if (!activeSchedule) return;
+
+    const incomingItems = Array.isArray(itemOrItems) ? itemOrItems : [itemOrItems];
+    let updatedItems = [...activeSchedule.bbsItems];
+
+    for (const item of incomingItems) {
+      const existingIndex = updatedItems.findIndex(
+        (i) =>
+          i.id === item.id ||
+          (i.barMark === item.barMark && i.member === item.member),
+      );
+
+      if (existingIndex >= 0) {
+        updatedItems[existingIndex] = item;
+      } else {
+        updatedItems.push(item);
+      }
+>>>>>>> 2933372 (cutting)
     }
 
     const optResult = optimizeBarCutting(updatedItems, {
@@ -290,7 +353,15 @@ export const BarCuttingDetailPage: React.FC = () => {
     setSchedules((prev) =>
       prev.map((s) => (s.id === updated.id ? updated : s)),
     );
+<<<<<<< HEAD
     toast.success("Bar mark saved and 12m patterns re-optimized!");
+=======
+    toast.success(
+      incomingItems.length > 1
+        ? `Added ${incomingItems.length} split stock segments and re-optimized 12m patterns!`
+        : "Bar mark saved and 12m patterns re-optimized!",
+    );
+>>>>>>> 2933372 (cutting)
   };
 
   // 4. Delete single BBS Rebar Mark
@@ -500,7 +571,11 @@ export const BarCuttingDetailPage: React.FC = () => {
               >
                 {schedules.map((s) => (
                   <option key={s.id} value={s.id}>
+<<<<<<< HEAD
                     {s.scheduleNumber} ({s.bbsItems?.length || 0} marks)
+=======
+                    {s.scheduleNumber} - {s.title} ({s.bbsItems?.length || 0} marks)
+>>>>>>> 2933372 (cutting)
                   </option>
                 ))}
               </select>

@@ -55,6 +55,7 @@ export const BarCuttingRegistryPage: React.FC = () => {
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+<<<<<<< HEAD
   const [levelFilter, setLevelFilter] = useState<string>(
     activeProject?.currentLevelName || "ALL",
   );
@@ -65,6 +66,9 @@ export const BarCuttingRegistryPage: React.FC = () => {
       setLevelFilter(activeProject?.currentLevelName || "ALL");
     }
   }, [activeProject?.currentLevelName]);
+=======
+  const [levelFilter, setLevelFilter] = useState<string>("ALL");
+>>>>>>> 2933372 (cutting)
   const [selectedScheduleIds, setSelectedScheduleIds] = useState<string[]>([]);
 
   // Pagination State
@@ -79,10 +83,27 @@ export const BarCuttingRegistryPage: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
+<<<<<<< HEAD
       const schedList = await dbService.getBarCuttingSchedules(
         currentProjId,
         currentCompId,
       );
+=======
+      let schedList = await dbService.getBarCuttingSchedules(
+        currentProjId,
+        currentCompId,
+      );
+      // If 0 schedules returned for currentProjId, attempt company-wide query
+      if (schedList.length === 0 && currentCompId) {
+        const companyList = await dbService.getBarCuttingSchedules(
+          "",
+          currentCompId,
+        );
+        if (companyList.length > 0) {
+          schedList = companyList;
+        }
+      }
+>>>>>>> 2933372 (cutting)
       const sorted = sortByNewestFirst(schedList);
       setSchedules(sorted);
     } catch (e) {
@@ -147,7 +168,13 @@ export const BarCuttingRegistryPage: React.FC = () => {
         (s.levelName && s.levelName.toLowerCase().includes(q)) ||
         (s.sourceBBSFileName &&
           s.sourceBBSFileName.toLowerCase().includes(q)) ||
+<<<<<<< HEAD
         (s.heatNumber && s.heatNumber.toLowerCase().includes(q));
+=======
+        (s.heatNumber && s.heatNumber.toLowerCase().includes(q)) ||
+        (s.supplier && s.supplier.toLowerCase().includes(q)) ||
+        s.bbsItems?.some((b) => b.barMark.toLowerCase().includes(q));
+>>>>>>> 2933372 (cutting)
 
       const matchesStatus =
         statusFilter === "ALL" || s.status === statusFilter;
@@ -672,6 +699,7 @@ export const BarCuttingRegistryPage: React.FC = () => {
           </select>
 
           {/* Level Filter */}
+<<<<<<< HEAD
           {availableLevels.length > 1 && (
             <select
               value={levelFilter}
@@ -686,6 +714,23 @@ export const BarCuttingRegistryPage: React.FC = () => {
               ))}
             </select>
           )}
+=======
+          <select
+            value={levelFilter}
+            onChange={(e) => setLevelFilter(e.target.value)}
+            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 focus:outline-none"
+          >
+            <option value="ALL">All Structural Levels ({schedules.length})</option>
+            {availableLevels.map((lvl) => {
+              const count = schedules.filter((s) => s.levelName === lvl).length;
+              return (
+                <option key={lvl} value={lvl}>
+                  {lvl} ({count})
+                </option>
+              );
+            })}
+          </select>
+>>>>>>> 2933372 (cutting)
         </div>
 
         {/* Selected Schedules Action (Combine / Merge) */}
@@ -714,6 +759,7 @@ export const BarCuttingRegistryPage: React.FC = () => {
             <p className="text-xs font-medium">Loading schedules...</p>
           </div>
         ) : filteredSchedules.length === 0 ? (
+<<<<<<< HEAD
           <div className="p-12 text-center text-slate-400">
             <Scissors className="w-10 h-10 mx-auto mb-3 text-slate-300 dark:text-slate-700" />
             <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
@@ -736,6 +782,47 @@ export const BarCuttingRegistryPage: React.FC = () => {
                 Import PDF/CSV
               </button>
             </div>
+=======
+          <div className="p-12 text-center text-slate-400 space-y-3">
+            <Scissors className="w-10 h-10 mx-auto text-amber-500/60" />
+            <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+              {schedules.length > 0
+                ? "No schedules match active filter criteria"
+                : "No cutting schedules found"}
+            </p>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              {schedules.length > 0
+                ? `You have ${schedules.length} saved cutting schedule${schedules.length > 1 ? "s" : ""} in this workspace, but none match your search or filter.`
+                : "Create a new cutting schedule or import a Bar Bending Schedule (BBS) to get started."}
+            </p>
+            {schedules.length > 0 ? (
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setStatusFilter("ALL");
+                  setLevelFilter("ALL");
+                }}
+                className="px-4 py-2 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl transition shadow"
+              >
+                Clear Filters & Show All {schedules.length} Schedules
+              </button>
+            ) : (
+              <div className="mt-4 flex justify-center gap-3">
+                <button
+                  onClick={() => setShowCreateScheduleModal(true)}
+                  className="px-4 py-2 text-xs font-bold bg-amber-500 text-slate-950 rounded-xl"
+                >
+                  Create Schedule
+                </button>
+                <button
+                  onClick={() => setShowUploadModal(true)}
+                  className="px-4 py-2 text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl"
+                >
+                  Import PDF/CSV
+                </button>
+              </div>
+            )}
+>>>>>>> 2933372 (cutting)
           </div>
         ) : (
           <div className="overflow-x-auto">

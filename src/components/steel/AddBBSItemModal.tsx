@@ -1,24 +1,13 @@
-<<<<<<< HEAD
-import React, { useState, useEffect } from "react";
-import { X, Plus, Check, Scissors, Calculator } from "lucide-react";
-import { BBSItem } from "@/types";
-import { toast } from "react-hot-toast";
-=======
 import React, { useState, useEffect, useMemo } from "react";
 import { X, Plus, Check, Scissors, Calculator } from "lucide-react";
 import { BBSItem } from "@/types";
 import { toast } from "react-hot-toast";
 import { splitRebarRunM, splitBBSItem } from "@/lib/rebarSplitter";
->>>>>>> 2933372 (cutting)
 
 interface AddBBSItemModalProps {
   isOpen: boolean;
   onClose: () => void;
-<<<<<<< HEAD
-  onSave: (item: BBSItem) => void;
-=======
   onSave: (item: BBSItem | BBSItem[]) => void;
->>>>>>> 2933372 (cutting)
   initialItem?: BBSItem | null;
   existingMarks?: string[];
 }
@@ -91,8 +80,6 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
   const unitWeightKgM = (diameter * diameter) / 162.2;
   const totalWeightKg = totalLengthM * unitWeightKgM;
 
-<<<<<<< HEAD
-=======
   // Real-time preview of multi-segment lap splits for runs > 12.0m
   const splitSegmentsPreview = useMemo(() => {
     if (cutLengthM <= 12.0 || cutLengthM <= 0) return [];
@@ -103,7 +90,6 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
     }
   }, [barMark, cutLengthM, diameter]);
 
->>>>>>> 2933372 (cutting)
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -115,15 +101,8 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
       toast.error("Please enter a Bar Mark (e.g. 01, 02).");
       return;
     }
-<<<<<<< HEAD
-    if (cutLengthM <= 0 || cutLengthM > 12.0) {
-      toast.error(
-        "Cut length must be between 0.1m and 12.0m for standard stock bars.",
-      );
-=======
     if (cutLengthM <= 0) {
       toast.error("Cut length must be greater than 0.");
->>>>>>> 2933372 (cutting)
       return;
     }
 
@@ -145,14 +124,6 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
       steelGrade: initialItem?.steelGrade || "Grade 500B",
     };
 
-<<<<<<< HEAD
-    onSave(item);
-    toast.success(
-      initialItem
-        ? `Updated Bar Mark ${item.barMark} successfully!`
-        : `Added Bar Mark ${item.barMark} to cutting schedule!`,
-    );
-=======
     if (cutLengthM > 12.0) {
       const splitItems = splitBBSItem(item);
       onSave(splitItems);
@@ -167,7 +138,6 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
           : `Added Bar Mark ${item.barMark} to cutting schedule!`,
       );
     }
->>>>>>> 2933372 (cutting)
     onClose();
   };
 
@@ -317,39 +287,29 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
                 type="number"
                 step="0.001"
                 min="0.1"
-<<<<<<< HEAD
-                max="12"
                 value={lengthInput}
                 onChange={(e) => setLengthInput(e.target.value)}
-                placeholder={lengthUnit === "M" ? "e.g. 4.250" : "e.g. 4250"}
-=======
-                value={lengthInput}
-                onChange={(e) => setLengthInput(e.target.value)}
-                placeholder={lengthUnit === "M" ? "e.g. 20.000 or 4.250" : "e.g. 20000 or 4250"}
->>>>>>> 2933372 (cutting)
+                placeholder={
+                  lengthUnit === "M"
+                    ? "e.g. 20.000 or 4.250"
+                    : "e.g. 20000 or 4250"
+                }
                 className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                 required
               />
               <span className="text-xs font-bold text-slate-400">
-<<<<<<< HEAD
-                = {cutLengthM.toFixed(3)} m per cut
-              </span>
-            </div>
-            {cutLengthM > 12.0 && (
-              <p className="text-xs text-red-500 font-semibold">
-                ⚠️ Cut length exceeds standard 12.0m commercial bar length! Add
-                a lap splice or coupler.
-              </p>
-=======
                 = {cutLengthM.toFixed(3)} m per continuous run
               </span>
             </div>
             {cutLengthM > 12.0 && splitSegmentsPreview.length > 0 && (
               <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs text-amber-800 dark:text-amber-200 space-y-1.5">
                 <div className="flex items-center justify-between font-bold">
-                  <span>✂️ Continuous Run &gt; 12.0m: Auto-Splitting Engine Active</span>
+                  <span>
+                    ✂️ Continuous Run &gt; 12.0m: Auto-Splitting Engine Active
+                  </span>
                   <span className="text-[10px] bg-amber-500/20 px-2 py-0.5 rounded text-amber-900 dark:text-amber-100 font-mono">
-                    Lap: 50d = {diameter * 50}mm ({((diameter * 50) / 1000).toFixed(2)}m)
+                    Lap: 50d = {diameter * 50}mm (
+                    {((diameter * 50) / 1000).toFixed(2)}m)
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
@@ -358,16 +318,20 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
                       key={idx}
                       className="bg-white/80 dark:bg-slate-800/80 px-2 py-0.5 rounded border border-amber-400/30"
                     >
-                      <strong className="text-amber-600 dark:text-amber-400">Mark {seg.barMark}:</strong>{" "}
+                      <strong className="text-amber-600 dark:text-amber-400">
+                        Mark {seg.barMark}:
+                      </strong>{" "}
                       {seg.cutLengthM}m ({seg.cutLengthMm}mm)
                     </span>
                   ))}
                 </div>
                 <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                  Splits into {splitSegmentsPreview.length} standard stock segments with structural overlaps. Invariant verified: Sum(Cuts) - {splitSegmentsPreview.length - 1}×({diameter * 50}mm) = {Math.round(cutLengthM * 1000)}mm.
+                  Splits into {splitSegmentsPreview.length} standard stock
+                  segments with structural overlaps. Invariant verified:
+                  Sum(Cuts) - {splitSegmentsPreview.length - 1}×({diameter * 50}
+                  mm) = {Math.round(cutLengthM * 1000)}mm.
                 </p>
               </div>
->>>>>>> 2933372 (cutting)
             )}
           </div>
 

@@ -545,8 +545,6 @@ export function findInVaultCaches<T extends { id?: string; sampleId?: string }>(
 }
 
 /**
-<<<<<<< HEAD
-=======
  * Find all items across all cached records matching a prefix
  */
 export function findAllInVaultCaches<T extends { id?: string }>(
@@ -593,7 +591,6 @@ export function findAllInVaultCaches<T extends { id?: string }>(
 }
 
 /**
->>>>>>> 2933372 (cutting)
  * Upsert an item into a vault cache list safely
  */
 export function upsertInVaultCache<T extends { id?: string; sampleId?: string }>(

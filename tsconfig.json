@@ -26,9 +26,6 @@
     }
   },
   "include": ["src"],
-<<<<<<< HEAD
-=======
   "exclude": ["node_modules", "src/**/__tests__/*"],
->>>>>>> 2933372 (cutting)
   "references": [{ "path": "./tsconfig.node.json" }]
 }

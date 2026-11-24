@@ -60,11 +60,8 @@ import {
   getVaultRecord,
   setVaultRecord,
   removeFromAllVaultCaches,
-<<<<<<< HEAD
-=======
   findInVaultCaches,
   findAllInVaultCaches,
->>>>>>> 2933372 (cutting)
   hydrateVaultFromIDB,
   queueOfflineAction,
   OfflineSyncEntityType,
@@ -2426,19 +2423,6 @@ export const dbService = {
 
   // --- Bar Cutting Schedules ---
   async getBarCuttingSchedules(
-<<<<<<< HEAD
-    projectId: string,
-    companyId?: string,
-  ): Promise<BarCuttingSchedule[]> {
-    const effectiveCompId = resolveEffectiveCompanyId(companyId);
-    if (!projectId || !effectiveCompId) return [];
-    const cacheKey = scopedCacheKey("bcs", projectId, effectiveCompId);
-    try {
-      const q = query(
-        collection(firestore, "barCuttingSchedules"),
-        where("projectId", "==", projectId),
-        where("companyId", "==", effectiveCompId),
-=======
     projectId?: string,
     companyId?: string,
   ): Promise<BarCuttingSchedule[]> {
@@ -2467,7 +2451,6 @@ export const dbService = {
       const q = query(
         collection(firestore, "barCuttingSchedules"),
         ...constraints,
->>>>>>> 2933372 (cutting)
       );
       const snap = await getDocs(q);
       const rawList = snap.docs.map(
@@ -2481,9 +2464,6 @@ export const dbService = {
         "Firestore getBarCuttingSchedules warning, reading local cache:",
         e,
       );
-<<<<<<< HEAD
-      return getCache<BarCuttingSchedule[]>(cacheKey, []);
-=======
       const localList = getCache<BarCuttingSchedule[]>(cacheKey, []);
       if (localList.length > 0) return localList;
       return sortByNewestFirst(
@@ -2494,7 +2474,6 @@ export const dbService = {
             (!cleanProjId || !s.projectId || s.projectId === cleanProjId),
         ),
       );
->>>>>>> 2933372 (cutting)
     }
   },
 
@@ -2504,8 +2483,6 @@ export const dbService = {
     companyId?: string,
   ): Promise<BarCuttingSchedule | null> {
     const effectiveCompId = resolveEffectiveCompanyId(companyId);
-<<<<<<< HEAD
-=======
 
     // 1. Check L1/L2 Vault caches first for instant retrieval
     const cachedItem = findInVaultCaches<BarCuttingSchedule>(
@@ -2513,29 +2490,21 @@ export const dbService = {
       (s) => s.id === id,
     );
 
->>>>>>> 2933372 (cutting)
     try {
       const snap = await getDoc(doc(firestore, "barCuttingSchedules", id));
       if (snap.exists()) {
         const item = { ...snap.data(), id: snap.id } as BarCuttingSchedule;
-<<<<<<< HEAD
-        if (!effectiveCompId || item.companyId === effectiveCompId) return item;
-=======
         if (!effectiveCompId || !item.companyId || item.companyId === effectiveCompId) {
           return item;
         }
->>>>>>> 2933372 (cutting)
       }
     } catch (e) {
       console.warn("Firestore getBarCuttingSchedule warning:", e);
     }
-<<<<<<< HEAD
-=======
 
     // 2. Return cached schedule if found in vault
     if (cachedItem) return cachedItem;
 
->>>>>>> 2933372 (cutting)
     return null;
   },
 

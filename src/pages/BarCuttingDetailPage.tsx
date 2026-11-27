@@ -42,6 +42,7 @@ import {
   exportBarCuttingSchedulePDF,
   printBarCuttingSchedule,
   exportBarCuttingScheduleCSV,
+  exportBarCuttingScheduleExcel,
 } from "@/services/pdf/barCuttingReport";
 import { optimizeBarCutting } from "@/lib/barCuttingOptimizer";
 import { toast } from "react-hot-toast";
@@ -63,6 +64,10 @@ export const BarCuttingDetailPage: React.FC = () => {
     useState<BarCuttingSchedule | null>(null);
   const [steelTests, setSteelTests] = useState<SteelRebarTest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const existingBarMarks = useMemo(
+    () => activeSchedule?.bbsItems.map((item) => item.barMark) || [],
+    [activeSchedule?.bbsItems],
+  );
 
   // Sub-tabs
   const [activeDetailTab, setActiveDetailTab] = useState<
@@ -435,6 +440,26 @@ export const BarCuttingDetailPage: React.FC = () => {
     }
   };
 
+  const handleExportExcel = async () => {
+    if (!activeSchedule) return;
+    try {
+      toast.loading("Generating cutting schedule Excel workbook...", {
+        id: "detail-excel",
+      });
+      await exportBarCuttingScheduleExcel(
+        activeSchedule,
+        activeProject || undefined,
+        company || undefined,
+      );
+      toast.success("Cutting schedule Excel workbook downloaded!", {
+        id: "detail-excel",
+      });
+    } catch (e) {
+      console.error("Excel export error:", e);
+      toast.error("Failed to export Excel workbook.", { id: "detail-excel" });
+    }
+  };
+
   if (!canAccessBarCutting(currentUser)) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
@@ -595,6 +620,15 @@ export const BarCuttingDetailPage: React.FC = () => {
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
             Export CSV
+          </button>
+
+          <button
+            onClick={handleExportExcel}
+            className="px-3 py-2 text-xs font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl border border-slate-200 dark:border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+            title="Download cutting schedule as a formatted Excel workbook"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+            Export Excel
           </button>
 
           <button
@@ -1193,6 +1227,7 @@ export const BarCuttingDetailPage: React.FC = () => {
         }}
         onSave={handleSaveBBSItem}
         initialItem={editingItem}
+        existingMarks={existingBarMarks}
       />
 
       <BarBundleTagsModal

@@ -52,9 +52,15 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
       setNoOfMembers(initialItem.noOfMembers || 1);
       setBarsPerMember(initialItem.barsPerMember || 1);
     } else {
-      // Suggest next available bar mark
-      const nextMarkNum = existingMarks.length + 1;
-      const suggestedMark = String(nextMarkNum).padStart(2, "0");
+      const usedMarks = new Set(
+        existingMarks.map((mark) => mark.trim().toUpperCase()),
+      );
+      let nextMarkNum = 1;
+      let suggestedMark = String(nextMarkNum).padStart(2, "0");
+      while (usedMarks.has(suggestedMark)) {
+        nextMarkNum += 1;
+        suggestedMark = String(nextMarkNum).padStart(2, "0");
+      }
       setBarMark(suggestedMark);
       setMember("Beam 1B1");
       setDiameter(16);
@@ -64,16 +70,12 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
       setNoOfMembers(1);
       setBarsPerMember(4);
     }
-  }, [initialItem, isOpen]);
-
-  if (!isOpen) return null;
+  }, [initialItem, isOpen, existingMarks]);
 
   // Calculations
   const rawLengthNum = parseFloat(lengthInput) || 0;
   const cutLengthM =
-    lengthUnit === "MM" || rawLengthNum > 50
-      ? rawLengthNum / 1000
-      : rawLengthNum;
+    lengthUnit === "MM" ? rawLengthNum / 1000 : rawLengthNum;
 
   const totalBars = Math.max(1, (noOfMembers || 1) * (barsPerMember || 1));
   const totalLengthM = totalBars * cutLengthM;
@@ -89,6 +91,8 @@ export const AddBBSItemModal: React.FC<AddBBSItemModalProps> = ({
       return [];
     }
   }, [barMark, cutLengthM, diameter]);
+
+  if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

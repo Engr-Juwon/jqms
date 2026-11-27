@@ -118,7 +118,7 @@ export function exportBarCuttingSchedulePDF(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(255, 255, 255);
-  doc.text("REBAR CUTTING SCHEDULE & STOCK BAR OPTIMIZATION", margin + 4, margin + 6.5);
+  doc.text("REINFORCEMENT SCHEDULE (SITE)", margin + 4, margin + 6.5);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
@@ -164,67 +164,20 @@ export function exportBarCuttingSchedulePDF(
     margin: { left: margin, right: margin },
     body: [
       [
-        {
-          content: "SCHEDULE REF:",
-          styles: { fontStyle: "bold", fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-        },
-        {
-          content: docRef,
-          styles: { fontStyle: "bold", textColor: [2, 132, 199] },
-        },
-        {
-          content: "TITLE / SCOPE:",
-          styles: { fontStyle: "bold", fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-        },
+        { content: "LOCATION/SITE", styles: { fontStyle: "bold", fillColor: [241, 245, 249] } },
+        { content: schedule.levelName || "SITE" },
+        { content: "NO", styles: { fontStyle: "bold", fillColor: [241, 245, 249] } },
+        { content: docRef, styles: { fontStyle: "bold", textColor: [2, 132, 199] } },
+        { content: "BTR. ELEMENT", styles: { fontStyle: "bold", fillColor: [241, 245, 249] } },
         { content: schedule.title || "Reinforcement Cutting Order" },
-        {
-          content: "DATE:",
-          styles: { fontStyle: "bold", fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-        },
-        { content: currentDate },
       ],
       [
-        {
-          content: "SOURCE BBS:",
-          styles: { fontStyle: "bold", fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-        },
-        { content: schedule.sourceBBSFileName || "BBS-Uploaded" },
-        {
-          content: "LOCATION / LEVEL:",
-          styles: { fontStyle: "bold", fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-        },
-        { content: schedule.levelName || "General Reinforcement" },
-        {
-          content: "STEEL GRADE:",
-          styles: { fontStyle: "bold", fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-        },
-        { content: schedule.steelGrade || "Grade 500B" },
-      ],
-      [
-        {
-          content: "HEAT / BATCH NO:",
-          styles: { fontStyle: "bold", fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-        },
-        { content: schedule.heatNumber || "HT-MILL-VERIFIED" },
-        {
-          content: "SUPPLIER:",
-          styles: { fontStyle: "bold", fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-        },
-        { content: schedule.supplier || "Approved Steel Mill" },
-        {
-          content: "QA STATUS:",
-          styles: { fontStyle: "bold", fillColor: [241, 245, 249], textColor: [71, 85, 105] },
-        },
-        {
-          content: schedule.status || "OPTIMIZED",
-          styles: {
-            fontStyle: "bold",
-            textColor:
-              schedule.status === "QA_APPROVED"
-                ? [22, 163, 74]
-                : [202, 138, 4],
-          },
-        },
+        { content: "PERIMETER/B.EAM", styles: { fontStyle: "bold", fillColor: [241, 245, 249] } },
+        { content: schedule.levelName || "GENERAL" },
+        { content: "REINF. TYPE", styles: { fontStyle: "bold", fillColor: [241, 245, 249] } },
+        { content: schedule.steelGrade || "GRADE 500B" },
+        { content: `Y${primaryDiameter}`, styles: { fontStyle: "bold", fillColor: [241, 245, 249] } },
+        { content: "LEVEL" },
       ],
     ],
     theme: "grid",
@@ -249,6 +202,7 @@ export function exportBarCuttingSchedulePDF(
   // 3. MAIN CUTTING TABLE (MATCHING SPREADSHEET LAYOUT)
   // =========================================================================
   const cuttingRows: RowInput[] = [];
+  const maxCutSlots = 10;
 
   patterns.forEach((pattern, pIdx) => {
     const sn = pIdx + 1;
@@ -262,18 +216,7 @@ export function exportBarCuttingSchedulePDF(
     const isRedOffcut = offcutMm >= 300;
 
     const cuts = pattern.cuts || [];
-    const cutSegmentsFormatted =
-      cuts.length > 0
-        ? cuts
-            .map(
-              (c) =>
-                `${Math.round(c.cutLengthM * 1000)} mm [MK:${c.barMark || "—"}${c.member ? ` · ${c.member}` : ""}]`,
-            )
-            .join("   +   ")
-        : "Full Bar (12,000 mm)";
-
-    // Sleek single-row per cutting pattern: maximizes patterns per page (fits 24-28 patterns per page)
-    cuttingRows.push([
+    const row: RowInput = [
       {
         content: String(sn),
         styles: { halign: "center", valign: "middle", fontStyle: "bold", fontSize: 6.8, cellPadding: 0.6 },
@@ -286,17 +229,27 @@ export function exportBarCuttingSchedulePDF(
         content: qtyFormatted,
         styles: { halign: "center", valign: "middle", fontStyle: "bold", fontSize: 6.8, cellPadding: 0.6 },
       },
-      {
-        content: cutSegmentsFormatted,
+    ];
+
+    for (let slot = 0; slot < maxCutSlots; slot++) {
+      const cut = cuts[slot];
+      row.push({
+        content: cut
+          ? `${Math.round(cut.cutLengthM * 1000)}\n${cut.barMark || "-"}\n${cut.member || schedule.levelName || "ELEMENT"}`
+          : "",
         styles: {
           fillColor: [240, 249, 255],
           textColor: [3, 105, 161],
           fontStyle: "bold",
-          fontSize: 6.8,
-          cellPadding: 0.6,
+          fontSize: 5.8,
+          halign: "center",
+          valign: "middle",
+          cellPadding: 0.25,
         },
-      },
-      {
+      });
+    }
+
+    row.push({
         content: String(offcutMm),
         styles: {
           halign: "center",
@@ -307,8 +260,8 @@ export function exportBarCuttingSchedulePDF(
           fillColor: isRedOffcut ? [254, 226, 226] : [248, 250, 252],
           textColor: isRedOffcut ? [220, 38, 38] : [71, 85, 105],
         },
-      },
-    ]);
+    });
+    cuttingRows.push(row);
   });
 
   const nextTableStartY = (doc as any).lastAutoTable
@@ -318,19 +271,17 @@ export function exportBarCuttingSchedulePDF(
   autoTable(doc, {
     startY: nextTableStartY,
     margin: { left: margin, right: margin },
-    head: [
-      [
-        "S/N",
-        "LENGTH",
-        "NO",
-        "CUTTING SCHEDULE (SEGMENT ALLOCATION)",
-        "OFFCUT (mm)",
-      ],
-    ],
+    head: [[
+      "S/N",
+      "LENGTH",
+      "NO",
+      ...Array.from({ length: maxCutSlots }, (_, i) => String(i + 1)),
+      "OFFCUT",
+    ]],
     body:
       cuttingRows.length > 0
         ? cuttingRows
-        : [["—", "12,000.00", "0", "No cutting patterns available", "0"]],
+        : [["—", "12,000.00", "0", ...Array(maxCutSlots).fill(""), "0"]],
     theme: "grid",
     headStyles: {
       fillColor: [226, 232, 240], // slate-200
@@ -352,176 +303,10 @@ export function exportBarCuttingSchedulePDF(
       0: { cellWidth: 12, halign: "center" },
       1: { cellWidth: 24, halign: "right" },
       2: { cellWidth: 16, halign: "center" },
-      3: { cellWidth: 199, halign: "left" },
-      4: { cellWidth: 26, halign: "center" },
+      ...Object.fromEntries(Array.from({ length: maxCutSlots }, (_, i) => [i + 3, { cellWidth: 13.5, halign: "center" }])),
+      13: { cellWidth: 22, halign: "center" },
     },
   });
-
-  // =========================================================================
-  // 3b. PER-DIAMETER SUMMARY TABLE
-  // Each bar diameter is shown as a bold section header row grouping all
-  // cutting patterns for that diameter, followed by an amber subtotal row.
-  // =========================================================================
-  {
-    // Build an ordered map: diameter → list of patterns
-    const diameterPatternMap = new Map<number, typeof patterns>();
-    patterns.forEach((p) => {
-      const d: number = p.diameter || schedule.diameterMm || 16;
-      if (!diameterPatternMap.has(d)) diameterPatternMap.set(d, []);
-      diameterPatternMap.get(d)!.push(p);
-    });
-
-    // Sort diameters ascending
-    const sortedDiameters = Array.from(diameterPatternMap.keys()).sort((a, b) => a - b);
-
-    if (sortedDiameters.length > 0) {
-      const diameterRows: RowInput[] = [];
-
-      sortedDiameters.forEach((dia) => {
-        const dPatterns = diameterPatternMap.get(dia)!;
-        const totalBarsForDia = dPatterns.reduce((sum, p) => sum + (p.stockBarQuantity || 0), 0);
-        const totalLenM = totalBarsForDia * stockLengthM;
-        const massKgPerM = getLinearMassKgPerM(dia);
-        const totalWeightKg = totalLenM * massKgPerM;
-
-        // Diameter header row (full-width dark label)
-        diameterRows.push([
-          {
-            content: `T${dia}  —  Ø${dia} mm Rebar`,
-            colSpan: 5,
-            styles: {
-              fillColor: [15, 23, 42],
-              textColor: [255, 255, 255],
-              fontStyle: "bold",
-              fontSize: 7.5,
-              halign: "left",
-              cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
-            },
-          },
-        ]);
-
-        // One row per cutting pattern for this diameter
-        dPatterns.forEach((p, idx) => {
-          const offcutMm = Math.round(p.offcutLengthM * 1000);
-          diameterRows.push([
-            {
-              content: String(idx + 1),
-              styles: { halign: "center", fontSize: 6.5, cellPadding: 0.8 },
-            },
-            {
-              content: `${stockLengthMm} mm`,
-              styles: { halign: "right", fontSize: 6.5, cellPadding: 0.8 },
-            },
-            {
-              content: String(p.stockBarQuantity),
-              styles: { halign: "center", fontSize: 6.5, cellPadding: 0.8 },
-            },
-            {
-              content: (p.cuts || [])
-                .map(
-                  (c) =>
-                    `${Math.round(c.cutLengthM * 1000)} mm [MK:${c.barMark || "—"}${c.member ? ` · ${c.member}` : ""}]`,
-                )
-                .join("   +   ") || "Full Bar",
-              styles: {
-                fontSize: 6.5,
-                cellPadding: 0.8,
-                fillColor: [240, 249, 255],
-                textColor: [3, 105, 161],
-              },
-            },
-            {
-              content: `${offcutMm} mm`,
-              styles: {
-                halign: "center",
-                fontSize: 6.5,
-                cellPadding: 0.8,
-                fillColor: offcutMm >= 300 ? [254, 226, 226] : [248, 250, 252],
-                textColor: offcutMm >= 300 ? [220, 38, 38] : [71, 85, 105],
-              },
-            },
-          ]);
-        });
-
-        // Amber subtotal row for this diameter
-        diameterRows.push([
-          {
-            content: `TOTAL — Ø${dia} mm`,
-            colSpan: 2,
-            styles: {
-              fillColor: [245, 158, 11],
-              textColor: [15, 23, 42],
-              fontStyle: "bold",
-              fontSize: 7,
-              halign: "left",
-              cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
-            },
-          },
-          {
-            content: String(totalBarsForDia),
-            styles: {
-              fillColor: [245, 158, 11],
-              textColor: [15, 23, 42],
-              fontStyle: "bold",
-              fontSize: 7,
-              halign: "center",
-              cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
-            },
-          },
-          {
-            content: `Stock Bars = ${totalBarsForDia} × ${stockLengthM}m = ${formatNumber(totalLenM, 2)} m  |  Unit Mass = ${massKgPerM} kg/m  |  Weight = ${formatNumber(totalWeightKg, 2)} kg`,
-            styles: {
-              fillColor: [245, 158, 11],
-              textColor: [15, 23, 42],
-              fontStyle: "bold",
-              fontSize: 6.8,
-              halign: "left",
-              cellPadding: { top: 2, bottom: 2, left: 4, right: 4 },
-            },
-          },
-          {
-            content: "",
-            styles: { fillColor: [245, 158, 11] },
-          },
-        ]);
-      });
-
-      const diaTableStartY = (doc as any).lastAutoTable
-        ? (doc as any).lastAutoTable.finalY + 4
-        : 45;
-
-      autoTable(doc, {
-        startY: diaTableStartY,
-        margin: { left: margin, right: margin },
-        head: [["S/N", "STOCK LENGTH", "NO OF BARS", "CUTTING PATTERN", "OFFCUT"]],
-        body: diameterRows,
-        theme: "grid",
-        headStyles: {
-          fillColor: [30, 41, 59],
-          textColor: [255, 255, 255],
-          fontStyle: "bold",
-          fontSize: 7.5,
-          halign: "center",
-          lineWidth: 0.2,
-          lineColor: [100, 116, 139],
-          cellPadding: 1,
-        },
-        styles: {
-          fontSize: 6.8,
-          cellPadding: 0.6,
-          lineColor: [203, 213, 225],
-          lineWidth: 0.2,
-        },
-        columnStyles: {
-          0: { cellWidth: 12, halign: "center" },
-          1: { cellWidth: 30, halign: "right" },
-          2: { cellWidth: 20, halign: "center" },
-          3: { cellWidth: 189, halign: "left" },
-          4: { cellWidth: 26, halign: "center" },
-        },
-      });
-    }
-  }
 
   // =========================================================================
   // 4. SUMMARY BOX & QA SIGN-OFF
@@ -750,6 +535,404 @@ export function exportBarCuttingScheduleCSV(
   URL.revokeObjectURL(url);
 }
 
+export async function exportBarCuttingScheduleExcel(
+  schedule: BarCuttingSchedule,
+  project?: Partial<Project>,
+  company?: Partial<Company>,
+): Promise<void> {
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = company?.name || "JQMS";
+  workbook.subject = `Cutting schedule ${schedule.scheduleNumber}`;
+  workbook.title = schedule.title || "Reinforcement Schedule";
+
+  const patternsByDiameter = new Map<number, typeof schedule.cuttingPatterns>();
+  (schedule.cuttingPatterns || []).forEach((pattern) => {
+    const diameter = pattern.diameter || schedule.diameterMm || 16;
+    const group = patternsByDiameter.get(diameter) || [];
+    group.push(pattern);
+    patternsByDiameter.set(diameter, group);
+  });
+  (schedule.bbsItems || []).forEach((item) => {
+    if (!patternsByDiameter.has(item.diameter)) {
+      patternsByDiameter.set(item.diameter, []);
+    }
+  });
+  if (patternsByDiameter.size === 0) {
+    patternsByDiameter.set(schedule.diameterMm || 16, []);
+  }
+
+  const border = {
+    top: { style: "thin" as const, color: { argb: "FF202020" } },
+    left: { style: "thin" as const, color: { argb: "FF202020" } },
+    bottom: { style: "thin" as const, color: { argb: "FF202020" } },
+    right: { style: "thin" as const, color: { argb: "FF202020" } },
+  };
+  const projectLabel = project?.code || project?.name || "SITE";
+  const level = schedule.levelName || "GENERAL";
+  const stockLengthM = schedule.stockBarLengthM || 12;
+  const diameters = Array.from(patternsByDiameter.keys()).sort((a, b) => a - b);
+  const summarySheet = workbook.addWorksheet("REINFORCEMENT SUMMARY");
+  const summaryTotalColumn = diameters.length + 5;
+  summarySheet.columns = [
+    { width: 7 },
+    { width: 30 },
+    { width: 13 },
+    { width: 10 },
+    ...diameters.map(() => ({ width: 13 })),
+    { width: 14 },
+  ];
+  summarySheet.pageSetup = {
+    orientation: "landscape",
+    paperSize: 9,
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    margins: { left: 0.2, right: 0.2, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 },
+  };
+  summarySheet.mergeCells(1, 1, 2, 2);
+  summarySheet.mergeCells(1, 3, 1, summaryTotalColumn);
+  summarySheet.getCell(1, 1).value = "REINFORCEMENT SUMMARY";
+  summarySheet.getCell(1, 3).value = company?.name || "JQMS";
+  summarySheet.getCell(2, 3).value = "LOCATION:";
+  summarySheet.getCell(2, 4).value = projectLabel;
+  summarySheet.getCell(2, 5).value = "LEVEL:";
+  summarySheet.getCell(2, 6).value = level;
+  summarySheet.getCell(1, 1).font = { name: "Arial", size: 12, bold: true };
+  summarySheet.getCell(1, 3).font = { name: "Arial", size: 12, bold: true };
+  summarySheet.getCell(1, 1).alignment = { horizontal: "center", vertical: "middle" };
+  summarySheet.getCell(1, 3).alignment = { horizontal: "center", vertical: "middle" };
+  summarySheet.getRow(1).height = 21;
+  summarySheet.getRow(2).height = 18;
+  summarySheet.mergeCells(3, 1, 4, 1);
+  summarySheet.mergeCells(3, 2, 4, 2);
+  summarySheet.mergeCells(3, 3, 4, 3);
+  summarySheet.mergeCells(3, 4, 4, 4);
+  if (diameters.length > 1) {
+    summarySheet.mergeCells(3, 5, 3, 4 + diameters.length);
+  }
+  summarySheet.mergeCells(3, summaryTotalColumn, 4, summaryTotalColumn);
+  summarySheet.getCell(3, 1).value = "S/N";
+  summarySheet.getCell(3, 2).value = "STRUCTURAL DETAILS";
+  summarySheet.getCell(3, 3).value = "UNIT (MT)";
+  summarySheet.getCell(3, 4).value = "NO";
+  if (diameters.length > 1) {
+    summarySheet.getCell(3, 5).value = "DIA-WISE QUANTITIES OF REBAR";
+  }
+  summarySheet.getCell(3, summaryTotalColumn).value = "TOTAL (MT)";
+  diameters.forEach((diameter, index) => {
+    summarySheet.getCell(4, 5 + index).value = `Y${diameter} (MT)`;
+  });
+  for (let row = 3; row <= 4; row++) {
+    for (let column = 1; column <= summaryTotalColumn; column++) {
+      const cell = summarySheet.getCell(row, column);
+      cell.font = { name: "Arial", size: 8, bold: true };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E2F3" } };
+      cell.border = border;
+    }
+  }
+  summarySheet.getRow(3).height = 24;
+  summarySheet.getRow(4).height = 20;
+
+  const memberTotals = new Map<string, { diameterKg: Map<number, number> }>();
+  (schedule.bbsItems || []).forEach((item) => {
+    const member = item.member || "UNSPECIFIED";
+    const aggregate = memberTotals.get(member) || {
+      diameterKg: new Map<number, number>(),
+    };
+    const weightKg =
+      item.totalWeightKg ||
+      item.totalLengthM * getLinearMassKgPerM(item.diameter);
+    aggregate.diameterKg.set(
+      item.diameter,
+      (aggregate.diameterKg.get(item.diameter) || 0) + weightKg,
+    );
+    memberTotals.set(member, aggregate);
+  });
+  const summaryRows = Array.from(memberTotals.entries()).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  const summaryTotals = new Map(diameters.map((diameter) => [diameter, 0]));
+  summaryRows.forEach(([member, aggregate], index) => {
+    const row = 5 + index;
+    let totalKg = 0;
+    summarySheet.getCell(row, 1).value = index + 1;
+    summarySheet.getCell(row, 2).value = member;
+    summarySheet.getCell(row, 3).value = Number(
+      (
+        Array.from(aggregate.diameterKg.values()).reduce((sum, value) => sum + value, 0) /
+        1000
+      ).toFixed(3),
+    );
+    summarySheet.getCell(row, 4).value = 1;
+    diameters.forEach((diameter, diameterIndex) => {
+      const weightKg = aggregate.diameterKg.get(diameter) || 0;
+      totalKg += weightKg;
+      summaryTotals.set(diameter, (summaryTotals.get(diameter) || 0) + weightKg);
+      summarySheet.getCell(row, 5 + diameterIndex).value = Number(
+        (weightKg / 1000).toFixed(3),
+      );
+    });
+    summarySheet.getCell(row, summaryTotalColumn).value = Number(
+      (totalKg / 1000).toFixed(3),
+    );
+    for (let column = 1; column <= summaryTotalColumn; column++) {
+      const cell = summarySheet.getCell(row, column);
+      cell.font = { name: "Arial", size: 9 };
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.border = border;
+      if (column !== 2) cell.alignment = { horizontal: "center", vertical: "middle" };
+    }
+    summarySheet.getRow(row).height = 18;
+  });
+  const summaryFooterRow = 5 + summaryRows.length;
+  summarySheet.getCell(summaryFooterRow, 2).value = "TOTAL";
+  summarySheet.getCell(summaryFooterRow, 3).value = Number(
+    Array.from(summaryTotals.values()).reduce((sum, value) => sum + value, 0) / 1000,
+  );
+  diameters.forEach((diameter, index) => {
+    summarySheet.getCell(summaryFooterRow, 5 + index).value = Number(
+      ((summaryTotals.get(diameter) || 0) / 1000).toFixed(3),
+    );
+  });
+  summarySheet.getCell(summaryFooterRow, summaryTotalColumn).value = Number(
+    Array.from(summaryTotals.values()).reduce((sum, value) => sum + value, 0) / 1000,
+  );
+  for (let column = 1; column <= summaryTotalColumn; column++) {
+    const cell = summarySheet.getCell(summaryFooterRow, column);
+    cell.font = { name: "Arial", size: 9, bold: true };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2E2E2" } };
+    cell.border = border;
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+  }
+  summarySheet.getRow(summaryFooterRow).height = 20;
+  summarySheet.pageSetup.printArea = `A1:${summarySheet.getColumn(summaryTotalColumn).letter}${summaryFooterRow}`;
+  summarySheet.views = [{ state: "frozen", ySplit: 4 }];
+
+  for (const [diameter, patterns] of Array.from(patternsByDiameter.entries()).sort(
+    ([a], [b]) => a - b,
+  )) {
+    const maxCutSlots = Math.max(
+      10,
+      ...patterns.map((pattern) => (pattern.cuts || []).length),
+    );
+    const firstCutColumn = 5;
+    const lastCutColumn = firstCutColumn + maxCutSlots - 1;
+    const offcutColumn = lastCutColumn + 1;
+    const totalNoColumn = offcutColumn + 2;
+    const fullLengthNoColumn = totalNoColumn + 1;
+    const estimatedNoColumn = totalNoColumn + 2;
+    const sheet = workbook.addWorksheet(`${diameter}MM-BAR`);
+
+    sheet.columns = [
+      { width: 7 },
+      { width: 14 },
+      { width: 9 },
+      { width: 13 },
+      ...Array.from({ length: maxCutSlots }, () => ({ width: 12 })),
+      { width: 12 },
+      { width: 3 },
+      { width: 12 },
+      { width: 17 },
+      { width: 12 },
+    ];
+    sheet.pageSetup = {
+      orientation: "landscape",
+      paperSize: 9,
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      margins: { left: 0.2, right: 0.2, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 },
+    };
+    sheet.views = [{ state: "frozen", ySplit: 7 }];
+    sheet.mergeCells(4, 1, 4, estimatedNoColumn);
+    const title = sheet.getCell(4, 1);
+    title.value = "REINFORCEMENT SCHEDULE (SITE)";
+    title.font = { name: "Arial", size: 14, bold: true };
+    title.alignment = { horizontal: "center", vertical: "middle" };
+    title.border = border;
+    sheet.getRow(4).height = 24;
+
+    sheet.mergeCells(5, 1, 5, 2);
+    sheet.mergeCells(5, 3, 5, 4);
+    sheet.mergeCells(5, 12, 5, 13);
+    sheet.mergeCells(5, 14, 5, 15);
+    [
+      [1, "LOCATION/SITE"],
+      [3, projectLabel],
+      [5, "STR. ELEMENT"],
+      [6, schedule.title || "REBAR"],
+      [7, "REINF. TYPE"],
+      [8, `Y${diameter}`],
+      [9, "LEVEL"],
+      [10, level],
+      [12, "SCHEDULE"],
+      [14, schedule.scheduleNumber],
+    ].forEach(([column, value], index) => {
+      const cell = sheet.getCell(5, Number(column));
+      cell.value = String(value);
+      cell.font = {
+        name: "Arial",
+        size: 9,
+        bold: index % 2 === 0,
+      };
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.border = border;
+    });
+    sheet.getRow(5).height = 22;
+
+    sheet.mergeCells(6, 1, 7, 1);
+    sheet.mergeCells(6, 2, 7, 2);
+    sheet.mergeCells(6, 3, 7, 3);
+    if (lastCutColumn > firstCutColumn) {
+      sheet.mergeCells(6, firstCutColumn, 6, lastCutColumn);
+    }
+    sheet.mergeCells(6, offcutColumn, 7, offcutColumn);
+    sheet.mergeCells(6, totalNoColumn, 7, totalNoColumn);
+    sheet.mergeCells(6, fullLengthNoColumn, 7, fullLengthNoColumn);
+    sheet.mergeCells(6, estimatedNoColumn, 7, estimatedNoColumn);
+    sheet.getCell(6, 1).value = "S/N";
+    sheet.getCell(6, 2).value = "LENGTH";
+    sheet.getCell(6, 3).value = "NO";
+    sheet.getCell(6, firstCutColumn).value = "CUTTING SCHEDULE";
+    sheet.getCell(6, offcutColumn).value = "OFFCUT";
+    sheet.getCell(6, totalNoColumn).value = "TOTAL NO";
+    sheet.getCell(6, fullLengthNoColumn).value = "NOS IN 1 FULL LENGTH";
+    sheet.getCell(6, estimatedNoColumn).value = "EST. NO";
+    for (let slot = 0; slot < maxCutSlots; slot++) {
+      sheet.getCell(7, firstCutColumn + slot).value = slot + 1;
+    }
+    for (let row = 6; row <= 7; row++) {
+      for (let column = 1; column <= estimatedNoColumn; column++) {
+        const cell = sheet.getCell(row, column);
+        cell.font = { name: "Arial", size: 8, bold: true };
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E2F3" } };
+        cell.border = border;
+      }
+    }
+    sheet.getRow(6).height = 22;
+    sheet.getRow(7).height = 20;
+
+    patterns.forEach((pattern, index) => {
+      const firstRow = 8 + index * 4;
+      const cuts = pattern.cuts || [];
+      const offcutMm = Math.round((pattern.offcutLengthM || 0) * 1000);
+      const quantity = pattern.stockBarQuantity || 0;
+      const cutCount = cuts.length;
+      sheet.getCell(firstRow, 1).value = index + 1;
+      sheet.getCell(firstRow, 2).value = Math.round(
+        (pattern.stockLengthM || stockLengthM) * 1000,
+      );
+      sheet.getCell(firstRow, 3).value = quantity;
+      sheet.getCell(firstRow + 1, 4).value = "BARMARK";
+      sheet.getCell(firstRow + 2, 4).value = "ELEMENT";
+      cuts.forEach((cut, slot) => {
+        const column = firstCutColumn + slot;
+        sheet.getCell(firstRow, column).value = Math.round(cut.cutLengthM * 1000);
+        sheet.getCell(firstRow + 1, column).value = cut.barMark || "-";
+        sheet.getCell(firstRow + 2, column).value =
+          cut.member || schedule.levelName || "ELEMENT";
+      });
+      sheet.getCell(firstRow, offcutColumn).value = offcutMm;
+      sheet.getCell(firstRow, totalNoColumn).value = quantity;
+      sheet.getCell(firstRow, fullLengthNoColumn).value = cutCount;
+      sheet.getCell(firstRow, estimatedNoColumn).value = quantity * cutCount;
+
+      for (let row = firstRow; row < firstRow + 4; row++) {
+        for (let column = 1; column <= estimatedNoColumn; column++) {
+          const cell = sheet.getCell(row, column);
+          cell.font = { name: "Arial", size: 8, bold: row === firstRow };
+          cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+          cell.border = border;
+        }
+      }
+      for (let slot = 0; slot < maxCutSlots; slot++) {
+        const cell = sheet.getCell(firstRow, firstCutColumn + slot);
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: cuts[slot] ? "FFB7CCE2" : "FFEAF1F8" },
+        };
+        cell.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF003B68" } };
+      }
+      const offcutCell = sheet.getCell(firstRow, offcutColumn);
+      offcutCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: offcutMm >= 300 ? "FFF4CCCC" : "FFD9D9D9" },
+      };
+      offcutCell.font = {
+        name: "Arial",
+        size: 9,
+        bold: true,
+        color: { argb: offcutMm >= 300 ? "FFCC0000" : "FF333333" },
+      };
+      sheet.getRow(firstRow).height = 19;
+      sheet.getRow(firstRow + 1).height = 14;
+      sheet.getRow(firstRow + 2).height = 14;
+      sheet.getRow(firstRow + 3).height = 5;
+    });
+
+    const totalBars = patterns.reduce(
+      (sum, pattern) => sum + (pattern.stockBarQuantity || 0),
+      0,
+    );
+    const totalLengthM = totalBars * stockLengthM;
+    const breakdown = schedule.summary?.diameterBreakdown?.[diameter];
+    const totalTonnes = breakdown?.totalStockWeightKg
+      ? breakdown.totalStockWeightKg / 1000
+      : (totalLengthM * getLinearMassKgPerM(diameter)) / 1000;
+    const footerRow = 8 + patterns.length * 4;
+    sheet.mergeCells(footerRow, 1, footerRow, 2);
+    sheet.mergeCells(footerRow, 3, footerRow, 4);
+    sheet.mergeCells(footerRow, 5, footerRow, 6);
+    sheet.mergeCells(footerRow, 7, footerRow, 8);
+    sheet.mergeCells(footerRow, 9, footerRow, estimatedNoColumn);
+    sheet.getCell(footerRow, 1).value = "TOTAL LENGTH (m)";
+    sheet.getCell(footerRow, 3).value = Number(totalLengthM.toFixed(2));
+    sheet.getCell(footerRow, 5).value = "MT";
+    sheet.getCell(footerRow, 7).value = Number(totalTonnes.toFixed(3));
+    sheet.getCell(footerRow, 9).value =
+      "NOTE: Red offcuts of 300mm and above should be tagged and stored for further use.";
+    for (let column = 1; column <= estimatedNoColumn; column++) {
+      const cell = sheet.getCell(footerRow, column);
+      cell.font = { name: "Arial", size: 9, bold: true };
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.border = border;
+    }
+    sheet.getCell(footerRow, 9).font = {
+      name: "Arial",
+      size: 8,
+      bold: false,
+      color: { argb: "FF990000" },
+    };
+    sheet.getRow(footerRow).height = 30;
+    sheet.pageSetup.printArea = `A4:${sheet.getColumn(estimatedNoColumn).letter}${footerRow}`;
+  }
+
+  const docRef = (schedule.scheduleNumber || "cutting-schedule").replace(
+    /[<>:"/\\|?*\u0000-\u001F]/g,
+    "-",
+  );
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([new Uint8Array(buffer)], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${docRef}.xlsx`;
+  document.body.appendChild(link);
+  try {
+    link.click();
+  } finally {
+    document.body.removeChild(link);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
 /**
  * Generates formatted HTML string of the cutting schedule matching the spreadsheet format.
  */
@@ -814,17 +997,18 @@ export function generateCuttingScheduleHTML(
       const isRedOffcut = offcutMm >= 300;
       const cuts = pattern.cuts || [];
 
-      const cutSegmentsHTML = cuts
-        .map((cut) => {
-          const cutMm = Math.round(cut.cutLengthM * 1000);
-          return `
-            <td style="background: #f0f9ff; border: 1px solid #38bdf8; border-radius: 2px; padding: 1px 3px; text-align: center; min-width: 34px;">
-              <div style="font-weight: 800; font-size: 8.5px; color: #0369a1; line-height: 1;">${cutMm}</div>
-              <div style="font-size: 6.5px; font-weight: 700; color: #475569; line-height: 1; margin-top: 1px;">${cut.barMark || "—"}</div>
-            </td>
-          `;
-        })
-        .join("");
+      const cutSegmentsHTML = Array.from({ length: 10 }, (_, slot) => {
+        const cut = cuts[slot];
+        if (!cut) return `<td style="background:#ffffff;border:1px solid #cbd5e1;"></td>`;
+        const cutMm = Math.round(cut.cutLengthM * 1000);
+        return `
+          <td style="background:#f0f9ff;border:1px solid #38bdf8;padding:1px 2px;text-align:center;width:7%;">
+            <div style="font-weight:800;font-size:8px;color:#0369a1;line-height:1;">${cutMm}</div>
+            <div style="font-size:6px;font-weight:800;color:#0369a1;line-height:1;margin-top:1px;">${cut.barMark || "-"}</div>
+            <div style="font-size:5.5px;font-weight:700;color:#475569;line-height:1;margin-top:1px;">${cut.member || schedule.levelName || "ELEMENT"}</div>
+          </td>
+        `;
+      }).join("");
 
       const offcutStyle = isRedOffcut
         ? "background: #fee2e2; color: #dc2626; font-weight: 800; font-size: 8.5px; border: 1px solid #f87171;"
@@ -841,11 +1025,7 @@ export function generateCuttingScheduleHTML(
           <td style="border: 1px solid #cbd5e1; text-align: center; font-weight: 800; font-size: 8.5px; padding: 1.5px 3px; background: #ffffff;">
             ${qtyFormatted}
           </td>
-          <td style="padding: 1px 2px; border: 1px solid #cbd5e1; background: #ffffff;">
-            <table style="width: 100%; border-collapse: collapse; margin: 0; padding: 0;">
-              <tr>${cutSegmentsHTML}</tr>
-            </table>
-          </td>
+          ${cutSegmentsHTML}
           <td style="text-align: center; vertical-align: middle; padding: 1.5px 3px; ${offcutStyle}">
             ${offcutMm}
           </td>
@@ -1083,9 +1263,9 @@ export function generateCuttingScheduleHTML(
             ${renderCompanyBrandCell(company, project)}
           </td>
           <td style="width: 53%;">
-            <div class="header-title">REBAR CUTTING SCHEDULE & STOCK BAR OPTIMIZATION</div>
+            <div class="header-title">REINFORCEMENT SCHEDULE (SITE)</div>
             <div class="header-sub">PROJECT: ${projectName} (${projectCode})</div>
-            <div class="header-iso">BS 8666:2020 / BS 4449 Standard &bull; 12.0m Commercial Stock Nesting</div>
+            <div class="header-iso">CUTTING SCHEDULE &bull; 12.0m COMMERCIAL STOCK</div>
           </td>
           <td class="meta-box">
             <strong>Doc Ref:</strong> <span style="color:#ea580c; font-weight:700;">${docRef}</span><br/>
@@ -1099,30 +1279,20 @@ export function generateCuttingScheduleHTML(
       <!-- Metadata Box -->
       <table class="meta-table">
         <tr>
-          <td class="meta-label">SCHEDULE REF:</td>
-          <td class="meta-val" style="font-family: monospace; font-size: 10px; color: #0284c7;">${docRef}</td>
-          <td class="meta-label">TITLE / SCOPE:</td>
+          <td class="meta-label">LOCATION/SITE</td>
+          <td class="meta-val">${schedule.levelName || "SITE"}</td>
+          <td class="meta-label">NO</td>
+          <td class="meta-val" style="font-family:monospace;color:#0284c7;">${docRef}</td>
+          <td class="meta-label">BTR. ELEMENT</td>
           <td class="meta-val">${schedule.title || "Reinforcement Cutting Order"}</td>
-          <td class="meta-label">DATE:</td>
-          <td class="meta-val">${currentDate}</td>
         </tr>
         <tr>
-          <td class="meta-label">SOURCE BBS:</td>
-          <td class="meta-val">${schedule.sourceBBSFileName || "BBS-Uploaded"}</td>
-          <td class="meta-label">LOCATION / LEVEL:</td>
-          <td class="meta-val">${schedule.levelName || "General Reinforcement"}</td>
-          <td class="meta-label">STEEL GRADE:</td>
-          <td class="meta-val">${schedule.steelGrade || "Grade 500B"}</td>
-        </tr>
-        <tr>
-          <td class="meta-label">HEAT / BATCH NO:</td>
-          <td class="meta-val">${schedule.heatNumber || "HT-MILL-VERIFIED"}</td>
-          <td class="meta-label">SUPPLIER:</td>
-          <td class="meta-val">${schedule.supplier || "Approved Steel Mill"}</td>
-          <td class="meta-label">QA STATUS:</td>
-          <td class="meta-val" style="color: ${schedule.status === "QA_APPROVED" ? "#16a34a" : "#ca8a04"};">
-            ${schedule.status || "OPTIMIZED"}
-          </td>
+          <td class="meta-label">PERIMETER/B.EAM</td>
+          <td class="meta-val">${schedule.levelName || "GENERAL"}</td>
+          <td class="meta-label">REINF. TYPE</td>
+          <td class="meta-val">${schedule.steelGrade || "GRADE 500B"}</td>
+          <td class="meta-label">Y${primaryDiameter}</td>
+          <td class="meta-val">${schedule.levelName === "Substructure" ? "SUB-STRUCTURE" : "LEVEL"}</td>
         </tr>
       </table>
 
@@ -1133,88 +1303,14 @@ export function generateCuttingScheduleHTML(
             <th style="width: 36px;">S/N</th>
             <th style="width: 90px;">LENGTH</th>
             <th style="width: 50px;">NO</th>
-            <th>CUTTING SCHEDULE (TRACK & SEGMENT ALLOCATION)</th>
-            <th style="width: 75px;">OFFCUT</th>
+            ${Array.from({length:10}, (_, i) => `<th style="width:7%;font-size:7px;">${i + 1}</th>`).join("")}
+            <th style="width: 55px;">OFFCUT</th>
           </tr>
         </thead>
         <tbody>
           ${rowsHTML}
         </tbody>
       </table>
-
-      <!-- Per-Diameter Summary Table -->
-      ${(() => {
-        // Build ordered map: diameter → patterns
-        const dMap = new Map<number, typeof patterns>();
-        patterns.forEach((p) => {
-          const d: number = p.diameter || schedule.diameterMm || 16;
-          if (!dMap.has(d)) dMap.set(d, []);
-          dMap.get(d)!.push(p);
-        });
-        const sortedDias = Array.from(dMap.keys()).sort((a, b) => a - b);
-        if (sortedDias.length === 0) return "";
-
-        const rows = sortedDias
-          .map((dia) => {
-            const dp = dMap.get(dia)!;
-            const totalBars = dp.reduce((s, p) => s + (p.stockBarQuantity || 0), 0);
-            const totalLen = totalBars * stockLengthM;
-            const massKgPerM = getLinearMassKgPerM(dia);
-            const totalWt = totalLen * massKgPerM;
-
-            const headerRow = `<tr>
-              <td colspan="5" style="background:#0f172a;color:#fff;font-weight:900;font-size:9px;padding:3px 8px;letter-spacing:0.5px;">
-                T${dia}&nbsp;&nbsp;—&nbsp;&nbsp;Ø${dia} mm Rebar
-              </td>
-            </tr>`;
-
-            const patternRows = dp
-              .map((p, idx) => {
-                const offcutMm = Math.round(p.offcutLengthM * 1000);
-                const isRed = offcutMm >= 300;
-                const segs = (p.cuts || [])
-                  .map(
-                    (c) =>
-                      `${Math.round(c.cutLengthM * 1000)} mm [MK:${c.barMark || "—"}${c.member ? ` · ${c.member}` : ""}]`,
-                  )
-                  .join(" + ") || "Full Bar";
-                return `<tr>
-                  <td style="border:1px solid #cbd5e1;text-align:center;font-size:8px;padding:2px 4px;">${idx + 1}</td>
-                  <td style="border:1px solid #cbd5e1;text-align:right;font-size:8px;padding:2px 4px;">${stockLengthMm} mm</td>
-                  <td style="border:1px solid #cbd5e1;text-align:center;font-weight:800;font-size:8px;padding:2px 4px;">${p.stockBarQuantity}</td>
-                  <td style="border:1px solid #cbd5e1;background:#f0f9ff;color:#0369a1;font-size:7.5px;padding:2px 6px;">${segs}</td>
-                  <td style="border:1px solid #cbd5e1;text-align:center;font-size:8px;padding:2px 4px;${isRed ? "background:#fee2e2;color:#dc2626;" : "background:#f8fafc;color:#334155;"}">${offcutMm} mm</td>
-                </tr>`;
-              })
-              .join("");
-
-            const subtotalRow = `<tr>
-              <td colspan="2" style="background:#f59e0b;color:#0f172a;font-weight:900;font-size:8.5px;padding:3px 8px;">TOTAL — Ø${dia} mm</td>
-              <td style="background:#f59e0b;color:#0f172a;font-weight:900;font-size:8.5px;text-align:center;padding:3px 4px;">${totalBars}</td>
-              <td style="background:#f59e0b;color:#0f172a;font-weight:800;font-size:7.8px;padding:3px 6px;">
-                Stock Bars = ${totalBars} × ${stockLengthM}m = ${formatNumber(totalLen, 2)} m &nbsp;|&nbsp; Unit Mass = ${massKgPerM} kg/m &nbsp;|&nbsp; Weight = ${formatNumber(totalWt, 2)} kg
-              </td>
-              <td style="background:#f59e0b;"></td>
-            </tr>`;
-
-            return headerRow + patternRows + subtotalRow;
-          })
-          .join("");
-
-        return `
-          <table style="width:100%;border-collapse:collapse;border:1.5px solid #0f172a;margin-bottom:10px;">
-            <thead>
-              <tr style="background:#1e293b;">
-                <th style="border:1px solid #475569;color:#fff;font-size:8.5px;padding:3px 6px;text-align:center;">S/N</th>
-                <th style="border:1px solid #475569;color:#fff;font-size:8.5px;padding:3px 6px;text-align:center;">STOCK LENGTH</th>
-                <th style="border:1px solid #475569;color:#fff;font-size:8.5px;padding:3px 6px;text-align:center;">NO OF BARS</th>
-                <th style="border:1px solid #475569;color:#fff;font-size:8.5px;padding:3px 6px;text-align:center;">CUTTING PATTERN</th>
-                <th style="border:1px solid #475569;color:#fff;font-size:8.5px;padding:3px 6px;text-align:center;">OFFCUT</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>`;
-      })()}
 
       <!-- Bottom Summary Box Matching Spreadsheet Layout -->
       <div class="summary-wrapper">
